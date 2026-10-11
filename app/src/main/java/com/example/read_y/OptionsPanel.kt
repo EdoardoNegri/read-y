@@ -91,6 +91,8 @@ class OptionsPanel(
         }
 
         section("Turning pages")
+        toggle("Slide the pages across", s.slidePages) { s.slidePages = it }
+        toggle("Tap the sides to turn pages", s.tapToTurn) { s.tapToTurn = it }
         toggle("Swipe the other way", s.reverseSwipe) { s.reverseSwipe = it }
         toggle("Volume up for the next page", s.volumeUpNext) { s.volumeUpNext = it }
     }

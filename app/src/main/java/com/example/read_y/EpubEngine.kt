@@ -185,7 +185,7 @@ class EpubEngine(
 
     private fun step(direction: Int) {
         if (!ready) return
-        web.evaluateJavascript("window.__r?__r.step($direction):null") { moved ->
+        web.evaluateJavascript("window.__r?__r.step($direction,${s.slidePages}):null") { moved ->
             val target = chapter + direction
             if (moved == "false" && !closed && target in book.spine.indices) {
                 chapter = target
@@ -337,9 +337,10 @@ class EpubEngine(
     }
   }
 
-  R.go = function (p) {
+  R.go = function (p, slide) {
     R.page = Math.max(0, Math.min(R.pages - 1, p));
-    window.scrollTo(R.page * R.W, 0);
+    if (slide) window.scrollTo({ left: R.page * R.W, top: 0, behavior: 'smooth' });
+    else window.scrollTo(R.page * R.W, 0);
     report();
   };
 
@@ -388,16 +389,17 @@ class EpubEngine(
     layout(frac == null ? R.frac : frac, anchor);
   };
 
-  R.step = function (d) {
+  R.step = function (d, slide) {
     if (R.cfg.vertical) {
       var max = maxScroll(), y = window.scrollY;
       if ((d > 0 && y >= max - 2) || (d < 0 && y <= 2)) return false;
-      window.scrollTo(0, Math.max(0, Math.min(max, y + d * Math.round(R.H * 0.88))));
+      window.scrollTo({ left: 0, top: Math.max(0, Math.min(max, y + d * Math.round(R.H * 0.88))),
+        behavior: slide ? 'smooth' : 'auto' });
       return true;
     }
     var p = R.page + d;
     if (p < 0 || p >= R.pages) return false;
-    R.go(p);
+    R.go(p, slide);
     return true;
   };
 

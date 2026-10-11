@@ -242,6 +242,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         val w = content.width
         e.tap(x - content.paddingLeft, y - content.paddingTop) { handled ->
             if (!handled) when {
+                !s.tapToTurn -> menu.visibility = View.VISIBLE
                 x > w * 0.7f -> e.next()
                 x < w * 0.3f -> e.prev()
                 else -> menu.visibility = View.VISIBLE

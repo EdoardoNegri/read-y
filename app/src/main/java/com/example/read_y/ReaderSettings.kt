@@ -60,6 +60,12 @@ class ReaderSettings(ctx: Context) {
     var reverseSwipe by bool(false)
     var volumeUpNext by bool(true)
 
+    /** Pages slide across when turned, instead of changing at once. */
+    var slidePages by bool(false)
+
+    /** A tap on the left or right part of the page turns it; off, every tap brings up the menu. */
+    var tapToTurn by bool(true)
+
     /** Keeps the screen from dimming and switching off while a book is open. */
     var keepScreenOn by bool(false)
     var hintShown by bool(false)

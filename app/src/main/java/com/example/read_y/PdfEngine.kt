@@ -54,6 +54,9 @@ class PdfEngine(
 
     private val frame = FrameLayout(act)
     private val single = ImageView(act).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
+
+    /** The page being left, which slides out while [single] slides in with the new one. */
+    private val leaving = ImageView(act).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
     private val list = RecyclerView(act)
     private val lm = LinearLayoutManager(act)
     private val gap = (4 * act.resources.displayMetrics.density).toInt()
@@ -108,6 +111,7 @@ class PdfEngine(
             }
         })
         frame.addView(list, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        frame.addView(leaving, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         frame.addView(single, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         frame.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
             if (r - l != or - ol || b - t != ob - ot) frame.post { if (!closed) configure() }
@@ -206,11 +210,27 @@ class PdfEngine(
 
     private fun step(direction: Int) {
         if (s.vertical) {
-            list.scrollBy(0, direction * (frame.height * 0.88f).toInt())
+            val by = direction * (frame.height * 0.88f).toInt()
+            if (s.slidePages) list.smoothScrollBy(0, by) else list.scrollBy(0, by)
         } else if (page + direction in 0 until count) {
+            if (s.slidePages) slide(direction)
             page += direction
             showSingle()
         }
+    }
+
+    /** Lets the page being shown slide out towards where it came from while the next slides in. */
+    private fun slide(direction: Int) {
+        val w = frame.width.toFloat()
+        leaving.animate().cancel()
+        single.animate().cancel()
+        leaving.colorFilter = filter
+        leaving.setImageBitmap(cache.get(page))
+        leaving.translationX = 0f
+        leaving.animate().translationX(-direction * w).setDuration(SLIDE_MS)
+            .withEndAction { leaving.setImageBitmap(null) }
+        single.translationX = direction * w
+        single.animate().translationX(0f).setDuration(SLIDE_MS)
     }
 
     override fun next() = step(1)
@@ -235,5 +255,6 @@ class PdfEngine(
 
     companion object {
         private const val MAX_PIXELS = 12_000_000f
+        private const val SLIDE_MS = 220L
     }
 }
