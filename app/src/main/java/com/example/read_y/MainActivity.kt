@@ -58,6 +58,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var barTitle: TextView
     private lateinit var up: View
     private lateinit var searchRow: View
+    private lateinit var selectRow: View
     private lateinit var undoBar: View
     private lateinit var undoText: TextView
     private lateinit var query: EditText
@@ -73,7 +74,11 @@ class MainActivity : AppCompatActivity() {
     private val searching get() = searchRow.visibility == View.VISIBLE
 
     private val back = object : OnBackPressedCallback(false) {
-        override fun handleOnBackPressed() = if (searching) closeSearch() else goUp()
+        override fun handleOnBackPressed() = when {
+            picked != null -> stopPicking()
+            searching -> closeSearch()
+            else -> goUp()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -87,6 +92,13 @@ class MainActivity : AppCompatActivity() {
         barTitle = findViewById(R.id.barTitle)
         up = findViewById(R.id.up)
         searchRow = findViewById(R.id.searchRow)
+        selectRow = findViewById(R.id.selectRow)
+        for (id in intArrayOf(R.id.moveSelected, R.id.deleteSelected)) {
+            findViewById<View>(id).background = PlaqueDrawable(resources.displayMetrics.density)
+        }
+        findViewById<View>(R.id.closeSelect).setOnClickListener { stopPicking() }
+        findViewById<View>(R.id.moveSelected).setOnClickListener { askMoveTo() }
+        findViewById<View>(R.id.deleteSelected).setOnClickListener { askDeleteAll() }
         undoBar = findViewById(R.id.undoBar)
         undoText = findViewById(R.id.undoText)
         findViewById<View>(R.id.undo).background = PlaqueDrawable(resources.displayMetrics.density)
@@ -167,7 +179,9 @@ class MainActivity : AppCompatActivity() {
         // The favorites stand first in the library, as a shelf of their own.
         val items =
             if (results == null && atRoot && books.isNotEmpty()) listOf(Library.favoritesShelf()) + books else books
-        back.isEnabled = !atRoot || searching
+        back.isEnabled = !atRoot || searching || picked != null
+        adapter.picked = picked
+        findViewById<TextView>(R.id.selectCount).text = getString(R.string.picked, picked?.size ?: 0)
         up.visibility = if (back.isEnabled) View.VISIBLE else View.INVISIBLE
         barTitle.text = shelfName(current)
         // Books found on several shelves each say which one they stand on.
@@ -206,6 +220,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun open(f: File, from: View? = null) {
+        if (picked != null) return pick(f)
         if (Library.isShelf(f)) {
             val miniature = from?.findViewById<View>(R.id.cover)?.let(::locate)
             val snapshot = if (miniature != null) snapshotShelf() else null
@@ -236,9 +251,92 @@ class MainActivity : AppCompatActivity() {
         if (Library.hasAccess(this) && current != Library.favoritesShelf()) {
             choices += getString(R.string.new_shelf) to ::askNewShelf
         }
+        if (Library.hasAccess(this) && current != Library.favoritesShelf() && found == null) {
+            choices += getString(R.string.select) to ::startPicking
+        }
         choices += getString(R.string.sort_by) to ::askSort
+        if (Library.hasAccess(this)) choices += getString(R.string.backup) to ::askBackup
         choices += getString(R.string.settings) to { startActivity(Intent(this, SettingsActivity::class.java)) }
         ShelfDialog(this).title(shelfName(current)).options(choices).show()
+    }
+
+    // ---- backup ----
+
+    private fun askBackup() {
+        val file = Library.backupFile()
+        val saved = if (file.isFile) {
+            getString(R.string.backup_from, DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(file.lastModified())))
+        } else {
+            getString(R.string.backup_none)
+        }
+        val choices = ArrayList<Pair<String, () -> Unit>>()
+        choices += getString(R.string.backup_save) to { toast(if (Library.saveBackup(this)) R.string.backup_saved else R.string.backup_failed) }
+        if (file.isFile) choices += getString(R.string.backup_restore) to {
+            toast(if (Library.restoreBackup(this)) R.string.backup_restored else R.string.backup_failed)
+            refresh()
+        }
+        ShelfDialog(this).title(getString(R.string.backup)).back(::showMenu)
+            .message(getString(R.string.backup_about, place(file)) + "\n\n" + saved)
+            .options(choices).show()
+    }
+
+    // ---- choosing several books and shelves, to move or delete them together ----
+
+    /** What has been chosen so far; null when nothing is being chosen. */
+    private var picked: MutableSet<File>? = null
+
+    private fun startPicking() {
+        picked = LinkedHashSet()
+        selectRow.visibility = View.VISIBLE
+        refresh()
+    }
+
+    private fun stopPicking() {
+        picked = null
+        selectRow.visibility = View.GONE
+        refresh()
+    }
+
+    /** Adds [f] to what is chosen, or takes it out again. The favorites are no folder and cannot be chosen. */
+    private fun pick(f: File) {
+        val set = picked ?: return
+        if (f == Library.favoritesShelf()) return
+        if (!set.remove(f)) set.add(f)
+        refresh()
+    }
+
+    /** Asks which shelf the chosen things go to: any but the one they are on, themselves, or one inside them. */
+    private fun askMoveTo() {
+        val chosen = picked?.toList().orEmpty()
+        if (chosen.isEmpty()) return
+        val shelves = Library.root().walkTopDown()
+            .onEnter { !it.name.startsWith(".") && it !in chosen }
+            .filter { it.isDirectory && it != current }.toList()
+        if (shelves.isEmpty()) {
+            toast(R.string.nowhere_to_move)
+            return
+        }
+        ShelfDialog(this).title(getString(R.string.move_to))
+            .options(shelves.map { shelf -> place(shelf) to { moveAll(chosen, shelf) } }).show()
+    }
+
+    private fun moveAll(chosen: List<File>, to: File) {
+        if (chosen.count { !Library.move(this, it, to) } > 0) toast(R.string.cannot_move)
+        stopPicking()
+    }
+
+    private fun askDeleteAll() {
+        val chosen = picked?.toList().orEmpty()
+        if (chosen.isEmpty()) return
+        ShelfDialog(this).title(getString(R.string.delete))
+            .message(resources.getQuantityString(R.plurals.delete_many, chosen.size, chosen.size))
+            .primary(R.string.delete) {
+                val gone = chosen.mapNotNull { f -> Library.delete(this, f)?.let { it to f } }
+                if (gone.size < chosen.size) toast(R.string.cannot_delete)
+                if (gone.isNotEmpty()) offerUndo(resources.getQuantityString(R.plurals.things, gone.size, gone.size), gone)
+                stopPicking()
+            }
+            .show()
     }
 
     private fun askNewShelf() {
@@ -319,6 +417,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Picks [f] up. Search results and the favorites are gathered from several shelves and stay put. */
     private fun startDrag(f: File, from: View) {
+        if (picked != null) return pick(f)
         val fixed = Library.favoritesShelf()
         if (found != null || f == fixed || current == fixed) {
             showInfo(f)
@@ -526,6 +625,7 @@ class MainActivity : AppCompatActivity() {
     // ---- details, shown by tapping a plaque ----
 
     private fun showInfo(f: File) {
+        if (picked != null) return pick(f)
         if (Library.isShelf(f)) {
             val kids = Library.shelf(this, f)
             val folders = kids.count { it.isDirectory }
@@ -578,21 +678,23 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    /** What was deleted last and can still be put back, and the end of the time for that. */
-    private var binned: File? = null
+    /** What was deleted last and can still be put back: where each thing lies and where it was. */
+    private var binned: List<Pair<File, File>> = emptyList()
     private val undoOver = Runnable { settleDelete() }
 
-    /** Shows for a few seconds that [name] was deleted, with a button that puts it back [to] where it was. */
-    private fun offerUndo(name: String, binned: File, to: File) {
+    /** Shows for a few seconds that [name] was deleted, with a button that puts it back where it was. */
+    private fun offerUndo(name: String, binned: File, to: File) = offerUndo(name, listOf(binned to to))
+
+    private fun offerUndo(name: String, gone: List<Pair<File, File>>) {
         settleDelete()
-        this.binned = binned
+        binned = gone
         undoText.text = getString(R.string.deleted, name)
         undoBar.visibility = View.VISIBLE
         findViewById<View>(R.id.undo).setOnClickListener {
             undoBar.removeCallbacks(undoOver)
             undoBar.visibility = View.GONE
-            this.binned = null
-            if (!Library.restore(this, binned, to)) toast(R.string.cannot_move)
+            binned = emptyList()
+            if (gone.count { (from, to) -> !Library.restore(this, from, to) } > 0) toast(R.string.cannot_move)
             refresh()
         }
         undoBar.postDelayed(undoOver, UNDO_MS)
@@ -602,10 +704,10 @@ class MainActivity : AppCompatActivity() {
     private fun settleDelete() {
         undoBar.removeCallbacks(undoOver)
         undoBar.visibility = View.GONE
-        val gone = binned ?: return
-        binned = null
+        val gone = binned
+        binned = emptyList()
         val app = applicationContext
-        Library.io.execute { Library.purge(app, gone) }
+        if (gone.isNotEmpty()) Library.io.execute { for ((from, _) in gone) Library.purge(app, from) }
     }
 
     /** Where [f] is, starting from the library folder rather than from the root of the storage. */
@@ -653,7 +755,7 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_DIR = "dir"
         private const val ZOOM_MS = 560L
         private const val MOVE_MS = 180L
-        private const val UNDO_MS = 7000L
+        private const val UNDO_MS = 10000L
     }
 }
 
@@ -672,6 +774,9 @@ class ShelfAdapter(
 
     /** What stands on the shelf, in the order shown. */
     val files: List<File> get() = items
+
+    /** While several things are being chosen: those chosen so far, which stand out from the rest. */
+    var picked: Set<File>? = null
 
     /** Shows on each book the shelf it stands on, for books gathered from several shelves. */
     var showPlaces = false
@@ -728,7 +833,11 @@ class ShelfAdapter(
         // whole, which the list makes visible again whenever it moves it.
         val carried = f == dragging
         val place = h.itemView as ViewGroup
-        for (i in 0 until place.childCount) place.getChildAt(i).visibility = if (carried) View.INVISIBLE else View.VISIBLE
+        val faint = picked.let { it != null && f !in it }
+        for (i in 0 until place.childCount) place.getChildAt(i).apply {
+            visibility = if (carried) View.INVISIBLE else View.VISIBLE
+            alpha = if (faint) 0.35f else 1f
+        }
         // A recycled view may have been left enlarged as the shelf something was dragged over.
         h.itemView.scaleX = 1f
         h.itemView.scaleY = 1f

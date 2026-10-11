@@ -14,6 +14,28 @@
     <string name="create">Create</string>
     <string name="name_taken">That name cannot be used, or something here already has it.</string>
     <string name="cannot_move">It cannot go there: something of the same name is already on that shelf.</string>
+    <string name="select">Select</string>
+    <string name="picked">%1$d selected</string>
+    <string name="move">Move</string>
+    <string name="move_to">Move to</string>
+    <string name="nowhere_to_move">There is no other shelf to move them to.</string>
+    <plurals name="delete_many">
+        <item quantity="one">%1$d book or shelf will be deleted from the phone, with everything on it.</item>
+        <item quantity="other">%1$d books and shelves will be deleted from the phone, with everything on them.</item>
+    </plurals>
+    <plurals name="things">
+        <item quantity="one">%1$d item</item>
+        <item quantity="other">%1$d items</item>
+    </plurals>
+    <string name="backup">Backup</string>
+    <string name="backup_about">Reading positions, favorites, finished books, the order of the shelves and the settings are kept in the file %1$s. Copy the Read-y folder to a new phone and restore the backup there.</string>
+    <string name="backup_from">Last saved: %1$s</string>
+    <string name="backup_none">No backup has been saved yet.</string>
+    <string name="backup_save">Save a backup now</string>
+    <string name="backup_restore">Restore the backup</string>
+    <string name="backup_saved">Backup saved.</string>
+    <string name="backup_restored">Backup restored.</string>
+    <string name="backup_failed">That did not work.</string>
     <string name="sort_by">Sort by</string>
     <string name="sort_manual">My own order</string>
     <string name="sort_title">Title</string>

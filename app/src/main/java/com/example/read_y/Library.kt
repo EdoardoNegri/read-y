@@ -227,6 +227,7 @@ object Library {
     }
 
     private fun bin() = File(root(), BIN)
+    private var binned = 0
 
     /**
      * Takes a book, or a folder with all it holds, off its shelf. It is not gone yet: it lies in
@@ -234,7 +235,8 @@ object Library {
      * Returns where it lies, or null if it could not be taken away.
      */
     fun delete(ctx: Context, f: File): File? {
-        val place = File(bin(), System.currentTimeMillis().toString())
+        // Several things deleted in the same moment each get a place of their own.
+        val place = File(bin(), "${System.currentTimeMillis()}-${binned++}")
         if (!place.mkdirs()) return null
         val target = File(place, f.name)
         return if (relocate(ctx, f, target)) target else null
@@ -257,6 +259,74 @@ object Library {
         if (!f.deleteRecursively()) return
         remember(ctx, f.path, null)
         for ((path, modified) in books) coverFile(ctx, path, modified).delete()
+    }
+
+    // ---- backup ----
+
+    /** Where the backup is kept: in the library folder, so that it moves with the books. */
+    fun backupFile() = File(root(), "Read-y backup.json")
+
+    /**
+     * Writes reading positions, favorites, finished books, the order of the shelves, the names
+     * given to books and the reader settings to [backupFile]. Books are named by where they are
+     * in the library, so the backup also fits the same library on another phone.
+     */
+    fun saveBackup(ctx: Context): Boolean = try {
+        val base = root().path
+        fun inLibrary(path: String) = path.startsWith(base + File.separator) || path == base
+        val positions = JSONObject()
+        for ((key, value) in statePrefs(ctx).all) if (value is String && inLibrary(key)) positions.put(key.removePrefix(base), value)
+        fun set(key: String) = JSONArray(
+            (statePrefs(ctx).getStringSet(key, null) ?: emptySet()).filter(::inLibrary).map { it.removePrefix(base) },
+        )
+        val orders = JSONObject()
+        val titles = JSONObject()
+        for ((key, value) in libraryPrefs(ctx).all) {
+            if (value !is String) continue
+            if (key.startsWith(ORDER)) orders.put(key.removePrefix(ORDER).removePrefix(base), value)
+            if (key.startsWith(TITLE)) titles.put(key.removePrefix(TITLE).removePrefix(base), value)
+        }
+        val settings = JSONObject()
+        for ((key, value) in ctx.getSharedPreferences("reader", Context.MODE_PRIVATE).all) {
+            if (value is Int || value is Boolean) settings.put(key, value)
+        }
+        val o = JSONObject().put("version", 1).put("positions", positions)
+            .put("favorites", set(FAVORITES)).put("finished", set(FINISHED))
+            .put("orders", orders).put("titles", titles).put("sort", sort(ctx).ordinal).put("settings", settings)
+        root().mkdirs()
+        backupFile().writeText(o.toString(1))
+        true
+    } catch (e: Exception) {
+        Log.w(TAG, "Cannot save the backup", e)
+        false
+    }
+
+    /** Takes over what [saveBackup] wrote, in place of what is remembered now. */
+    fun restoreBackup(ctx: Context): Boolean = try {
+        val o = JSONObject(backupFile().readText())
+        val base = root().path
+        fun paths(key: String) = o.optJSONArray(key).let { a -> if (a == null) emptySet() else List(a.length()) { base + a.getString(it) }.toHashSet() }
+        val state = statePrefs(ctx).edit()
+        o.optJSONObject("positions")?.let { for (key in it.keys()) state.putString(base + key, it.getString(key)) }
+        state.putStringSet(FAVORITES, paths("favorites")).putStringSet(FINISHED, paths("finished")).apply()
+        val library = libraryPrefs(ctx).edit()
+        o.optJSONObject("orders")?.let { for (key in it.keys()) library.putString(ORDER + base + key, it.getString(key)) }
+        o.optJSONObject("titles")?.let { for (key in it.keys()) library.putString(TITLE + base + key, it.getString(key)) }
+        library.putInt(SORT, o.optInt("sort")).apply()
+        val reader = ctx.getSharedPreferences("reader", Context.MODE_PRIVATE).edit()
+        o.optJSONObject("settings")?.let {
+            for (key in it.keys()) when (val value = it.get(key)) {
+                is Boolean -> reader.putBoolean(key, value)
+                is Int -> reader.putInt(key, value)
+            }
+        }
+        reader.apply()
+        stamp++
+        FavoritesWidget.refresh(ctx)
+        true
+    } catch (e: Exception) {
+        Log.w(TAG, "Cannot restore the backup", e)
+        false
     }
 
     // ---- books from other apps ----

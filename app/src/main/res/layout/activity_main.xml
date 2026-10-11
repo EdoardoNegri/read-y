@@ -8,6 +8,56 @@
 
     <include layout="@layout/top_bar" />
 
+    <!-- Shown while several books and shelves are being chosen, to move or delete them together. -->
+    <LinearLayout
+        android:id="@+id/selectRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/shelf_plank"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingBottom="8dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="4dp"
+        android:visibility="gone">
+
+        <ImageButton
+            android:id="@+id/closeSelect"
+            android:layout_width="48dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/close"
+            android:src="@drawable/ic_close" />
+
+        <TextView
+            android:id="@+id/selectCount"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="serif"
+            android:textColor="@color/gold_light"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <!-- The backgrounds are PlaqueDrawables set in code. -->
+        <TextView
+            android:id="@+id/moveSelected"
+            style="@style/BrassButton"
+            android:layout_width="wrap_content"
+            android:paddingEnd="18dp"
+            android:paddingStart="18dp"
+            android:text="@string/move" />
+
+        <TextView
+            android:id="@+id/deleteSelected"
+            style="@style/BrassButton"
+            android:layout_width="wrap_content"
+            android:layout_marginStart="10dp"
+            android:paddingEnd="18dp"
+            android:paddingStart="18dp"
+            android:text="@string/delete" />
+    </LinearLayout>
+
     <!-- Shown while searching; what is typed is looked for on this shelf and all those inside it. -->
     <LinearLayout
         android:id="@+id/searchRow"
