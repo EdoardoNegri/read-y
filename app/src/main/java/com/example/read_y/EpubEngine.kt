@@ -1,0 +1,401 @@
+package com.example.read_y
+
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import android.view.View
+import android.webkit.JavascriptInterface
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import org.json.JSONObject
+import java.io.ByteArrayInputStream
+import java.io.File
+import java.io.IOException
+
+/**
+ * Renders one EPUB chapter at a time in a WebView. Horizontal mode lays the chapter out in
+ * screen-sized CSS columns and moves between them; vertical mode is a normal scrolling page.
+ */
+@SuppressLint("SetJavaScriptEnabled")
+class EpubEngine(
+    private val act: Activity,
+    file: File,
+    private val s: ReaderSettings,
+    start: BookState,
+    private val host: ReaderHost,
+) : ReaderEngine {
+
+    private val book = EpubBook.open(file)
+    private val total: Long
+    private val web = WebView(act)
+    override val view: View get() = web
+
+    private var chapter = 0
+    private var pendingFraction = 0f
+    private var pendingAnchor: String? = null
+    private var injected = false
+    private var ready = false
+    private var closed = false
+
+    init {
+        if (book.spine.isEmpty()) {
+            book.close()
+            throw IOException("EPUB has no readable content")
+        }
+        total = book.weights.sum().coerceAtLeast(1)
+        chapter = start.chapter.coerceIn(0, book.spine.lastIndex)
+        pendingFraction = start.fraction
+
+        web.settings.javaScriptEnabled = true
+        web.settings.allowFileAccess = false
+        web.settings.allowContentAccess = false
+        web.settings.textZoom = s.fontSize
+        web.overScrollMode = View.OVER_SCROLL_NEVER
+        web.isHorizontalScrollBarEnabled = false
+        web.addJavascriptInterface(Bridge(), "Android")
+        web.webViewClient = Client()
+        web.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
+            if (r - l != or - ol || b - t != ob - ot) web.post { if (!closed) applySettings() }
+        }
+        load()
+    }
+
+    private inner class Client : WebViewClient() {
+        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse {
+            // Everything is served from the book itself; nothing ever reaches the network.
+            val url = request.url
+            val path = url.path?.removePrefix("/")
+            val stream = if (url.host == HOST && path != null) book.stream(path) else null
+            if (stream == null || path == null) {
+                return WebResourceResponse(
+                    "text/plain", "utf-8", 404, "Not Found", emptyMap(), ByteArrayInputStream(ByteArray(0)),
+                )
+            }
+            val mime = book.mimeOf(path)
+            val text = mime.startsWith("text/") || mime.endsWith("xml")
+            return WebResourceResponse(mime, if (text) "utf-8" else null, stream)
+        }
+
+        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+            openLink(request.url.toString())
+            return true
+        }
+
+        override fun onPageFinished(view: WebView, url: String?) {
+            if (injected || closed) return
+            injected = true
+            view.evaluateJavascript(SCRIPT, null)
+            val anchor = pendingAnchor?.let { JSONObject.quote(it) } ?: "null"
+            view.evaluateJavascript("__r.apply(${config()},$pendingFraction,$anchor)", null)
+            pendingAnchor = null
+            // If the chapter could not be scripted (e.g. malformed XHTML) still show what loaded.
+            view.postDelayed({ if (!closed && !ready) reveal() }, 1500)
+        }
+    }
+
+    private inner class Bridge {
+        @JavascriptInterface
+        fun onLayout(page: Int, pages: Int, fraction: Double, progress: Double) {
+            act.runOnUiThread {
+                if (closed) return@runOnUiThread
+                reveal()
+                val n = book.spine.size
+                val label =
+                    if (s.vertical) "Chapter ${chapter + 1}/$n"
+                    else "Chapter ${chapter + 1}/$n · page ${page + 1}/$pages"
+                host.onPosition(chapter, fraction.toFloat(), bookPercent(progress.toFloat()), label)
+            }
+        }
+
+        @JavascriptInterface
+        fun onLink(url: String) {
+            act.runOnUiThread { if (!closed) openLink(url) }
+        }
+    }
+
+    private fun reveal() {
+        ready = true
+        web.alpha = 1f
+    }
+
+    private fun load() {
+        ready = false
+        injected = false
+        web.alpha = 0f
+        web.setBackgroundColor(s.palette.bg)
+        web.isVerticalScrollBarEnabled = s.vertical
+        web.loadUrl("https://$HOST/" + Uri.encode(book.spine[chapter], "/"))
+    }
+
+    private fun css(color: Int) = String.format("#%06X", color and 0xFFFFFF)
+
+    private fun config(): String {
+        val p = s.palette
+        // The page size is passed in rather than read from window.innerWidth, which the WebView
+        // widens to the content width once the columns overflow.
+        val dm = act.resources.displayMetrics
+        val w = if (web.width > 0) web.width else dm.widthPixels
+        val h = if (web.height > 0) web.height else dm.heightPixels
+        return JSONObject()
+            .put("w", (w / dm.density).toInt())
+            .put("h", (h / dm.density).toInt())
+            .put("bg", css(p.bg))
+            .put("fg", css(p.fg))
+            .put("link", css(p.link))
+            .put("themed", s.theme == 2)
+            .put("lh", s.lineSpacing / 10.0)
+            .put("font", ReaderSettings.FONTS[s.font.coerceIn(0, ReaderSettings.FONTS.lastIndex)].second)
+            .put("mh", s.marginH)
+            .put("mv", s.marginV)
+            .put("vertical", s.vertical)
+            .toString()
+    }
+
+    private fun bookPercent(progress: Float): Float {
+        var before = 0L
+        for (i in 0 until chapter) before += book.weights[i]
+        return ((before + progress * book.weights[chapter]) / total).coerceIn(0f, 1f)
+    }
+
+    private fun openLink(url: String) {
+        val uri = Uri.parse(url)
+        if (uri.host == HOST) {
+            val index = book.spine.indexOf(uri.path?.removePrefix("/"))
+            if (index >= 0) {
+                chapter = index
+                pendingFraction = 0f
+                pendingAnchor = uri.fragment
+                load()
+            }
+        } else if (uri.scheme == "http" || uri.scheme == "https" || uri.scheme == "mailto") {
+            try {
+                act.startActivity(Intent(Intent.ACTION_VIEW, uri))
+            } catch (e: Exception) {
+                // No app can open the link.
+            }
+        }
+    }
+
+    private fun step(direction: Int) {
+        if (!ready) return
+        web.evaluateJavascript("window.__r?__r.step($direction):null") { moved ->
+            val target = chapter + direction
+            if (moved == "false" && !closed && target in book.spine.indices) {
+                chapter = target
+                pendingFraction = if (direction < 0) 1f else 0f
+                load()
+            }
+        }
+    }
+
+    override fun next() = step(1)
+    override fun prev() = step(-1)
+
+    override fun applySettings() {
+        web.settings.textZoom = s.fontSize
+        web.setBackgroundColor(s.palette.bg)
+        web.isVerticalScrollBarEnabled = s.vertical
+        if (!ready) return
+        relayout()
+        // Text zoom reflows asynchronously; measure once more when it has settled.
+        web.postDelayed({ if (!closed && ready) relayout() }, 350)
+    }
+
+    private fun relayout() = web.evaluateJavascript("window.__r&&__r.apply(${config()},null,null)", null)
+
+    override fun seekTo(fraction: Float) {
+        val target = fraction.coerceIn(0f, 1f) * total
+        var before = 0L
+        var index = book.spine.lastIndex
+        for (i in book.spine.indices) {
+            if (target < before + book.weights[i]) {
+                index = i
+                break
+            }
+            before += book.weights[i]
+        }
+        val inChapter = ((target - before) / book.weights[index]).coerceIn(0f, 0.999f)
+        if (index == chapter && ready) {
+            web.evaluateJavascript("__r.apply(${config()},$inChapter,null)", null)
+        } else {
+            chapter = index
+            pendingFraction = inChapter
+            load()
+        }
+    }
+
+    override fun tap(x: Float, y: Float, done: (handled: Boolean) -> Unit) {
+        // In vertical mode the WebView receives the touch itself and follows links natively.
+        if (s.vertical || !ready) {
+            done(false)
+            return
+        }
+        val d = act.resources.displayMetrics.density
+        web.evaluateJavascript("window.__r?__r.tap(${x / d},${y / d}):false") { done(it == "true") }
+    }
+
+    override fun close() {
+        closed = true
+        web.stopLoading()
+        web.destroy()
+        book.close()
+    }
+
+    companion object {
+        private const val HOST = "epub.local"
+
+        // Injected into every chapter. All sizes are whole CSS pixels so that pages never drift.
+        private const val SCRIPT = """
+(function () {
+  if (window.__r) return;
+  var st = document.createElement('style');
+  (document.head || document.documentElement).appendChild(st);
+  // The last column ends one margin short of a full page, so without this marker at the far
+  // edge the view could not scroll all the way to the last page.
+  var edge = document.createElement('div');
+  edge.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:1px;visibility:hidden;';
+  document.body.appendChild(edge);
+  var R = window.__r = { page: 0, pages: 1, frac: 0, cfg: null, W: 0, H: 0 };
+
+  function css(c, W, H) {
+    var ih = H - 2 * c.mv, iw = W - 2 * c.mh;
+    var s = 'html{margin:0!important;padding:0!important;background:' + c.bg + '!important;}'
+      + 'body{background:' + c.bg + '!important;color:' + c.fg + '!important;margin:0!important;'
+      + 'box-sizing:border-box!important;max-width:none!important;'
+      + 'padding:' + c.mv + 'px ' + c.mh + 'px!important;overflow-wrap:break-word;}';
+    if (c.themed) {
+      s += 'body *{color:' + c.fg + '!important;background-color:transparent!important;'
+        + 'border-color:' + c.fg + '!important;}a,a *{color:' + c.link + '!important;}';
+    }
+    s += 'body,body *{line-height:' + c.lh + '!important;}';
+    if (c.font) {
+      s += 'body,body *:not(pre):not(code):not(tt):not(kbd){font-family:' + c.font + '!important;}';
+    }
+    s += 'img,svg,video,canvas{max-width:100%!important;height:auto;object-fit:contain;break-inside:avoid;'
+      + (c.vertical ? '' : 'max-height:' + ih + 'px!important;') + '}';
+    if (c.vertical) {
+      s += 'html{overflow-x:hidden!important;overflow-y:auto!important;}'
+        + 'body{width:auto!important;height:auto!important;min-height:' + H + 'px;}';
+    } else {
+      s += 'html{width:' + W + 'px!important;height:' + H + 'px!important;overflow:hidden!important;}'
+        + 'body{width:' + W + 'px!important;height:' + H + 'px!important;'
+        + 'column-width:' + iw + 'px!important;column-gap:' + (2 * c.mh) + 'px!important;'
+        + 'column-fill:auto!important;overflow:visible!important;}';
+    }
+    return s;
+  }
+
+  function maxScroll() {
+    return Math.max(0, document.documentElement.scrollHeight - R.H);
+  }
+
+  function find(id) {
+    return document.getElementById(id) || document.getElementsByName(id)[0] || null;
+  }
+
+  function report() {
+    if (R.cfg.vertical) {
+      var max = maxScroll(), y = window.scrollY;
+      R.frac = max > 0 ? Math.min(1, y / max) : 0;
+      Android.onLayout(0, 1, R.frac, max > 0 ? Math.min(1, (y + R.H) / (max + R.H)) : 1);
+    } else {
+      R.frac = R.page / R.pages;
+      Android.onLayout(R.page, R.pages, R.frac, (R.page + 1) / R.pages);
+    }
+  }
+
+  R.go = function (p) {
+    R.page = Math.max(0, Math.min(R.pages - 1, p));
+    window.scrollTo(R.page * R.W, 0);
+    report();
+  };
+
+  R.anchor = function (id) {
+    var el = find(id);
+    if (!el) return;
+    var r = el.getBoundingClientRect();
+    if (R.cfg.vertical) {
+      window.scrollTo(0, Math.max(0, r.top + window.scrollY - R.cfg.mv));
+      report();
+    } else {
+      R.go(Math.floor((r.left + window.scrollX) / R.W));
+    }
+  };
+
+  function layout(frac, anchor) {
+    var c = R.cfg;
+    R.W = c.w;
+    R.H = c.h;
+    st.textContent = css(c, R.W, R.H);
+    edge.style.left = '0';
+    window.scrollTo(0, 0);
+    var ran = false;
+    var done = function () {
+      if (ran) return;
+      ran = true;
+      if (c.vertical) {
+        window.scrollTo(0, Math.round(frac * maxScroll()));
+        R.page = 0;
+        R.pages = 1;
+        if (anchor && find(anchor)) R.anchor(anchor); else report();
+      } else {
+        var w = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
+        R.pages = Math.max(1, Math.ceil((w - 2) / R.W));
+        edge.style.left = (R.pages * R.W - 1) + 'px';
+        var p = frac >= 1 ? R.pages - 1 : Math.floor(frac * R.pages + 0.001);
+        if (anchor && find(anchor)) R.anchor(anchor); else R.go(p);
+      }
+    };
+    requestAnimationFrame(function () { requestAnimationFrame(done); });
+    setTimeout(done, 300);
+  }
+
+  R.apply = function (c, frac, anchor) {
+    R.cfg = c;
+    layout(frac == null ? R.frac : frac, anchor);
+  };
+
+  R.step = function (d) {
+    if (R.cfg.vertical) {
+      var max = maxScroll(), y = window.scrollY;
+      if ((d > 0 && y >= max - 2) || (d < 0 && y <= 2)) return false;
+      window.scrollTo(0, Math.max(0, Math.min(max, y + d * Math.round(R.H * 0.88))));
+      return true;
+    }
+    var p = R.page + d;
+    if (p < 0 || p >= R.pages) return false;
+    R.go(p);
+    return true;
+  };
+
+  R.tap = function (x, y) {
+    var el = document.elementFromPoint(x, y);
+    while (el && el.nodeType === 1) {
+      if ((el.localName || '').toLowerCase() === 'a') {
+        var href = el.getAttribute('href') || el.getAttribute('xlink:href');
+        if (!href) return false;
+        var u = new URL(href, location.href);
+        if (u.host === location.host && u.pathname === location.pathname && u.hash) {
+          R.anchor(decodeURIComponent(u.hash.substring(1)));
+        } else {
+          Android.onLink(u.href);
+        }
+        return true;
+      }
+      el = el.parentNode;
+    }
+    return false;
+  };
+
+  var scrollTimer = null;
+  window.addEventListener('scroll', function () {
+    if (!R.cfg || !R.cfg.vertical || scrollTimer) return;
+    scrollTimer = setTimeout(function () { scrollTimer = null; report(); }, 200);
+  });
+})();
+"""
+    }
+}

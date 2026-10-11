@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The bottom 44dp (plaque plus margins) sits on the plank drawn by ShelfDecoration. The plaque's
+     background is a PlaqueDrawable set in code; its paddings keep the title clear of the screws. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="?attr/selectableItemBackground"
+    android:orientation="vertical"
+    android:paddingEnd="9dp"
+    android:paddingStart="9dp"
+    android:paddingTop="16dp">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <com.example.read_y.RatioImageView
+            android:id="@+id/cover"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#FF24160D"
+            android:scaleType="centerCrop"
+            android:importantForAccessibility="no" />
+
+        <ImageView
+            android:id="@+id/star"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_gravity="top|end"
+            android:layout_margin="3dp"
+            android:contentDescription="@string/favorite"
+            android:src="@drawable/ic_star"
+            android:visibility="gone" />
+
+        <ProgressBar
+            android:id="@+id/progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_gravity="bottom"
+            android:max="100"
+            android:progressTint="@color/gold_light"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/plaque"
+        android:layout_width="match_parent"
+        android:layout_height="34dp"
+        android:layout_marginBottom="5dp"
+        android:layout_marginTop="5dp"
+        android:ellipsize="end"
+        android:fontFamily="serif"
+        android:gravity="center"
+        android:lineSpacingMultiplier="0.9"
+        android:maxLines="2"
+        android:paddingBottom="2dp"
+        android:paddingEnd="13dp"
+        android:paddingStart="13dp"
+        android:shadowColor="#99FFF6C8"
+        android:shadowDy="1"
+        android:shadowRadius="1"
+        android:textColor="@color/plaque_text"
+        android:textSize="11dp"
+        android:textStyle="bold" />
+</LinearLayout>

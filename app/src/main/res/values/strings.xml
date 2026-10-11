@@ -1,0 +1,21 @@
+<resources>
+    <string name="app_name">Read-y</string>
+    <string name="widget_name">Favorite books</string>
+    <string name="widget_description">Your favorite books, one tap away</string>
+    <string name="widget_empty">Long-press a book and add it to favorites</string>
+    <string name="favorites">Favorites</string>
+    <string name="grant_access">Allow access to files</string>
+    <string name="need_access">Read-y keeps your books in a normal folder:\n%1$s\n\nAllow access to all files so it can read that folder.</string>
+    <string name="empty_folder">This shelf is empty.\n\nCopy EPUB or PDF files (and folders) into\n%1$s</string>
+    <string name="folder_info">%1$d folders, %2$d books\n\n%3$s</string>
+    <string name="open">Open</string>
+    <string name="close">Close</string>
+    <string name="add_favorite">Add to favorites</string>
+    <string name="remove_favorite">Remove favorite</string>
+    <string name="back">Back</string>
+    <string name="favorite">Favorite</string>
+    <string name="book_missing">This book is no longer in the library.</string>
+    <string name="book_unreadable">Cannot open %1$s</string>
+    <string name="reader_hint">Tap the middle of the screen for settings</string>
+    <string name="position_format">%1$s · %2$d%%</string>
+</resources>

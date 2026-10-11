@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="wood_dark">#FF3E2415</color>
+    <color name="wood">#FF6B4226</color>
+    <color name="shelf_back">#FF2A1A10</color>
+    <color name="shelf_back_light">#FF3A2416</color>
+    <color name="gold">#FFD4AF37</color>
+    <color name="gold_light">#FFF6E27A</color>
+    <color name="gold_dark">#FF8C6A14</color>
+    <color name="plaque_text">#FF3B2A05</color>
+    <color name="panel">#FF1C1C1C</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>
