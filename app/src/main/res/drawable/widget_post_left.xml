@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A side post of the bookcase (12dp) and the shadow it casts on the shelves beside it (6dp). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:right="6dp">
+        <shape>
+            <gradient
+                android:angle="0"
+                android:centerColor="#FF9A6836"
+                android:endColor="#FF5C3A1E"
+                android:startColor="#FF4A2E1A" />
+        </shape>
+    </item>
+    <item android:left="12dp">
+        <shape>
+            <gradient
+                android:angle="0"
+                android:endColor="#00000000"
+                android:startColor="#88000000" />
+        </shape>
+    </item>
+</layer-list>

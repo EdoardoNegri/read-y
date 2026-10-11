@@ -1,47 +1,51 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- A bookcase: the shelves scroll between two side posts that stay put. Each list item is one
+     whole shelf (widget_row.xml), put together by FavoritesWidget. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@android:id/background"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/widget_bg"
-    android:orientation="vertical"
-    android:padding="10dp">
+    android:clipToOutline="true"
+    tools:targetApi="31">
+
+    <ListView
+        android:id="@+id/shelves"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:divider="@null"
+        android:dividerHeight="0dp"
+        android:listSelector="@android:color/transparent"
+        android:paddingEnd="11dp"
+        android:paddingStart="11dp"
+        android:scrollbars="none" />
 
     <TextView
-        android:id="@+id/header"
+        android:id="@+id/empty"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="match_parent"
         android:fontFamily="serif"
-        android:paddingBottom="6dp"
-        android:paddingEnd="4dp"
-        android:paddingStart="4dp"
-        android:text="@string/favorites"
+        android:gravity="center"
+        android:paddingEnd="20dp"
+        android:paddingStart="20dp"
+        android:text="@string/widget_empty"
         android:textColor="@color/gold_light"
-        android:textSize="15sp"
-        android:textStyle="bold" />
+        android:textSize="13sp" />
 
-    <FrameLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
+    <ImageView
+        android:layout_width="18dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="left"
+        android:background="@drawable/widget_post_left"
+        android:importantForAccessibility="no"
+        tools:ignore="RtlHardcoded" />
 
-        <GridView
-            android:id="@+id/grid"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:columnWidth="72dp"
-            android:horizontalSpacing="8dp"
-            android:numColumns="auto_fit"
-            android:stretchMode="columnWidth"
-            android:verticalSpacing="8dp" />
-
-        <TextView
-            android:id="@+id/empty"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:fontFamily="serif"
-            android:gravity="center"
-            android:text="@string/widget_empty"
-            android:textColor="@color/gold_light"
-            android:textSize="13sp" />
-    </FrameLayout>
-</LinearLayout>
+    <ImageView
+        android:layout_width="18dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="right"
+        android:background="@drawable/widget_post_right"
+        android:importantForAccessibility="no"
+        tools:ignore="RtlHardcoded" />
+</FrameLayout>

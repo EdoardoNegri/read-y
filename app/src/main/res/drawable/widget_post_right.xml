@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- widget_post_left.xml mirrored. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:left="6dp">
+        <shape>
+            <gradient
+                android:angle="0"
+                android:centerColor="#FF9A6836"
+                android:endColor="#FF5C3A1E"
+                android:startColor="#FF4A2E1A" />
+        </shape>
+    </item>
+    <item android:right="12dp">
+        <shape>
+            <gradient
+                android:angle="0"
+                android:endColor="#88000000"
+                android:startColor="#00000000" />
+        </shape>
+    </item>
+</layer-list>

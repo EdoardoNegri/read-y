@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Before Android 12 widgets are plain rectangles. -->
+    <dimen name="widget_radius">0dp</dimen>
+</resources>

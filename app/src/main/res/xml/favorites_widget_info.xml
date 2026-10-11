@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Dropped as 4x2, resizable both ways down to 1x1. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_description"
     android:initialLayout="@layout/widget_favorites"
     android:minHeight="110dp"
+    android:minResizeHeight="40dp"
+    android:minResizeWidth="40dp"
     android:minWidth="250dp"
     android:resizeMode="horizontal|vertical"
     android:targetCellHeight="2"

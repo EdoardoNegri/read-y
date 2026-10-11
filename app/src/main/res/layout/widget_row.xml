@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One shelf of the widget: books standing on a plank as thin as the gap above them, no plaques.
+     FavoritesWidget shows as many of the places as fit the widget's width and stands a book in
+     each; a cover takes its size from the bitmap it is given, not from the width of its place.
+     Should the place be narrower than that after all, the picture shrinks inside its view but the
+     view keeps its height, so every shelf stays exactly as tall as FavoritesWidget means it to be.
+     The places are spelled out because views added to a list item at run time come out with the
+     wrong pictures once the launcher refreshes the list. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <!-- Shadow of the shelf above, and the top surface of the plank below. -->
+        <ImageView
+            android:layout_width="match_parent"
+            android:layout_height="6dp"
+            android:background="@drawable/shelf_shade"
+            android:importantForAccessibility="no" />
+
+        <ImageView
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_gravity="bottom"
+            android:background="@drawable/shelf_lip"
+            android:importantForAccessibility="no" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <FrameLayout
+                android:id="@+id/place0"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1">
+
+                <ImageView
+                    android:id="@+id/cover0"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginEnd="3dp"
+                    android:layout_marginStart="3dp"
+                    android:scaleType="fitEnd" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:id="@+id/place1"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1">
+
+                <ImageView
+                    android:id="@+id/cover1"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginEnd="3dp"
+                    android:layout_marginStart="3dp"
+                    android:scaleType="fitEnd" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:id="@+id/place2"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1">
+
+                <ImageView
+                    android:id="@+id/cover2"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginEnd="3dp"
+                    android:layout_marginStart="3dp"
+                    android:scaleType="fitEnd" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:id="@+id/place3"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1">
+
+                <ImageView
+                    android:id="@+id/cover3"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginEnd="3dp"
+                    android:layout_marginStart="3dp"
+                    android:scaleType="fitEnd" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:id="@+id/place4"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1">
+
+                <ImageView
+                    android:id="@+id/cover4"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginEnd="3dp"
+                    android:layout_marginStart="3dp"
+                    android:scaleType="fitEnd" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:id="@+id/place5"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1">
+
+                <ImageView
+                    android:id="@+id/cover5"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginEnd="3dp"
+                    android:layout_marginStart="3dp"
+                    android:scaleType="fitEnd" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:id="@+id/place6"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1">
+
+                <ImageView
+                    android:id="@+id/cover6"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginEnd="3dp"
+                    android:layout_marginStart="3dp"
+                    android:scaleType="fitEnd" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:id="@+id/place7"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1">
+
+                <ImageView
+                    android:id="@+id/cover7"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginEnd="3dp"
+                    android:layout_marginStart="3dp"
+                    android:scaleType="fitEnd" />
+            </FrameLayout>
+        </LinearLayout>
+    </FrameLayout>
+
+    <ImageView
+        android:layout_width="match_parent"
+        android:layout_height="8dp"
+        android:background="@drawable/shelf_plank"
+        android:importantForAccessibility="no" />
+</LinearLayout>
