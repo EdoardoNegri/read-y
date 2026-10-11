@@ -28,8 +28,14 @@ class ReaderSettings(ctx: Context) {
     /** 0..100 strength of the warm (orange) light filter. */
     var warmth by int(0)
 
-    /** Index into [THEMES]. */
-    var theme by int(0)
+    /** Light lettering on dark pages. */
+    var darkMode by bool(false)
+
+    /** Index into [THEMES]: light pages, or dark ones in [darkMode]. */
+    val theme get() = if (darkMode) 2 else 0
+
+    /** Shows the page being read in small print at the foot of the page. */
+    var showPage by bool(false)
 
     /** true = continuous vertical scrolling, false = horizontal pages. */
     var vertical by bool(false)
@@ -53,6 +59,9 @@ class ReaderSettings(ctx: Context) {
     /** Off: dragging the page from right to left goes forward. On: the other way round. */
     var reverseSwipe by bool(false)
     var volumeUpNext by bool(true)
+
+    /** Keeps the screen from dimming and switching off while a book is open. */
+    var keepScreenOn by bool(false)
     var hintShown by bool(false)
 
     val palette get() = THEMES[theme.coerceIn(0, THEMES.lastIndex)]
@@ -63,7 +72,6 @@ class ReaderSettings(ctx: Context) {
             Palette(0xFFF4ECD8.toInt(), 0xFF3B2F1E.toInt(), 0xFF8A4B08.toInt()),
             Palette(0xFF121212.toInt(), 0xFFC8C8C8.toInt(), 0xFF8AB4F8.toInt()),
         )
-        val THEME_NAMES = listOf("Light", "Sepia", "Dark")
 
         /** Display name to system font family; an empty family keeps the book's own fonts. */
         val FONTS = listOf(

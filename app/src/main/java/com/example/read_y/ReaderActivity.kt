@@ -1,17 +1,15 @@
 package com.example.read_y
 
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Color
-import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.HorizontalScrollView
 import android.widget.ImageButton
-import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -21,9 +19,6 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.google.android.material.button.MaterialButton
-import com.google.android.material.button.MaterialButtonToggleGroup
-import com.google.android.material.switchmaterial.SwitchMaterial
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -39,9 +34,13 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
     private lateinit var menu: View
     private lateinit var warmth: View
     private lateinit var position: TextView
+    private lateinit var pageNumber: TextView
     private lateinit var seek: SeekBar
-    private lateinit var options: LinearLayout
+    private lateinit var chapters: ChapterMarks
     private var seeking = false
+
+    /** The settings screen was opened from here, so they may have changed by the time it is left. */
+    private var settingsOpened = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,8 +51,9 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         menu = findViewById(R.id.menu)
         warmth = findViewById(R.id.warmth)
         position = findViewById(R.id.position)
+        pageNumber = findViewById(R.id.pageNumber)
         seek = findViewById(R.id.seek)
-        options = findViewById(R.id.options)
+        chapters = findViewById(R.id.chapters)
 
         if (Build.VERSION.SDK_INT >= 28) {
             window.attributes.layoutInDisplayCutoutMode =
@@ -71,7 +71,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         file = File(intent.getStringExtra(EXTRA_PATH) ?: "")
         if (!file.isFile) {
             Toast.makeText(this, R.string.book_missing, Toast.LENGTH_LONG).show()
-            finish()
+            leave()
             return
         }
         state = Library.state(this, file)
@@ -80,18 +80,36 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
             else PdfEngine(this, file, s, state, this)
         } catch (e: Exception) {
             Toast.makeText(this, getString(R.string.book_unreadable, file.name), Toast.LENGTH_LONG).show()
-            finish()
+            leave()
             return
         }
         engine = opened
+        Library.setOpenBook(this, file)
         content.addView(opened.view, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         content.listener = this
 
-        findViewById<TextView>(R.id.bookTitle).text =
-            Library.cachedMeta(this, file)?.title ?: file.nameWithoutExtension
-        findViewById<ImageButton>(R.id.back).setOnClickListener { finish() }
+        val title = findViewById<TextView>(R.id.bookTitle)
+        val known = Library.cachedMeta(this, file)
+        title.text = known?.title ?: file.nameWithoutExtension
+        // A book opened before the shelf has looked at it, e.g. one just handed over by another app.
+        if (known == null) Library.io.execute {
+            val meta = Library.meta(applicationContext, file)
+            runOnUiThread { title.text = meta.title }
+        }
+        findViewById<ImageButton>(R.id.back).setOnClickListener { leave() }
+        setUpChapters(opened)
+        findViewById<ImageButton>(R.id.settings).setOnClickListener {
+            settingsOpened = true
+            menu.visibility = View.GONE
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {}
+            override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
+                // While the knob is dragged, the chapter it is over is named.
+                val e = engine ?: return
+                val mark = chapters.marks.indexOfLast { it <= progress / 1000f + 0.0005f }
+                if (fromUser && mark >= 0) position.text = chapterName(e, mark)
+            }
             override fun onStartTrackingTouch(bar: SeekBar) {
                 seeking = true
             }
@@ -103,11 +121,10 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         })
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (menu.visibility == View.VISIBLE) menu.visibility = View.GONE else finish()
+                if (menu.visibility == View.VISIBLE) menu.visibility = View.GONE else leave()
             }
         })
 
-        buildOptions()
         applyBrightness()
         applyWarmth()
         applyLayout()
@@ -118,6 +135,43 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (settingsOpened) {
+            settingsOpened = false
+            applyBrightness()
+            applyWarmth()
+            applyLayout()
+        }
+    }
+
+    /** The lines of the contents of the book that have a mark of their own on the seek line. */
+    private var marked: List<Int> = emptyList()
+
+    /**
+     * Marks the chapters along the seek line. Lines of the contents that lead to the same place,
+     * such as the sections of one chapter, share the mark of the first.
+     */
+    private fun setUpChapters(e: ReaderEngine) {
+        val places = e.contentPositions
+        marked = places.indices.filter { it == 0 || places[it] - places[it - 1] > 0.0005f }
+        chapters.visibility = if (marked.size > 1) View.VISIBLE else View.GONE
+        chapters.inset = seek.paddingLeft
+        // The line runs through the middle of the seek bar.
+        chapters.lineBelow = seek.layoutParams.height / 2f
+        chapters.marks = marked.map { places[it] }
+        chapters.onPick = { mark -> e.openContent(marked[mark]) }
+        // The name of the chapter a finger is on takes the place of the position until it is let go.
+        chapters.onPreview = { mark -> position.text = if (mark < 0) shown else chapterName(e, mark) }
+    }
+
+    /** The number and name of the chapter with the mark [mark]. */
+    private fun chapterName(e: ReaderEngine, mark: Int) =
+        getString(R.string.chapter_name, mark + 1, e.contents[marked[mark]].first)
+
+    /** The position as last reported, to go back to after the name of a chapter was shown instead. */
+    private var shown = ""
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) immersive()
@@ -127,6 +181,15 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         engine?.close()
         engine = null
         super.onDestroy()
+    }
+
+    /**
+     * Back to the shelf. Only this forgets the open book: when the app is closed in any other way
+     * the next start goes straight back into it (see MainActivity).
+     */
+    private fun leave() {
+        Library.setOpenBook(this, null)
+        finish()
     }
 
     private fun immersive() {
@@ -145,6 +208,8 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
             if (s.brightness < 0) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
             else (s.brightness / 100f).coerceIn(0.01f, 1f)
         window.attributes = lp
+        if (s.keepScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     private fun applyWarmth() {
@@ -158,6 +223,9 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
             else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
         root.setBackgroundColor(s.palette.bg)
+        pageNumber.visibility = if (s.showPage) View.VISIBLE else View.GONE
+        // In the colour of the text, but fainter.
+        pageNumber.setTextColor(s.palette.fg and 0xFFFFFF or 0x99000000.toInt())
         // In paged mode page turns are ours; in scroll mode the content scrolls itself.
         content.consumeAll = !s.vertical
         engine?.applySettings()
@@ -207,125 +275,13 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         state.percent = percent
         state.lastRead = System.currentTimeMillis()
         Library.saveState(this, file, state)
-        position.text = getString(R.string.position_format, label, (percent * 100).roundToInt())
-        if (!seeking) seek.progress = (percent * 1000).roundToInt()
-    }
-
-    // ---- settings panel ----
-
-    private fun buildOptions() {
-        slider("Brightness", 0, 100, 1, s.brightness.coerceAtLeast(0), true, { if (it == 0) "system" else "$it%" }) {
-            s.brightness = if (it == 0) -1 else it
-            applyBrightness()
-        }
-        slider("Light warmth", 0, 100, 1, s.warmth, true, { "$it%" }) {
-            s.warmth = it
-            applyWarmth()
-        }
-        choice("Colors", ReaderSettings.THEME_NAMES, s.theme) {
-            s.theme = it
-            applyLayout()
-        }
-        choice("Reading direction", listOf("Horizontal (pages)", "Vertical (scroll)"), if (s.vertical) 1 else 0) {
-            s.vertical = it == 1
-            applyLayout()
-        }
-        choice("Screen rotation", listOf("Auto", "Portrait", "Landscape"), s.orientation) {
-            s.orientation = it
-            applyLayout()
-        }
-        if (Library.isEpub(file)) {
-            val fonts = ReaderSettings.FONTS
-            choice("Font", fonts.map { it.first }, s.font, fonts.map { Typeface.create(it.second, Typeface.NORMAL) }) {
-                s.font = it
-                applyLayout()
-            }
-            slider("Font size", 50, 300, 5, s.fontSize, false, { "$it%" }) {
-                s.fontSize = it
-                applyLayout()
-            }
-            slider("Line spacing", 10, 30, 1, s.lineSpacing, false, { "%.1f".format(it / 10f) }) {
-                s.lineSpacing = it
-                applyLayout()
-            }
-            slider("Left / right spacing", 0, 80, 2, s.marginH, false, { "$it" }) {
-                s.marginH = it
-                applyLayout()
-            }
-            slider("Top / bottom spacing", 0, 80, 2, s.marginV, false, { "$it" }) {
-                s.marginV = it
-                applyLayout()
-            }
-        }
-        toggle("Reverse swipe direction", s.reverseSwipe) { s.reverseSwipe = it }
-        toggle("Volume up for next page", s.volumeUpNext) { s.volumeUpNext = it }
-    }
-
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-
-    private fun label(text: String) = TextView(this).apply {
-        this.text = text
-        textSize = 13f
-        setPadding(0, dp(14), 0, dp(2))
-        options.addView(this)
-    }
-
-    /** [live] sliders apply while dragging; the others only when released, since they re-flow the book. */
-    private fun slider(
-        name: String, min: Int, max: Int, step: Int, value: Int, live: Boolean,
-        format: (Int) -> String, onChange: (Int) -> Unit,
-    ) {
-        val title = label("$name: ${format(value)}")
-        val bar = SeekBar(this)
-        bar.max = (max - min) / step
-        bar.progress = (value.coerceIn(min, max) - min) / step
-        bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(b: SeekBar, progress: Int, fromUser: Boolean) {
-                if (!fromUser) return
-                val v = min + progress * step
-                title.text = "$name: ${format(v)}"
-                if (live) onChange(v)
-            }
-
-            override fun onStartTrackingTouch(b: SeekBar) {}
-            override fun onStopTrackingTouch(b: SeekBar) {
-                if (!live) onChange(min + b.progress * step)
-            }
-        })
-        options.addView(bar, ViewGroup.LayoutParams.MATCH_PARENT, dp(36))
-    }
-
-    private fun choice(
-        name: String, items: List<String>, selected: Int,
-        faces: List<Typeface>? = null, onChange: (Int) -> Unit,
-    ) {
-        label(name)
-        val group = MaterialButtonToggleGroup(this)
-        group.isSingleSelection = true
-        group.isSelectionRequired = true
-        val ids = items.mapIndexed { i, text ->
-            val b = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle)
-            b.id = View.generateViewId()
-            b.text = text
-            b.isAllCaps = false
-            faces?.let { b.typeface = it[i] }
-            group.addView(b)
-            b.id
-        }
-        group.check(ids[selected.coerceIn(0, ids.lastIndex)])
-        group.addOnButtonCheckedListener { _, id, checked -> if (checked) onChange(ids.indexOf(id)) }
-        val scroller = HorizontalScrollView(this)
-        scroller.isHorizontalScrollBarEnabled = false
-        scroller.addView(group)
-        options.addView(scroller)
-    }
-
-    private fun toggle(name: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-        val sw = SwitchMaterial(this)
-        sw.text = name
-        sw.isChecked = checked
-        sw.setOnCheckedChangeListener { _, on -> onChange(on) }
-        options.addView(sw, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)).apply { topMargin = dp(8) })
+        // Reaching the end marks the book as finished; taking the mark off again is up to the reader.
+        if (percent >= 0.999f && !Library.isFinished(this, file)) Library.setFinished(this, file, true)
+        shown = getString(R.string.position_format, label, (percent * 100).roundToInt())
+        position.text = shown
+        pageNumber.text = label
+        if (!seeking) seek.progress = ((engine?.place ?: percent) * 1000).roundToInt()
+        chapters.current = marked.indexOfLast { it <= (engine?.currentContent ?: -1) }
     }
 
     companion object {

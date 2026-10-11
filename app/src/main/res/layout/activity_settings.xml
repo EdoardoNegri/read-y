@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/panel"
+    android:orientation="vertical">
+
+    <include layout="@layout/top_bar" />
+
+    <!-- A sample page that follows the settings below it, framed like a picture on the wood. -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="16dp"
+        android:layout_weight="35"
+        android:background="@color/gold_dark"
+        android:padding="2dp">
+
+        <TextView
+            android:id="@+id/sample"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:text="@string/sample_page" />
+
+        <View
+            android:id="@+id/warmth"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </FrameLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="65">
+
+        <LinearLayout
+            android:id="@+id/options"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="24dp"
+            android:paddingEnd="20dp"
+            android:paddingStart="20dp" />
+    </ScrollView>
+</LinearLayout>

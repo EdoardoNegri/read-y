@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Typeface
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -27,6 +28,25 @@ interface ReaderEngine {
 
     /** Jumps to a position in the whole book, 0..1. */
     fun seekTo(fraction: Float)
+
+    /** The book's table of contents: each line's title and how deep it is nested. Empty if it has none. */
+    val contents: List<Pair<String, Int>> get() = emptyList()
+
+    /**
+     * Where in the whole book, 0..1, the page being shown begins, if that differs from how much
+     * of the book is read, which counts the page itself too. The seek bar shows this, so that
+     * its knob stands on the mark of a chapter when the chapter has just been opened.
+     */
+    val place: Float? get() = null
+
+    /** Where in the whole book, 0..1, each line of [contents] leads. */
+    val contentPositions: List<Float> get() = emptyList()
+
+    /** The line of [contents] that the place being read belongs to, or -1. */
+    val currentContent: Int get() = -1
+
+    /** Opens the place the line [index] of [contents] leads to. */
+    fun openContent(index: Int) {}
 
     /** Gives the content a chance to handle a tap (e.g. a link) before it turns the page. */
     fun tap(x: Float, y: Float, done: (handled: Boolean) -> Unit) = done(false)
@@ -68,6 +88,101 @@ class RatioImageView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet
             area.set(0f, 0f, width.toFloat(), height.toFloat())
             ShelfArt.drawBinding(canvas, area, resources.displayMetrics.density, shade)
         }
+    }
+}
+
+/**
+ * The chapters of a book as marks across the line of the seek bar that lies under this view, each
+ * where its chapter begins and with its number above it, the one being read brighter. Tapping a
+ * number opens its chapter, and holding a finger on the numbers shows the name of the chapter
+ * under it first. The marks are drawn outside this view, so its parent must not clip it.
+ */
+class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = null) : View(ctx, attrs) {
+
+    /** Where each mark stands, 0..1 along the line. */
+    var marks: List<Float> = emptyList()
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    /** The mark of the chapter being read, or -1. */
+    var current = -1
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
+    /** How far the line of the seek bar starts and ends inside its view. */
+    var inset = 0
+
+    /** How far below this view the line of the seek bar runs. */
+    var lineBelow = 0f
+
+    var onPick: ((Int) -> Unit)? = null
+
+    /** Told the mark a finger is on, or -1 when it has left without choosing one. */
+    var onPreview: ((Int) -> Unit)? = null
+
+    private val d = resources.displayMetrics.density
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER
+        textSize = 12 * resources.displayMetrics.scaledDensity
+    }
+    private val shape = RectF()
+
+    private fun x(mark: Float) = inset + mark * (width - 2 * inset)
+
+    override fun onDraw(canvas: Canvas) {
+        // The line of the seek bar runs below this view, which draws its marks across it.
+        val line = height + lineBelow
+        var free = Float.NEGATIVE_INFINITY
+        marks.forEachIndexed { i, mark ->
+            val here = i == current
+            val half = (if (here) 1.75f else 1.25f) * d
+            val reach = (if (here) 7f else 5f) * d
+            val x = x(mark)
+            paint.color = if (here) 0xFFF6E27A.toInt() else 0xFFB8922A.toInt()
+            shape.set(x - half, line - reach, x + half, line + reach)
+            canvas.drawRoundRect(shape, half, half, paint)
+
+            // Its number above it, unless it would run into the one before; the chapter being
+            // read is always numbered.
+            val number = (i + 1).toString()
+            val w = paint.measureText(number)
+            if (here || x - w / 2 >= free) {
+                paint.typeface = if (here) BOLD else PLAIN
+                canvas.drawText(number, x, height - 5 * d, paint)
+                free = x + w / 2 + 5 * d
+            }
+        }
+    }
+
+    /**
+     * While a finger rests on the numbers or slides along them, [onPreview] is told the chapter
+     * under it, so that its name can be shown; lifting the finger opens that chapter.
+     */
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (marks.isEmpty()) return false
+        val nearest = marks.indices.minByOrNull { abs(x(marks[it]) - event.x) } ?: return true
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> onPreview?.invoke(nearest)
+            MotionEvent.ACTION_UP -> {
+                performClick()
+                onPick?.invoke(nearest)
+            }
+            MotionEvent.ACTION_CANCEL -> onPreview?.invoke(-1)
+        }
+        return true
+    }
+
+    override fun performClick(): Boolean = super.performClick()
+
+    private companion object {
+        val PLAIN: Typeface = Typeface.create(Typeface.SERIF, Typeface.NORMAL)
+        val BOLD: Typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
     }
 }
 

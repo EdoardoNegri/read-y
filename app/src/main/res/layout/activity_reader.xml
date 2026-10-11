@@ -9,7 +9,24 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- The gap between the two bars is not clickable, so taps there reach the book and close the menu. -->
+    <!-- The page being read, in small print at the foot of the page, if the reader asked for it. -->
+    <TextView
+        android:id="@+id/pageNumber"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="5dp"
+        android:fontFamily="serif"
+        android:textSize="11sp"
+        android:visibility="gone" />
+
+    <!-- Orange tint over the pages: the "light temperature" filter. The menu lies above it. -->
+    <View
+        android:id="@+id/warmth"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- The space above the panel is not clickable, so taps there reach the book and close the menu. -->
     <LinearLayout
         android:id="@+id/menu"
         android:layout_width="match_parent"
@@ -17,87 +34,89 @@
         android:orientation="vertical"
         android:visibility="gone">
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:background="@color/panel"
-            android:clickable="true"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingEnd="16dp"
-            android:paddingStart="4dp">
-
-            <ImageButton
-                android:id="@+id/back"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/back"
-                android:src="@drawable/ic_back" />
-
-            <TextView
-                android:id="@+id/bookTitle"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:ellipsize="end"
-                android:paddingEnd="0dp"
-                android:paddingStart="12dp"
-                android:singleLine="true"
-                android:textColor="@color/white"
-                android:textSize="18sp" />
-        </LinearLayout>
-
         <View
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="40" />
+            android:layout_weight="1" />
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="60"
+            android:layout_height="wrap_content"
             android:background="@color/panel"
             android:clickable="true"
-            android:orientation="vertical">
+            android:clipChildren="false"
+            android:focusable="true"
+            android:orientation="vertical"
+            android:paddingBottom="14dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingEnd="4dp"
+                android:paddingStart="4dp">
+
+                <ImageButton
+                    android:id="@+id/back"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/back"
+                    android:src="@drawable/ic_back" />
+
+                <TextView
+                    android:id="@+id/bookTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:fontFamily="serif"
+                    android:gravity="center"
+                    android:paddingEnd="8dp"
+                    android:paddingStart="8dp"
+                    android:singleLine="true"
+                    android:textColor="@color/gold_light"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <ImageButton
+                    android:id="@+id/settings"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/settings"
+                    android:src="@drawable/ic_settings" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/position"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:fontFamily="serif"
                 android:gravity="center"
-                android:paddingTop="10dp"
-                android:textColor="@color/white"
-                android:textSize="13sp" />
+                android:textColor="@color/cream"
+                android:textSize="14sp" />
+
+            <!-- The numbers of the chapters; their marks are drawn across the line of the seek bar
+                 below. Tapping a number opens its chapter. -->
+            <com.example.read_y.ChapterMarks
+                android:id="@+id/chapters"
+                android:layout_width="match_parent"
+                android:layout_height="26dp"
+                android:layout_marginEnd="8dp"
+                android:layout_marginStart="8dp"
+                android:layout_marginTop="2dp"
+                android:contentDescription="@string/contents"
+                android:visibility="gone" />
 
             <SeekBar
                 android:id="@+id/seek"
                 android:layout_width="match_parent"
-                android:layout_height="36dp"
+                android:layout_height="30dp"
                 android:layout_marginEnd="8dp"
                 android:layout_marginStart="8dp"
                 android:max="1000" />
-
-            <ScrollView
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1">
-
-                <LinearLayout
-                    android:id="@+id/options"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:paddingBottom="24dp"
-                    android:paddingEnd="20dp"
-                    android:paddingStart="20dp" />
-            </ScrollView>
         </LinearLayout>
     </LinearLayout>
-
-    <!-- Orange tint over everything: the "light temperature" filter. -->
-    <View
-        android:id="@+id/warmth"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent" />
 </FrameLayout>

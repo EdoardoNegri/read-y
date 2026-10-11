@@ -106,6 +106,10 @@ class EpubEngine(
                 val label =
                     if (s.vertical) "Chapter ${chapter + 1}/$n"
                     else "Chapter ${chapter + 1}/$n · page ${page + 1}/$pages"
+                // In the last chapter the pages are spread up to the very end of the line, so
+                // that the last page of the book stands there.
+                val last = chapter == book.spine.lastIndex && !s.vertical && pages > 1
+                shown = if (last) page.toFloat() / (pages - 1) else fraction.toFloat()
                 host.onPosition(chapter, fraction.toFloat(), bookPercent(progress.toFloat()), label)
             }
         }
@@ -189,6 +193,32 @@ class EpubEngine(
                 load()
             }
         }
+    }
+
+    override val contents get() = book.toc.map { it.title to it.depth }
+
+    /** How far into the chapter, 0..1, the page being shown begins. */
+    private var shown = 0f
+
+    override val place get() = bookPercent(shown)
+
+    override val contentPositions: List<Float>
+        get() = book.toc.map { entry ->
+            var before = 0L
+            for (i in 0 until book.spine.indexOf(entry.path)) before += book.weights[i]
+            before.toFloat() / total
+        }
+
+    override val currentContent get() = book.toc.indexOfLast { book.spine.indexOf(it.path) <= chapter }
+
+    override fun openContent(index: Int) {
+        val entry = book.toc.getOrNull(index) ?: return
+        val target = book.spine.indexOf(entry.path)
+        if (target < 0) return
+        chapter = target
+        pendingFraction = 0f
+        pendingAnchor = entry.anchor
+        load()
     }
 
     override fun next() = step(1)
