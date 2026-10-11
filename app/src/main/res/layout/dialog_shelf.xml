@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- See ShelfDialog: a wooden panel with a brass title plate over whichever of these it is given:
+     a cover beside details, a text field, a column of choices, one wide brass button. The plates'
+     backgrounds are PlaqueDrawables set in code. The panel takes the first focus, so that a title
+     that can be edited does not bring the keyboard up by itself. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/panel_wood"
+    android:focusable="true"
+    android:focusableInTouchMode="true"
+    android:orientation="vertical"
+    android:padding="18dp">
+
+    <!-- The plate in the middle, between the arrow that leads back and the buttons on the right;
+         its margins keep it clear of two buttons on either side. -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="44dp">
+
+        <ImageButton
+            android:id="@+id/dialogBack"
+            android:layout_width="36dp"
+            android:layout_height="44dp"
+            android:layout_gravity="start"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/back"
+            android:src="@drawable/ic_back"
+            android:visibility="gone" />
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_marginEnd="76dp"
+            android:layout_marginStart="76dp">
+
+            <TextView
+                android:id="@+id/dialogTitle"
+                style="@style/TitlePlate" />
+
+            <!-- Takes the place of the title where the name can be changed. -->
+            <EditText
+                android:id="@+id/dialogName"
+                style="@style/TitlePlate"
+                android:layout_width="match_parent"
+                android:hint="@string/name"
+                android:imeOptions="actionDone|flagNoExtractUi"
+                android:importantForAutofill="no"
+                android:inputType="textCapSentences|textNoSuggestions"
+                android:textColorHint="@color/gold_dark"
+                android:visibility="gone" />
+        </FrameLayout>
+
+        <!-- Buttons added in code stand before the cross. -->
+        <LinearLayout
+            android:id="@+id/dialogIcons"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_gravity="end"
+            android:orientation="horizontal">
+
+            <ImageButton
+                android:id="@+id/dialogClose"
+                android:layout_width="36dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/close"
+                android:src="@drawable/ic_close" />
+        </LinearLayout>
+    </FrameLayout>
+
+    <LinearLayout
+        android:id="@+id/dialogBody"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <com.example.read_y.RatioImageView
+            android:id="@+id/dialogCover"
+            android:layout_width="96dp"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="16dp"
+            android:background="#FF24160D"
+            android:elevation="4dp"
+            android:importantForAccessibility="no"
+            android:scaleType="centerCrop"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/dialogDetails"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="serif"
+            android:lineSpacingExtra="4dp"
+            android:textColor="@color/cream"
+            android:textSize="14sp" />
+    </LinearLayout>
+
+    <EditText
+        android:id="@+id/dialogInput"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/field"
+        android:fontFamily="serif"
+        android:imeOptions="actionDone|flagNoExtractUi"
+        android:importantForAutofill="no"
+        android:inputType="textCapSentences"
+        android:paddingEnd="12dp"
+        android:paddingStart="12dp"
+        android:textColor="@color/cream"
+        android:textColorHint="@color/gold_dark"
+        android:textSize="16sp"
+        android:visibility="gone" />
+
+    <!-- One button or line per choice, added in code; a long column scrolls. -->
+    <ScrollView
+        android:id="@+id/dialogScroll"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/dialogOptions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </ScrollView>
+
+    <TextView
+        android:id="@+id/dialogPrimary"
+        style="@style/BrassButton"
+        android:layout_width="match_parent"
+        android:layout_marginTop="18dp"
+        android:visibility="gone" />
+</LinearLayout>

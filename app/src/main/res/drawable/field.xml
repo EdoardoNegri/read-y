@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A text field let into the wood: dark inside, with a brass rim. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <corners android:radius="6dp" />
+    <solid android:color="@color/shelf_back" />
+    <stroke
+        android:width="1.5dp"
+        android:color="@color/gold_dark" />
+</shape>

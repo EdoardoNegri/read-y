@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A board of the bookcase's wood with a brass edge: the body of dialogs and notices. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <corners android:radius="14dp" />
+            <solid android:color="@color/gold_dark" />
+        </shape>
+    </item>
+    <item android:bottom="2dp" android:left="2dp" android:right="2dp" android:top="2dp">
+        <shape>
+            <corners android:radius="12dp" />
+            <gradient
+                android:angle="270"
+                android:endColor="@color/wood_dark"
+                android:startColor="@color/wood" />
+        </shape>
+    </item>
+    <!-- A lit line just inside the top edge. -->
+    <item android:height="1dp" android:gravity="top" android:left="14dp" android:right="14dp" android:top="3dp">
+        <shape>
+            <solid android:color="#40FFE2B0" />
+        </shape>
+    </item>
+</layer-list>

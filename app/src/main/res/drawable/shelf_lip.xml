@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The top surface of a shelf plank, seen between the books standing on it. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient
+        android:angle="270"
+        android:endColor="#FFA9743F"
+        android:startColor="#FF4A2E1A" />
+</shape>

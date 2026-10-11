@@ -10,6 +10,42 @@
         <item name="android:windowBackground">@color/wood_dark</item>
     </style>
 
+    <!-- A brass plate used as a button; its background is a PlaqueDrawable set in code. -->
+    <style name="BrassButton">
+        <item name="android:layout_height">40dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingBottom">2dp</item>
+        <item name="android:fontFamily">serif</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:textColor">@color/plaque_text</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:foreground">?attr/selectableItemBackground</item>
+    </style>
+
+    <!-- The plate that names the bookcase on its top rail, and every dialog; its background is an
+         ornate PlaqueDrawable set in code. -->
+    <style name="TitlePlate">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">40dp</item>
+        <item name="android:layout_gravity">center</item>
+        <item name="android:minWidth">132dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingStart">26dp</item>
+        <item name="android:paddingEnd">26dp</item>
+        <item name="android:paddingTop">0dp</item>
+        <item name="android:paddingBottom">2dp</item>
+        <item name="android:fontFamily">serif</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textSize">18dp</item>
+        <item name="android:textColor">@color/plaque_text</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:shadowColor">#99FFF6C8</item>
+        <item name="android:shadowDy">1</item>
+        <item name="android:shadowRadius">1</item>
+    </style>
+
     <style name="Theme.Ready.Reader">
         <item name="android:windowBackground">@color/black</item>
     </style>

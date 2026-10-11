@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The front face of a shelf plank, as drawn by ShelfDecoration.drawPlank: lit top edge, dark underside. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <gradient
+                android:angle="270"
+                android:endColor="#FF5C3A1E"
+                android:startColor="#FF8B5A2B" />
+        </shape>
+    </item>
+    <item android:height="1dp" android:gravity="top">
+        <shape>
+            <solid android:color="#40FFE2B0" />
+        </shape>
+    </item>
+    <item android:height="1.5dp" android:gravity="bottom">
+        <shape>
+            <solid android:color="#66000000" />
+        </shape>
+    </item>
+</layer-list>

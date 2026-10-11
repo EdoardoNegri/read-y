@@ -1,14 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The bottom 44dp (plaque plus margins) sits on the plank drawn by ShelfDecoration. The plaque's
-     background is a PlaqueDrawable set in code; its paddings keep the title clear of the screws. -->
+     background is a PlaqueDrawable set in code; its paddings keep the title clear of the screws.
+     Tapping the plaque shows the details; tapping anywhere else opens the book or the shelf. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="?attr/selectableItemBackground"
     android:orientation="vertical"
     android:paddingEnd="9dp"
-    android:paddingStart="9dp"
-    android:paddingTop="16dp">
+    android:paddingStart="9dp">
+
+    <!-- The free space under the shelf above. It holds the bar that shows how far a book is read,
+         clear of the cover; ShelfAdapter makes it lower for a case, which stands taller. -->
+    <FrameLayout
+        android:id="@+id/gap"
+        android:layout_width="match_parent"
+        android:layout_height="16dp">
+
+        <ProgressBar
+            android:id="@+id/progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="9dp"
+            android:layout_gravity="bottom"
+            android:layout_marginBottom="3dp"
+            android:max="100"
+            android:progressDrawable="@drawable/reading_progress"
+            android:visibility="gone" />
+    </FrameLayout>
 
     <FrameLayout
         android:layout_width="match_parent"
@@ -22,24 +41,24 @@
             android:scaleType="centerCrop"
             android:importantForAccessibility="no" />
 
-        <ImageView
-            android:id="@+id/star"
-            android:layout_width="22dp"
-            android:layout_height="22dp"
-            android:layout_gravity="top|end"
-            android:layout_margin="3dp"
-            android:contentDescription="@string/favorite"
-            android:src="@drawable/ic_star"
-            android:visibility="gone" />
-
-        <ProgressBar
-            android:id="@+id/progress"
-            style="?android:attr/progressBarStyleHorizontal"
+        <!-- The shelf the book stands on, shown on the books a search found. -->
+        <TextView
+            android:id="@+id/place"
             android:layout_width="match_parent"
-            android:layout_height="4dp"
+            android:layout_height="wrap_content"
             android:layout_gravity="bottom"
-            android:max="100"
-            android:progressTint="@color/gold_light"
+            android:background="#E61A0F08"
+            android:ellipsize="middle"
+            android:fontFamily="serif"
+            android:gravity="center"
+            android:paddingBottom="3dp"
+            android:paddingEnd="4dp"
+            android:paddingStart="4dp"
+            android:paddingTop="3dp"
+            android:singleLine="true"
+            android:textColor="@color/gold_light"
+            android:textSize="11sp"
+            android:textStyle="italic"
             android:visibility="gone" />
     </FrameLayout>
 

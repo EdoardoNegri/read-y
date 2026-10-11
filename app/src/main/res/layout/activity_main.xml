@@ -6,6 +6,47 @@
     android:background="@color/wood_dark"
     android:orientation="vertical">
 
+    <include layout="@layout/top_bar" />
+
+    <!-- Shown while searching; what is typed is looked for on this shelf and all those inside it. -->
+    <LinearLayout
+        android:id="@+id/searchRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/shelf_plank"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingBottom="8dp"
+        android:paddingStart="12dp"
+        android:paddingTop="4dp"
+        android:visibility="gone">
+
+        <EditText
+            android:id="@+id/query"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:background="@drawable/field"
+            android:fontFamily="serif"
+            android:hint="@string/search_hint"
+            android:imeOptions="actionSearch|flagNoExtractUi"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:paddingEnd="12dp"
+            android:paddingStart="12dp"
+            android:textColor="@color/cream"
+            android:textColorHint="@color/gold_dark"
+            android:textSize="16sp" />
+
+        <ImageButton
+            android:id="@+id/closeSearch"
+            android:layout_width="48dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/close"
+            android:src="@drawable/ic_close" />
+    </LinearLayout>
+
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -27,16 +68,65 @@
             android:scaleType="fitXY"
             android:visibility="gone" />
 
+        <!-- The shadow the top rail casts into the case. -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="10dp"
+            android:background="@drawable/shelf_shade"
+            android:translationZ="2dp" />
+
+        <!-- Shown for a few seconds after something was deleted. -->
+        <LinearLayout
+            android:id="@+id/undoBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:layout_marginBottom="16dp"
+            android:layout_marginEnd="20dp"
+            android:layout_marginStart="20dp"
+            android:background="@drawable/panel_wood"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingBottom="10dp"
+            android:paddingEnd="12dp"
+            android:paddingStart="16dp"
+            android:paddingTop="10dp"
+            android:translationZ="4dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/undoText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="middle"
+                android:fontFamily="serif"
+                android:singleLine="true"
+                android:textColor="@color/cream"
+                android:textSize="15sp" />
+
+            <!-- The background is a PlaqueDrawable set in code. -->
+            <TextView
+                android:id="@+id/undo"
+                style="@style/BrassButton"
+                android:layout_width="wrap_content"
+                android:layout_marginStart="12dp"
+                android:paddingEnd="22dp"
+                android:paddingStart="22dp"
+                android:text="@string/undo" />
+        </LinearLayout>
+
         <LinearLayout
             android:id="@+id/empty"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
             android:layout_margin="24dp"
-            android:background="@drawable/plaque"
+            android:background="@drawable/panel_wood"
             android:gravity="center"
             android:orientation="vertical"
-            android:padding="20dp"
+            android:padding="22dp"
+            android:translationZ="3dp"
             android:visibility="gone">
 
             <TextView
@@ -45,17 +135,19 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="serif"
                 android:gravity="center"
-                android:textColor="@color/plaque_text"
+                android:lineSpacingExtra="3dp"
+                android:textColor="@color/cream"
                 android:textSize="15sp" />
 
-            <Button
+            <!-- The background is a PlaqueDrawable set in code. -->
+            <TextView
                 android:id="@+id/grant"
+                style="@style/BrassButton"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:backgroundTint="@color/wood_dark"
-                android:text="@string/grant_access"
-                android:textColor="@color/gold_light" />
+                android:layout_marginTop="18dp"
+                android:paddingEnd="24dp"
+                android:paddingStart="24dp"
+                android:text="@string/grant_access" />
         </LinearLayout>
     </FrameLayout>
 </LinearLayout>
