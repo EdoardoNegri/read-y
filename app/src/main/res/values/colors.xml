@@ -12,5 +12,4 @@
     <!-- Menus and the settings screen: the dark wood of the back of the case. -->
     <color name="panel">#FF2A1A10</color>
     <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
 </resources>

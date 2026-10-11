@@ -1,4 +1,4 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">Read-y</string>
     <string name="widget_name">Favorite books</string>
     <string name="widget_description">Your favorite books, one tap away</string>
@@ -15,7 +15,11 @@
     <string name="name_taken">That name cannot be used, or something here already has it.</string>
     <string name="cannot_move">It cannot go there: something of the same name is already on that shelf.</string>
     <string name="select">Select</string>
-    <string name="picked">%1$d selected</string>
+    <plurals name="picked">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <string name="chosen">\u2713  %1$s</string>
     <string name="move">Move</string>
     <string name="move_to">Move to</string>
     <string name="nowhere_to_move">There is no other shelf to move them to.</string>
@@ -53,7 +57,7 @@
     <string name="name">Name</string>
     <string name="delete">Delete</string>
     <string name="delete_book">%1$s will be deleted from the phone.</string>
-    <string name="delete_shelf">The shelf %1$s will be deleted from the phone with everything on it: %2$d books and %3$d shelves.</string>
+    <string name="delete_shelf" tools:ignore="PluralsCandidate">The shelf %1$s will be deleted from the phone with everything on it: %2$d books and %3$d shelves.</string>
     <string name="deleted">%1$s deleted</string>
     <string name="undo">Undo</string>
     <string name="cannot_import">That file is neither an EPUB nor a PDF, or it could not be read.</string>

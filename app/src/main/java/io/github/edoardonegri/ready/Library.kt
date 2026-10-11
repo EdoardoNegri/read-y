@@ -28,6 +28,9 @@ import android.text.TextUtils
 import android.util.Log
 import android.util.LruCache
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.withTranslation
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -142,7 +145,7 @@ object Library {
         Sort.values().getOrElse(libraryPrefs(ctx).getInt(SORT, 0)) { Sort.MANUAL }
 
     fun setSort(ctx: Context, sort: Sort) {
-        libraryPrefs(ctx).edit().putInt(SORT, sort.ordinal).apply()
+        libraryPrefs(ctx).edit { putInt(SORT, sort.ordinal) }
         stamp++
     }
 
@@ -157,7 +160,7 @@ object Library {
     }
 
     fun setOrder(ctx: Context, dir: File, names: List<String>) {
-        libraryPrefs(ctx).edit().putString(ORDER + dir.path, JSONArray(names).toString()).apply()
+        libraryPrefs(ctx).edit { putString(ORDER + dir.path, JSONArray(names).toString()) }
         stamp++
     }
 
@@ -221,7 +224,7 @@ object Library {
             val names = order(ctx, parent)
             if (f.name in names) setOrder(ctx, parent, names.map { if (it == f.name) target.name else it })
         }
-        if (!target.isDirectory) libraryPrefs(ctx).edit().putString(TITLE + target.path, clean).apply()
+        if (!target.isDirectory) libraryPrefs(ctx).edit { putString(TITLE + target.path, clean) }
         stamp++
         return target
     }
@@ -306,21 +309,23 @@ object Library {
         val o = JSONObject(backupFile().readText())
         val base = root().path
         fun paths(key: String) = o.optJSONArray(key).let { a -> if (a == null) emptySet() else List(a.length()) { base + a.getString(it) }.toHashSet() }
-        val state = statePrefs(ctx).edit()
-        o.optJSONObject("positions")?.let { for (key in it.keys()) state.putString(base + key, it.getString(key)) }
-        state.putStringSet(FAVORITES, paths("favorites")).putStringSet(FINISHED, paths("finished")).apply()
-        val library = libraryPrefs(ctx).edit()
-        o.optJSONObject("orders")?.let { for (key in it.keys()) library.putString(ORDER + base + key, it.getString(key)) }
-        o.optJSONObject("titles")?.let { for (key in it.keys()) library.putString(TITLE + base + key, it.getString(key)) }
-        library.putInt(SORT, o.optInt("sort")).apply()
-        val reader = ctx.getSharedPreferences("reader", Context.MODE_PRIVATE).edit()
-        o.optJSONObject("settings")?.let {
-            for (key in it.keys()) when (val value = it.get(key)) {
-                is Boolean -> reader.putBoolean(key, value)
-                is Int -> reader.putInt(key, value)
+        statePrefs(ctx).edit {
+            o.optJSONObject("positions")?.let { for (key in it.keys()) putString(base + key, it.getString(key)) }
+            putStringSet(FAVORITES, paths("favorites")).putStringSet(FINISHED, paths("finished"))
+        }
+        libraryPrefs(ctx).edit {
+            o.optJSONObject("orders")?.let { for (key in it.keys()) putString(ORDER + base + key, it.getString(key)) }
+            o.optJSONObject("titles")?.let { for (key in it.keys()) putString(TITLE + base + key, it.getString(key)) }
+            putInt(SORT, o.optInt("sort"))
+        }
+        ctx.getSharedPreferences("reader", Context.MODE_PRIVATE).edit {
+            o.optJSONObject("settings")?.let {
+                for (key in it.keys()) when (val value = it.get(key)) {
+                    is Boolean -> putBoolean(key, value)
+                    is Int -> putInt(key, value)
+                }
             }
         }
-        reader.apply()
         stamp++
         FavoritesWidget.refresh(ctx)
         true
@@ -407,32 +412,30 @@ object Library {
     private fun remember(ctx: Context, old: String, new: String?) {
         fun within(path: String) = path == old || path.startsWith(old + File.separator)
         fun moved(path: String) = new + path.removePrefix(old)
-        for (prefs in arrayOf(statePrefs(ctx), metaPrefs(ctx))) {
-            val e = prefs.edit()
+        for (prefs in arrayOf(statePrefs(ctx), metaPrefs(ctx))) prefs.edit {
             for ((key, value) in prefs.all) if (value is String && within(key)) {
-                e.remove(key)
-                if (new != null) e.putString(moved(key), value)
+                remove(key)
+                if (new != null) putString(moved(key), value)
             }
-            e.apply()
         }
         for (key in arrayOf(FAVORITES, FINISHED)) {
             val paths = statePrefs(ctx).getStringSet(key, null) ?: continue
             if (paths.none(::within)) continue
             val kept = HashSet<String>()
             for (path in paths) if (!within(path)) kept.add(path) else if (new != null) kept.add(moved(path))
-            statePrefs(ctx).edit().putStringSet(key, kept).apply()
+            statePrefs(ctx).edit { putStringSet(key, kept) }
         }
         openBook(ctx)?.let { if (within(it.path)) setOpenBook(ctx, if (new == null) null else File(moved(it.path))) }
         val library = libraryPrefs(ctx)
-        val e = library.edit()
-        for ((key, value) in library.all) for (kind in arrayOf(ORDER, TITLE)) {
-            val path = key.removePrefix(kind)
-            if (key.startsWith(kind) && value is String && within(path)) {
-                e.remove(key)
-                if (new != null) e.putString(kind + moved(path), value)
+        library.edit {
+            for ((key, value) in library.all) for (kind in arrayOf(ORDER, TITLE)) {
+                val path = key.removePrefix(kind)
+                if (key.startsWith(kind) && value is String && within(path)) {
+                    remove(key)
+                    if (new != null) putString(kind + moved(path), value)
+                }
             }
         }
-        e.apply()
     }
 
     /**
@@ -509,7 +512,7 @@ object Library {
                     pages = r.pageCount
                     if (pages > 0) r.openPage(0).use { p ->
                         val h = (COVER_W.toFloat() * p.height / p.width).toInt().coerceIn(1, COVER_W * 3)
-                        val b = Bitmap.createBitmap(COVER_W, h, Bitmap.Config.ARGB_8888)
+                        val b = createBitmap(COVER_W, h, Bitmap.Config.ARGB_8888)
                         b.eraseColor(Color.WHITE)
                         p.render(b, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                         bmp = b
@@ -529,7 +532,7 @@ object Library {
         }
         val o = JSONObject().put("sig", sig(f)).put("v", META_VERSION).put("title", title).put("author", author)
             .put("pages", pages).put("chapters", chapters)
-        metaPrefs(ctx).edit().putString(f.path, o.toString()).apply()
+        metaPrefs(ctx).edit { putString(f.path, o.toString()) }
         return named(ctx, f, meta)
     }
 
@@ -565,7 +568,7 @@ object Library {
         val w = spec.width.toFloat()
         val h = spec.miniH.toFloat()
         val rail = spec.rail.toFloat()
-        val bmp = Bitmap.createBitmap(COVER_W, (COVER_W * h / w).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        val bmp = createBitmap(COVER_W, (COVER_W * h / w).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         // Draw in real case pixels.
         c.scale(COVER_W / w, COVER_W / w)
@@ -628,16 +631,10 @@ object Library {
                 .setMaxLines(2)
                 .setEllipsize(TextUtils.TruncateAt.END)
                 .build()
-            c.save()
-            c.translate((plaque.left + inset).toFloat(), plaque.top + (faceHeight - text.height) / 2f)
-            text.draw(c)
-            c.restore()
+            c.withTranslation((plaque.left + inset).toFloat(), plaque.top + (faceHeight - text.height) / 2f) { text.draw(c) }
         }
 
-        c.save()
-        c.translate(0f, rail)
-        ShelfDecoration.drawCase(c, w, h - rail, spec, paint)
-        c.restore()
+        c.withTranslation(0f, rail) { ShelfDecoration.drawCase(c, w, h - rail, spec, paint) }
         ShelfDecoration.drawRail(c, w, rail, spec.density, paint)
         paint.shader = null
         if (depth == 0) bitmaps.put(folderKey(dir, spec), bmp)
@@ -676,7 +673,7 @@ object Library {
     private fun placeholder(title: String, author: String): Bitmap {
         val w = COVER_W
         val h = w * 3 / 2
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val bmp = createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val leather = intArrayOf(
             0xFF5B1A1A.toInt(), 0xFF1F3A5F.toInt(), 0xFF234D32.toInt(), 0xFF4A2C5A.toInt(), 0xFF5A3A1A.toInt(),
@@ -704,16 +701,10 @@ object Library {
         }
 
         val t = text(title, 36f, Typeface.BOLD, 6)
-        c.save()
-        c.translate(36f, (h - t.height) / 2f - 24f)
-        t.draw(c)
-        c.restore()
+        c.withTranslation(36f, (h - t.height) / 2f - 24f) { t.draw(c) }
         if (author.isNotBlank()) {
             val a = text(author, 24f, Typeface.ITALIC, 2)
-            c.save()
-            c.translate(36f, h - 44f - a.height)
-            a.draw(c)
-            c.restore()
+            c.withTranslation(36f, h - 44f - a.height) { a.draw(c) }
         }
         return bmp
     }
@@ -738,14 +729,14 @@ object Library {
     fun saveState(ctx: Context, f: File, s: BookState) {
         val o = JSONObject().put("chapter", s.chapter).put("fraction", s.fraction.toDouble())
             .put("percent", s.percent.toDouble()).put("lastRead", s.lastRead)
-        statePrefs(ctx).edit().putString(f.path, o.toString()).apply()
+        statePrefs(ctx).edit { putString(f.path, o.toString()) }
     }
 
     /** The book currently open in the reader, remembered so that it is reopened after the app was closed. */
     fun openBook(ctx: Context): File? = statePrefs(ctx).getString(OPEN_BOOK, null)?.let(::File)
 
     fun setOpenBook(ctx: Context, f: File?) {
-        statePrefs(ctx).edit().apply { if (f == null) remove(OPEN_BOOK) else putString(OPEN_BOOK, f.path) }.apply()
+        statePrefs(ctx).edit { if (f == null) remove(OPEN_BOOK) else putString(OPEN_BOOK, f.path) }
     }
 
     private fun favoritePaths(ctx: Context): Set<String> =
@@ -756,7 +747,7 @@ object Library {
     fun setFavorite(ctx: Context, f: File, on: Boolean) {
         val set = HashSet(favoritePaths(ctx))
         if (on) set.add(f.path) else set.remove(f.path)
-        statePrefs(ctx).edit().putStringSet(FAVORITES, set).apply()
+        statePrefs(ctx).edit { putStringSet(FAVORITES, set) }
         stamp++
         FavoritesWidget.refresh(ctx)
     }
@@ -767,7 +758,7 @@ object Library {
     fun setFinished(ctx: Context, f: File, on: Boolean) {
         val set = HashSet(statePrefs(ctx).getStringSet(FINISHED, null) ?: emptySet())
         if (on) set.add(f.path) else set.remove(f.path)
-        statePrefs(ctx).edit().putStringSet(FINISHED, set).apply()
+        statePrefs(ctx).edit { putStringSet(FINISHED, set) }
         stamp++
     }
 

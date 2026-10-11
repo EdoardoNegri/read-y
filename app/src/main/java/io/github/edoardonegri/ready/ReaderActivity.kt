@@ -2,7 +2,6 @@ package io.github.edoardonegri.ready
 
 import android.content.Intent
 import android.content.pm.ActivityInfo
-import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -19,6 +18,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.isVisible
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -46,6 +46,11 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         super.onCreate(savedInstanceState)
         s = ReaderSettings(this)
         setContentView(R.layout.activity_reader)
+        // The page covers the whole window, so the window need not paint anything under it.
+        window.setBackgroundDrawable(null)
+        // A page of text stands still; a screen that can refresh faster than 60 times a second
+        // gains nothing from doing so here and only uses more power.
+        if (Build.VERSION.SDK_INT >= 30) window.attributes = window.attributes.apply { preferredRefreshRate = 60f }
         root = findViewById(R.id.root)
         content = findViewById(R.id.content)
         menu = findViewById(R.id.menu)
@@ -75,6 +80,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
             return
         }
         state = Library.state(this, file)
+        finished = Library.isFinished(this, file)
         val opened = try {
             if (Library.isEpub(file)) EpubEngine(this, file, s, state, this)
             else PdfEngine(this, file, s, state, this)
@@ -121,7 +127,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         })
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (menu.visibility == View.VISIBLE) menu.visibility = View.GONE else leave()
+                if (menu.isVisible) menu.visibility = View.GONE else leave()
             }
         })
 
@@ -135,8 +141,16 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         }
     }
 
+    override fun onPause() {
+        // The place in the book is written down when the reader leaves, however briefly.
+        savePosition()
+        engine?.pause()
+        super.onPause()
+    }
+
     override fun onResume() {
         super.onResume()
+        engine?.resume()
         if (settingsOpened) {
             settingsOpened = false
             applyBrightness()
@@ -202,19 +216,9 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
 
     // ---- applying settings ----
 
-    private fun applyBrightness() {
-        val lp = window.attributes
-        lp.screenBrightness =
-            if (s.brightness < 0) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-            else (s.brightness / 100f).coerceIn(0.01f, 1f)
-        window.attributes = lp
-        if (s.keepScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-    }
+    private fun applyBrightness() = s.light(window, mayStayOn = true)
 
-    private fun applyWarmth() {
-        warmth.setBackgroundColor(Color.argb((s.warmth * 1.4f).toInt(), 255, 140, 30))
-    }
+    private fun applyWarmth() = s.warm(warmth)
 
     private fun applyLayout() {
         requestedOrientation = when (s.orientation) {
@@ -234,7 +238,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
     // ---- input ----
 
     override fun onTap(x: Float, y: Float) {
-        if (menu.visibility == View.VISIBLE) {
+        if (menu.isVisible) {
             menu.visibility = View.GONE
             return
         }
@@ -251,7 +255,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
     }
 
     override fun onSwipe(direction: Int) {
-        if (menu.visibility == View.VISIBLE) return
+        if (menu.isVisible) return
         if ((direction < 0) != s.reverseSwipe) engine?.next() else engine?.prev()
     }
 
@@ -275,9 +279,15 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         state.fraction = fraction
         state.percent = percent
         state.lastRead = System.currentTimeMillis()
-        Library.saveState(this, file, state)
+        // Scrolling reports its place several times a second; writing each one down would keep
+        // the storage busy for nothing. It is saved now and then, and whenever the reader leaves.
+        unsaved = true
+        if (state.lastRead - savedAt > SAVE_EVERY_MS) savePosition()
         // Reaching the end marks the book as finished; taking the mark off again is up to the reader.
-        if (percent >= 0.999f && !Library.isFinished(this, file)) Library.setFinished(this, file, true)
+        if (percent >= 0.999f && !finished) {
+            finished = true
+            Library.setFinished(this, file, true)
+        }
         shown = getString(R.string.position_format, label, (percent * 100).roundToInt())
         position.text = shown
         pageNumber.text = label
@@ -285,7 +295,22 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         chapters.current = marked.indexOfLast { it <= (engine?.currentContent ?: -1) }
     }
 
+    /** The place in the book has changed since it was last written down, at [savedAt]. */
+    private var unsaved = false
+    private var savedAt = 0L
+
+    /** The book was marked as finished here, or already was when it was opened. */
+    private var finished = false
+
+    private fun savePosition() {
+        if (!unsaved) return
+        unsaved = false
+        savedAt = System.currentTimeMillis()
+        Library.saveState(this, file, state)
+    }
+
     companion object {
         const val EXTRA_PATH = "path"
+        private const val SAVE_EVERY_MS = 5000L
     }
 }

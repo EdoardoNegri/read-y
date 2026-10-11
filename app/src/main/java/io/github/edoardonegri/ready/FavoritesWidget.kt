@@ -17,6 +17,8 @@ import android.os.Bundle
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
+import androidx.core.content.edit
+import androidx.core.graphics.createBitmap
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -139,8 +141,8 @@ private class WidgetShelf(ctx: Context, manager: AppWidgetManager, id: Int) {
         val prefs = prefs(ctx)
         var two = prefs.getInt(TWO + id, 0)
         var four = prefs.getInt(FOUR + id, 0)
-        if (two == 0 && reportedH > 0) prefs.edit().putInt(TWO + id, h).apply()
-        if (four == 0 && reportedW > 0) prefs.edit().putInt(FOUR + id, inner).apply()
+        if (two == 0 && reportedH > 0) prefs.edit { putInt(TWO + id, h) }
+        if (four == 0 && reportedW > 0) prefs.edit { putInt(FOUR + id, inner) }
         if (two == 0) two = h
         if (four == 0) four = inner
         val cellW = four / 4f
@@ -169,7 +171,7 @@ private class WidgetShelf(ctx: Context, manager: AppWidgetManager, id: Int) {
         private fun prefs(ctx: Context) = ctx.getSharedPreferences("widget", Context.MODE_PRIVATE)
 
         fun forget(ctx: Context, ids: IntArray) {
-            prefs(ctx).edit().apply { for (id in ids) remove(TWO + id).remove(FOUR + id) }.apply()
+            prefs(ctx).edit { for (id in ids) remove(TWO + id).remove(FOUR + id) }
         }
     }
 }
@@ -219,7 +221,7 @@ private class Shelves(private val ctx: Context, id: Int) {
         val shown = (shelf.coverW * dm.density).toInt().coerceAtLeast(1)
         val w = minOf(shown, MAX_COVER_W)
         val h = (w * shelf.placeH / shelf.coverW).roundToInt().coerceAtLeast(1)
-        return Bitmap.createBitmap(w, h, config).apply { density = dm.densityDpi * w / shown }
+        return createBitmap(w, h, config).apply { density = dm.densityDpi * w / shown }
             .also { bytes += it.allocationByteCount }
     }
 

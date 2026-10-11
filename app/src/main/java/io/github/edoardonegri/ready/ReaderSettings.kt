@@ -1,6 +1,11 @@
 package io.github.edoardonegri.ready
 
 import android.content.Context
+import android.graphics.Color
+import android.view.View
+import android.view.Window
+import android.view.WindowManager
+import androidx.core.content.edit
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
 
@@ -13,13 +18,13 @@ class ReaderSettings(ctx: Context) {
     private fun int(def: Int) = object : ReadWriteProperty<Any?, Int> {
         override fun getValue(thisRef: Any?, property: KProperty<*>) = p.getInt(property.name, def)
         override fun setValue(thisRef: Any?, property: KProperty<*>, value: Int) =
-            p.edit().putInt(property.name, value).apply()
+            p.edit { putInt(property.name, value) }
     }
 
     private fun bool(def: Boolean) = object : ReadWriteProperty<Any?, Boolean> {
         override fun getValue(thisRef: Any?, property: KProperty<*>) = p.getBoolean(property.name, def)
         override fun setValue(thisRef: Any?, property: KProperty<*>, value: Boolean) =
-            p.edit().putBoolean(property.name, value).apply()
+            p.edit { putBoolean(property.name, value) }
     }
 
     /** 1..100, or -1 to follow the system brightness. */
@@ -30,9 +35,6 @@ class ReaderSettings(ctx: Context) {
 
     /** Light lettering on dark pages. */
     var darkMode by bool(false)
-
-    /** Index into [THEMES]: light pages, or dark ones in [darkMode]. */
-    val theme get() = if (darkMode) 2 else 0
 
     /** Shows the page being read in small print at the foot of the page. */
     var showPage by bool(false)
@@ -70,14 +72,36 @@ class ReaderSettings(ctx: Context) {
     var keepScreenOn by bool(false)
     var hintShown by bool(false)
 
-    val palette get() = THEMES[theme.coerceIn(0, THEMES.lastIndex)]
+    val palette get() = if (darkMode) DARK else LIGHT
+
+    /**
+     * Gives [window] the brightness chosen for reading, and keeps the screen on if [mayStayOn] and
+     * the reader asked for that.
+     */
+    fun light(window: Window, mayStayOn: Boolean) {
+        val lp = window.attributes
+        lp.screenBrightness =
+            if (brightness < 0) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            else (brightness / 100f).coerceIn(0.01f, 1f)
+        window.attributes = lp
+        if (mayStayOn && keepScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    /**
+     * Tints [overlay], a view lying over the page, with the warm light chosen. Without any it is
+     * taken away altogether, so that the screen is not blended with an invisible layer on every frame.
+     */
+    fun warm(overlay: View) {
+        overlay.visibility = if (warmth > 0) View.VISIBLE else View.GONE
+        overlay.setBackgroundColor(Color.argb((warmth * 1.4f).toInt(), 255, 140, 30))
+    }
 
     companion object {
-        val THEMES = arrayOf(
-            Palette(0xFFFFFFFF.toInt(), 0xFF1A1A1A.toInt(), 0xFF1A5FB4.toInt()),
-            Palette(0xFFF4ECD8.toInt(), 0xFF3B2F1E.toInt(), 0xFF8A4B08.toInt()),
-            Palette(0xFF121212.toInt(), 0xFFC8C8C8.toInt(), 0xFF8AB4F8.toInt()),
-        )
+        private val LIGHT = Palette(0xFFFFFFFF.toInt(), 0xFF1A1A1A.toInt(), 0xFF1A5FB4.toInt())
+
+        // True black: on the screens that light every dot by itself, black dots use no power.
+        private val DARK = Palette(0xFF000000.toInt(), 0xFFC8C8C8.toInt(), 0xFF8AB4F8.toInt())
 
         /** Display name to system font family; an empty family keeps the book's own fonts. */
         val FONTS = listOf(

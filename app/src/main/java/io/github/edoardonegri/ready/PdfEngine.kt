@@ -5,8 +5,6 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.ColorMatrixColorFilter
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffColorFilter
 import android.graphics.pdf.PdfRenderer
 import android.os.Handler
 import android.os.Looper
@@ -16,6 +14,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
+import androidx.core.graphics.createBitmap
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import java.io.File
@@ -139,7 +138,7 @@ class PdfEngine(
                         else min(w.toFloat() / p.width, h.toFloat() / p.height)
                     val pixels = p.width * scale * p.height * scale
                     if (pixels > MAX_PIXELS) scale *= sqrt(MAX_PIXELS / pixels)
-                    val b = Bitmap.createBitmap(
+                    val b = createBitmap(
                         (p.width * scale).toInt().coerceAtLeast(1),
                         (p.height * scale).toInt().coerceAtLeast(1),
                         Bitmap.Config.ARGB_8888,
@@ -181,18 +180,15 @@ class PdfEngine(
         pending.clear()
         cache.evictAll()
         frame.setBackgroundColor(s.palette.bg)
-        filter = when (s.theme) {
-            2 -> ColorMatrixColorFilter(
-                floatArrayOf(
-                    -1f, 0f, 0f, 0f, 255f,
-                    0f, -1f, 0f, 0f, 255f,
-                    0f, 0f, -1f, 0f, 255f,
-                    0f, 0f, 0f, 1f, 0f,
-                ),
-            )
-            1 -> PorterDuffColorFilter(s.palette.bg, PorterDuff.Mode.MULTIPLY)
-            else -> null
-        }
+        // Dark mode shows the pages with their colours turned round.
+        filter = if (s.darkMode) ColorMatrixColorFilter(
+            floatArrayOf(
+                -1f, 0f, 0f, 0f, 255f,
+                0f, -1f, 0f, 0f, 255f,
+                0f, 0f, -1f, 0f, 255f,
+                0f, 0f, 0f, 1f, 0f,
+            ),
+        ) else null
         if (s.vertical) {
             single.visibility = View.GONE
             single.setImageBitmap(null)

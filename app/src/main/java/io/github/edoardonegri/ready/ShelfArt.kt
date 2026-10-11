@@ -10,6 +10,7 @@ import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.drawable.Drawable
+import androidx.core.graphics.withTranslation
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -146,10 +147,7 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         paint.strokeWidth = 0.75f * d
         scooped(left + 3.5f * d, top + 3.5f * d, right - 3.5f * d, bottom - 3.5f * d)
         paint.color = 0x66FFF6C0
-        c.save()
-        c.translate(0.7f * d, 0.7f * d)
-        c.drawPath(path, paint)
-        c.restore()
+        c.withTranslation(0.7f * d, 0.7f * d) { c.drawPath(path, paint) }
         paint.color = 0x80503800.toInt()
         c.drawPath(path, paint)
 
@@ -203,10 +201,7 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         star.close()
         paint.style = Paint.Style.FILL
         paint.color = 0x80302000.toInt()
-        c.save()
-        c.translate(0.4f * d, 0.6f * d)
-        c.drawPath(star, paint)
-        c.restore()
+        c.withTranslation(0.4f * d, 0.6f * d) { c.drawPath(star, paint) }
         paint.shader = RadialGradient(
             x - outer * 0.3f, y - outer * 0.35f, outer * 1.4f,
             intArrayOf(0xFFFFFBE0.toInt(), 0xFFE0B840.toInt(), 0xFF7A5A12.toInt()),

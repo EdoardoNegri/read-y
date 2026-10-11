@@ -1,10 +1,10 @@
 package io.github.edoardonegri.ready
 
+import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
@@ -20,6 +20,8 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toDrawable
+import androidx.core.view.isVisible
 
 /**
  * A dialog built like the bookcase (dialog_shelf.xml): a wooden panel with a brass title plate,
@@ -28,6 +30,8 @@ import androidx.core.content.ContextCompat
  */
 class ShelfDialog(private val ctx: Context) {
     private val dialog = Dialog(ctx)
+    // A dialog has no parent to inflate its content into.
+    @SuppressLint("InflateParams")
     private val view: View = LayoutInflater.from(ctx).inflate(R.layout.dialog_shelf, null)
     private val d = ctx.resources.displayMetrics.density
     private val input: EditText = view.findViewById(R.id.dialogInput)
@@ -188,7 +192,9 @@ class ShelfDialog(private val ctx: Context) {
      */
     fun pick(labels: List<String>, chosen: Int, onPick: (Int) -> Unit) = apply {
         val buttons = labels.map { option(it) }
-        fun mark(index: Int) = buttons.forEachIndexed { i, b -> b.text = (if (i == index) "\u2713  " else "") + labels[i] }
+        fun mark(index: Int) = buttons.forEachIndexed { i, b ->
+            b.text = if (i == index) ctx.getString(R.string.chosen, labels[i]) else labels[i]
+        }
         mark(chosen)
         buttons.forEachIndexed { i, b ->
             b.setOnClickListener {
@@ -233,8 +239,8 @@ class ShelfDialog(private val ctx: Context) {
     fun show() {
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
         dialog.setContentView(view)
-        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-        if (input.visibility == View.VISIBLE) {
+        dialog.window?.setBackgroundDrawable(Color.TRANSPARENT.toDrawable())
+        if (input.isVisible) {
             dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
             input.requestFocus()
         }

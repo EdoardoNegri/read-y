@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Xml
+import androidx.core.graphics.scale
 import org.xmlpull.v1.XmlPullParser
 import java.io.Closeable
 import java.io.File
@@ -246,7 +247,7 @@ class EpubBook private constructor(private val zip: ZipFile) : Closeable {
         opts.inJustDecodeBounds = false
         val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return null
         if (bmp.width <= maxWidth) return bmp
-        return Bitmap.createScaledBitmap(bmp, maxWidth, (maxWidth.toFloat() * bmp.height / bmp.width).toInt().coerceAtLeast(1), true)
+        return bmp.scale(maxWidth, (maxWidth.toFloat() * bmp.height / bmp.width).toInt().coerceAtLeast(1))
     }
 
     override fun close() = zip.close()

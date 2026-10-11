@@ -7,9 +7,11 @@
      The places are spelled out because views added to a list item at run time come out with the
      wrong pictures once the launcher refreshes the list. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical">
+    android:orientation="vertical"
+    tools:ignore="ContentDescription">
 
     <FrameLayout
         android:layout_width="match_parent"

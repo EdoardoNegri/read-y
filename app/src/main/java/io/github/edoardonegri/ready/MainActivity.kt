@@ -1,44 +1,39 @@
 package io.github.edoardonegri.ready
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.LinearGradient
-import android.graphics.Paint
 import android.graphics.Rect
-import android.graphics.Shader
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
 import android.text.format.Formatter
 import android.view.DragEvent
-import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.ImageView
-import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.core.graphics.createBitmap
+import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnPreDraw
+import androidx.core.view.isVisible
 import androidx.core.widget.doAfterTextChanged
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
-import java.util.TreeSet
 import kotlin.math.roundToInt
 
 /**
@@ -71,7 +66,7 @@ class MainActivity : AppCompatActivity() {
     /** Counts the searches started, so that a slow one cannot overwrite a later one. */
     private var searches = 0
 
-    private val searching get() = searchRow.visibility == View.VISIBLE
+    private val searching get() = searchRow.isVisible
 
     private val back = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() = when {
@@ -181,7 +176,7 @@ class MainActivity : AppCompatActivity() {
             if (results == null && atRoot && books.isNotEmpty()) listOf(Library.favoritesShelf()) + books else books
         back.isEnabled = !atRoot || searching || picked != null
         adapter.picked = picked
-        findViewById<TextView>(R.id.selectCount).text = getString(R.string.picked, picked?.size ?: 0)
+        findViewById<TextView>(R.id.selectCount).text = (picked?.size ?: 0).let { resources.getQuantityString(R.plurals.picked, it, it) }
         up.visibility = if (back.isEnabled) View.VISIBLE else View.INVISIBLE
         barTitle.text = shelfName(current)
         // Books found on several shelves each say which one they stand on.
@@ -525,7 +520,7 @@ class MainActivity : AppCompatActivity() {
     private fun snapshotShelf(): Bitmap? {
         if (shelf.width == 0 || shelf.height == 0) return null
         return try {
-            Bitmap.createBitmap(shelf.width, shelf.height, Bitmap.Config.RGB_565).also { shelf.draw(Canvas(it)) }
+            createBitmap(shelf.width, shelf.height, Bitmap.Config.RGB_565).also { shelf.draw(Canvas(it)) }
         } catch (e: OutOfMemoryError) {
             null
         }
@@ -612,7 +607,7 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= 30) {
             try {
                 startActivity(
-                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")),
+                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, "package:$packageName".toUri()),
                 )
             } catch (e: Exception) {
                 startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
@@ -756,228 +751,5 @@ class MainActivity : AppCompatActivity() {
         private const val ZOOM_MS = 560L
         private const val MOVE_MS = 180L
         private const val UNDO_MS = 10000L
-    }
-}
-
-/**
- * The places on a shelf. Tapping one opens it, tapping its plaque shows its details, and a long
- * press picks it up.
- */
-class ShelfAdapter(
-    private val onOpen: (File, View) -> Unit,
-    private val onInfo: (File) -> Unit,
-    private val onPickUp: (File, View) -> Unit,
-    private val spec: () -> ShelfSpec,
-) : RecyclerView.Adapter<ShelfAdapter.Holder>() {
-
-    private var items: MutableList<File> = ArrayList()
-
-    /** What stands on the shelf, in the order shown. */
-    val files: List<File> get() = items
-
-    /** While several things are being chosen: those chosen so far, which stand out from the rest. */
-    var picked: Set<File>? = null
-
-    /** Shows on each book the shelf it stands on, for books gathered from several shelves. */
-    var showPlaces = false
-
-    /** The item being dragged; its place on the shelf stays empty while it is carried about. */
-    var dragging: File? = null
-        set(value) {
-            val changed = listOfNotNull(field, value)
-            field = value
-            // Said to be a small change, so that the place is not faded over into a new view.
-            for (f in changed) indexOf(f).let { if (it >= 0) notifyItemChanged(it, "drag") }
-        }
-
-    class Holder(v: View) : RecyclerView.ViewHolder(v) {
-        val cover: RatioImageView = v.findViewById(R.id.cover)
-        val gap: View = v.findViewById(R.id.gap)
-        val progress: ProgressBar = v.findViewById(R.id.progress)
-        val place: TextView = v.findViewById(R.id.place)
-        val plaque: TextView = v.findViewById(R.id.plaque)
-        var file: File? = null
-    }
-
-    fun indexOf(f: File) = items.indexOf(f)
-
-    fun submit(list: List<File>) {
-        items = ArrayList(list)
-        notifyDataSetChanged()
-    }
-
-    /** Takes the item at [from] to the place [to], the others closing up behind it. */
-    fun move(from: Int, to: Int) {
-        items.add(to, items.removeAt(from))
-        notifyItemMoved(from, to)
-    }
-
-    override fun getItemCount() = items.size
-
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
-        Holder(LayoutInflater.from(parent.context).inflate(R.layout.item_book, parent, false)).also {
-            it.plaque.background = PlaqueDrawable(parent.resources.displayMetrics.density)
-        }
-
-    override fun onBindViewHolder(h: Holder, position: Int) {
-        val f = items[position]
-        val ctx = h.itemView.context.applicationContext
-        h.file = f
-        h.itemView.setOnClickListener { onOpen(f, it) }
-        h.plaque.setOnClickListener { onInfo(f) }
-        for (v in arrayOf(h.itemView, h.plaque)) v.setOnLongClickListener {
-            onPickUp(f, h.itemView)
-            true
-        }
-        // What is carried leaves its place empty. Its parts are hidden rather than the place as a
-        // whole, which the list makes visible again whenever it moves it.
-        val carried = f == dragging
-        val place = h.itemView as ViewGroup
-        val faint = picked.let { it != null && f !in it }
-        for (i in 0 until place.childCount) place.getChildAt(i).apply {
-            visibility = if (carried) View.INVISIBLE else View.VISIBLE
-            alpha = if (faint) 0.35f else 1f
-        }
-        // A recycled view may have been left enlarged as the shelf something was dragged over.
-        h.itemView.scaleX = 1f
-        h.itemView.scaleY = 1f
-        h.place.visibility = if (showPlaces && !Library.isShelf(f)) View.VISIBLE else View.GONE
-        if (showPlaces) h.place.text = f.parentFile.let {
-            if (it == null || it == Library.root()) ctx.getString(R.string.app_name) else it.name
-        }
-        val shelfSpec = spec()
-        h.cover.binding = !Library.isShelf(f)
-        // A book fills its place; a case is narrower, stands in the middle of it and rises above
-        // the books into the gap under the shelf above, which the row's top padding gives up.
-        val rise = if (Library.isShelf(f) && shelfSpec.width > 0) shelfSpec.miniRise else 0
-        h.cover.scaleType = if (Library.isShelf(f)) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
-        h.cover.setBackgroundColor(if (Library.isShelf(f)) 0 else 0xFF24160D.toInt())
-        h.cover.ratio = 1.5f + if (rise > 0) rise.toFloat() / shelfSpec.coverW else 0f
-        h.gap.layoutParams.height = shelfSpec.px(16) - rise
-        h.gap.requestLayout()
-        val plate = h.plaque.background as PlaqueDrawable
-        if (Library.isShelf(f)) {
-            h.plaque.text = if (f == Library.favoritesShelf()) ctx.getString(R.string.favorites) else f.name
-            // The shelf of the favorites wears their plate.
-            plate.favorite = f == Library.favoritesShelf()
-            plate.finished = false
-            h.progress.visibility = View.GONE
-            if (shelfSpec.width <= 0) return
-            val preview = Library.cachedFolderPreview(f, shelfSpec)
-            h.cover.setImageBitmap(preview)
-            if (preview == null) Library.io.execute {
-                val bmp = Library.folderPreview(ctx, f, shelfSpec)
-                Library.main.post { if (h.file == f) h.cover.setImageBitmap(bmp) }
-            }
-            return
-        }
-        val st = Library.state(ctx, f)
-        // A favorite is told by its plate, which leaves the cover free.
-        plate.favorite = Library.isFavorite(ctx, f)
-        plate.finished = Library.isFinished(ctx, f)
-        h.progress.visibility = if (st.percent > 0f) View.VISIBLE else View.GONE
-        h.progress.progress = (st.percent * 100).roundToInt()
-        h.plaque.text = Library.cachedMeta(ctx, f)?.title ?: f.nameWithoutExtension
-        val cached = Library.cachedCover(f)
-        h.cover.setImageBitmap(cached)
-        if (cached == null) Library.io.execute {
-            val meta = Library.meta(ctx, f)
-            val bmp = Library.cover(ctx, f)
-            Library.main.post {
-                if (h.file == f) {
-                    h.cover.setImageBitmap(bmp)
-                    h.plaque.text = meta.title
-                }
-            }
-        }
-    }
-}
-
-/**
- * Draws the bookcase: a wooden plank under every row of books, empty shelves below the last row,
- * and on top of everything the case's side posts, which stay put while the
- * shelves scroll inside it.
- */
-class ShelfDecoration(ctx: Context, private val columns: Int) : RecyclerView.ItemDecoration() {
-    private val d = ctx.resources.displayMetrics.density
-    private val paint = Paint()
-
-    override fun onDraw(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
-        val bottoms = TreeSet<Int>()
-        var row = ShelfSpec(parent.width, columns, d).rowH.coerceAtLeast(1)
-        for (i in 0 until parent.childCount) {
-            val v = parent.getChildAt(i)
-            // Where the row is, not where a book sliding to another place happens to be on its way.
-            bottoms.add(v.bottom)
-            if (v.height > 0) row = v.height
-        }
-        for (b in bottoms) drawPlank(c, parent.width.toFloat(), b.toFloat(), d, paint)
-        var b = (if (bottoms.isEmpty()) parent.paddingTop else bottoms.last()) + row
-        while (b - (PLANK + LIP) * d < parent.height) {
-            drawPlank(c, parent.width.toFloat(), b.toFloat(), d, paint)
-            b += row
-        }
-    }
-
-    override fun onDrawOver(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
-        drawCase(c, parent.width.toFloat(), parent.height.toFloat(), ShelfSpec(parent.width, columns, d), paint)
-    }
-
-    companion object {
-        private const val PLANK = 44
-        private const val LIP = 5
-        private const val SHADE = 10
-
-        /** One plank whose front face ends at [bottom]; [d] is the display density. */
-        fun drawPlank(c: Canvas, w: Float, bottom: Float, d: Float, paint: Paint) {
-            val top = bottom - PLANK * d
-            gradient(c, w, top - LIP * d, top, 0xFF4A2E1A.toInt(), 0xFFA9743F.toInt(), paint)
-            gradient(c, w, top, bottom, 0xFF8B5A2B.toInt(), 0xFF5C3A1E.toInt(), paint)
-            // A lit front edge and a dark underside give the board some thickness.
-            paint.shader = null
-            paint.color = 0x40FFE2B0
-            c.drawRect(0f, top, w, top + d, paint)
-            paint.color = 0x66000000
-            c.drawRect(0f, bottom - 1.5f * d, w, bottom, paint)
-            paint.alpha = 255
-            gradient(c, w, bottom, bottom + SHADE * d, 0xAA000000.toInt(), 0x00000000, paint)
-        }
-
-        /** The top rail of the case, [h] tall, and its shadow: the board of the app's top bar (shelf_plank.xml). */
-        fun drawRail(c: Canvas, w: Float, h: Float, d: Float, paint: Paint) {
-            gradient(c, w, 0f, h, 0xFF8B5A2B.toInt(), 0xFF5C3A1E.toInt(), paint)
-            paint.shader = null
-            paint.color = 0x66000000
-            c.drawRect(0f, h - 1.5f * d, w, h, paint)
-            paint.alpha = 255
-            gradient(c, w, h, h + SHADE * d, 0xAA000000.toInt(), 0x00000000, paint)
-            paint.shader = null
-        }
-
-        /** The case around a shelf area of [w] by [h]: two side posts and the shadows they cast. */
-        fun drawCase(c: Canvas, w: Float, h: Float, spec: ShelfSpec, paint: Paint) {
-            val post = spec.post.toFloat()
-            val shade = 6 * spec.density
-            val wood = intArrayOf(0xFF4A2E1A.toInt(), 0xFF9A6836.toInt(), 0xFF5C3A1E.toInt())
-            paint.alpha = 255
-            for (left in floatArrayOf(0f, w - post)) {
-                paint.shader = LinearGradient(left, 0f, left + post, 0f, wood, null, Shader.TileMode.CLAMP)
-                c.drawRect(left, 0f, left + post, h, paint)
-            }
-            // Shadows the posts cast on the shelves beside them.
-            paint.shader = LinearGradient(post, 0f, post + shade, 0f, 0x88000000.toInt(), 0, Shader.TileMode.CLAMP)
-            c.drawRect(post, 0f, post + shade, h, paint)
-            paint.shader =
-                LinearGradient(w - post - shade, 0f, w - post, 0f, 0, 0x88000000.toInt(), Shader.TileMode.CLAMP)
-            c.drawRect(w - post - shade, 0f, w - post, h, paint)
-            paint.shader = null
-        }
-
-        private fun gradient(c: Canvas, w: Float, top: Float, bottom: Float, from: Int, to: Int, paint: Paint) {
-            // A shader is still multiplied by the paint alpha, which an earlier translucent colour may have lowered.
-            paint.alpha = 255
-            paint.shader = LinearGradient(0f, top, 0f, bottom, from, to, Shader.TileMode.CLAMP)
-            c.drawRect(0f, top, w, bottom, paint)
-        }
     }
 }

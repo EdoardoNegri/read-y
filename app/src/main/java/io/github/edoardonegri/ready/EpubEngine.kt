@@ -10,6 +10,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.core.net.toUri
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -50,6 +51,8 @@ class EpubEngine(
         pendingFraction = start.fraction
 
         web.settings.javaScriptEnabled = true
+        // A book is read from its file alone; nothing in it may wake the radio.
+        web.settings.blockNetworkLoads = true
         web.settings.allowFileAccess = false
         web.settings.allowContentAccess = false
         web.settings.textZoom = s.fontSize
@@ -149,7 +152,7 @@ class EpubEngine(
             .put("bg", css(p.bg))
             .put("fg", css(p.fg))
             .put("link", css(p.link))
-            .put("themed", s.theme == 2)
+            .put("themed", s.darkMode)
             .put("lh", s.lineSpacing / 10.0)
             .put("font", ReaderSettings.FONTS[s.font.coerceIn(0, ReaderSettings.FONTS.lastIndex)].second)
             .put("mh", s.marginH)
@@ -165,7 +168,7 @@ class EpubEngine(
     }
 
     private fun openLink(url: String) {
-        val uri = Uri.parse(url)
+        val uri = url.toUri()
         if (uri.host == HOST) {
             val index = book.spine.indexOf(uri.path?.removePrefix("/"))
             if (index >= 0) {
@@ -220,6 +223,11 @@ class EpubEngine(
         pendingAnchor = entry.anchor
         load()
     }
+
+    /** Stops the page's scripts and drawing while the reader is not on screen. */
+    override fun pause() = web.onPause()
+
+    override fun resume() = web.onResume()
 
     override fun next() = step(1)
     override fun prev() = step(-1)

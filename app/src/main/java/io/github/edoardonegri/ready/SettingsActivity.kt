@@ -1,11 +1,9 @@
 package io.github.edoardonegri.ready
 
-import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
 import android.util.TypedValue
 import android.view.View
-import android.view.WindowManager
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -49,17 +47,9 @@ class SettingsActivity : AppCompatActivity() {
         applyPage()
     }
 
-    private fun applyBrightness() {
-        val lp = window.attributes
-        lp.screenBrightness =
-            if (s.brightness < 0) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-            else (s.brightness / 100f).coerceIn(0.01f, 1f)
-        window.attributes = lp
-    }
+    private fun applyBrightness() = s.light(window, mayStayOn = false)
 
-    private fun applyWarmth() {
-        warmth.setBackgroundColor(Color.argb((s.warmth * 1.4f).toInt(), 255, 140, 30))
-    }
+    private fun applyWarmth() = s.warm(warmth)
 
     /** Lays the sample out the way EpubEngine styles a chapter: 16px text scaled by the zoom, CSS line height. */
     private fun applyPage() {
