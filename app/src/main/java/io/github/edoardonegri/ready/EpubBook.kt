@@ -1,4 +1,4 @@
-package com.example.read_y
+package io.github.edoardonegri.ready
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory

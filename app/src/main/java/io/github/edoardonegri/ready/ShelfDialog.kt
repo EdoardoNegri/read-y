@@ -1,4 +1,4 @@
-package com.example.read_y
+package io.github.edoardonegri.ready
 
 import android.app.Dialog
 import android.content.Context

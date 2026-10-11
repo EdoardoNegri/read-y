@@ -3,13 +3,13 @@ plugins {
 }
 
 android {
-    namespace = "com.example.read_y"
+    namespace = "io.github.edoardonegri.ready"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "com.example.read_y"
+        applicationId = "io.github.edoardonegri.ready"
         minSdk = 24
         targetSdk = 37
         versionCode = 1

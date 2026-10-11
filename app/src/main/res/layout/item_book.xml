@@ -33,7 +33,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
-        <com.example.read_y.RatioImageView
+        <io.github.edoardonegri.ready.RatioImageView
             android:id="@+id/cover"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

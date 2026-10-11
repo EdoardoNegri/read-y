@@ -4,7 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <com.example.read_y.GestureFrame
+    <io.github.edoardonegri.ready.GestureFrame
         android:id="@+id/content"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
@@ -100,7 +100,7 @@
 
             <!-- The numbers of the chapters; their marks are drawn across the line of the seek bar
                  below. Tapping a number opens its chapter. -->
-            <com.example.read_y.ChapterMarks
+            <io.github.edoardonegri.ready.ChapterMarks
                 android:id="@+id/chapters"
                 android:layout_width="match_parent"
                 android:layout_height="26dp"

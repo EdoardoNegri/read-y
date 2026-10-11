@@ -1,4 +1,4 @@
-package com.example.read_y
+package io.github.edoardonegri.ready
 
 import java.io.File
 import java.io.RandomAccessFile
