@@ -19,7 +19,8 @@ import kotlin.math.sin
  * slotted screw at each end. Used as the background of the real plaques and drawn straight onto the
  * folder miniatures, so both look the same. [d] is the display density. The [ornate] plate is the
  * one that names the case on its top rail: its corners are scooped out and the engraved border
- * follows them.
+ * follows them. A [favorite] has stars and scooped corners. A [finished]
+ * book has the plate it would have anyway, of bronze instead of brass.
  */
 class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) : Drawable() {
 
@@ -47,15 +48,27 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
             }
         }
 
+    /** The plate of a book read to the end: the same plate, of bronze instead of brass. */
+    var finished = false
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidateSelf()
+            }
+        }
+
+    private val metal get() = if (finished) BRONZE else BRASS
+
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
     private val star = Path()
     private var notch = 0f
     private val r = RectF()
+    private val face = Path()
 
     override fun draw(c: Canvas) {
         if (ornate || favorite) {
-            drawScooped(c)
+            drawShaped(c)
             return
         }
         val b = bounds
@@ -76,62 +89,52 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
 
         // Dark rim, then the plate: bright where the light hits the top, darker towards the bottom.
         // Held down, it lies in the shadow of its own rim instead.
-        paint.color = 0xFF5E450C.toInt()
+        val metal = metal
+        paint.color = metal.rim
         r.set(left, top, right, bottom)
         c.drawRoundRect(r, 3 * d, 3 * d, paint)
         paint.shader = LinearGradient(
             0f, top, 0f, bottom,
-            if (sunk) intArrayOf(0xFF4A3306.toInt(), 0xFF6E5210.toInt(), 0xFF83641A.toInt(), 0xFF927222.toInt())
-            else intArrayOf(0xFFFFF3B4.toInt(), 0xFFE6C24C.toInt(), 0xFFCDA233.toInt(), 0xFF9C7418.toInt()),
+            if (sunk) SUNK else metal.plate,
             floatArrayOf(0f, 0.3f, 0.72f, 1f), Shader.TileMode.CLAMP,
         )
         r.inset(d, d)
         c.drawRoundRect(r, 2 * d, 2 * d, paint)
         if (sunk) {
             // The rim it has gone down behind casts its shadow on it from above.
-            paint.shader = LinearGradient(0f, r.top, 0f, r.top + 6 * d, 0x99000000.toInt(), 0, Shader.TileMode.CLAMP)
+            paint.shader = LinearGradient(0f, r.top, 0f, r.top + 6 * d, 0x70301400, 0, Shader.TileMode.CLAMP)
             c.drawRoundRect(r, 2 * d, 2 * d, paint)
+        } else {
+            face.rewind()
+            face.addRoundRect(r, 2 * d, 2 * d, Path.Direction.CW)
+            gloss(c, face, r.left, r.top, r.right, r.bottom)
         }
         paint.shader = null
 
         // Bevel: a lit upper edge and a shaded lower edge just inside the rim, or the other way round.
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = d
-        paint.color = if (sunk) 0x90402C00.toInt() else 0xB0FFFBDC.toInt()
+        paint.color = if (sunk) 0x90402C00.toInt() else metal.lit
         c.drawLine(left + 3 * d, top + 1.5f * d, right - 3 * d, top + 1.5f * d, paint)
-        paint.color = if (sunk) 0x70FFFBDC else 0x70402C00
+        paint.color = if (sunk) 0x70FFFBDC else metal.shade
         c.drawLine(left + 3 * d, bottom - 1.5f * d, right - 3 * d, bottom - 1.5f * d, paint)
 
         // Engraved border: a dark groove with a lighter lip just below and right of it.
         paint.strokeWidth = 0.75f * d
         r.set(left + 3.5f * d, top + 3.5f * d, right - 3.5f * d, bottom - 3.5f * d)
         r.offset(0.7f * d, 0.7f * d)
-        paint.color = 0x66FFF6C0
+        paint.color = metal.lip
         c.drawRoundRect(r, 1.5f * d, 1.5f * d, paint)
         r.offset(-0.7f * d, -0.7f * d)
-        paint.color = 0x80503800.toInt()
+        paint.color = metal.groove
         c.drawRoundRect(r, 1.5f * d, 1.5f * d, paint)
 
         val cy = (top + bottom) / 2
-        if (finished) {
-            tick(c, left + SCREW_X_DP * d, cy)
-            tick(c, right - SCREW_X_DP * d, cy)
-        } else {
-            screw(c, left + SCREW_X_DP * d, cy, 0.6f)
-            screw(c, right - SCREW_X_DP * d, cy, 2.3f)
-        }
+        screw(c, left + SCREW_X_DP * d, cy, 0.6f)
+        screw(c, right - SCREW_X_DP * d, cy, 2.3f)
     }
 
-    /** The plate of a book read to the end: a tick takes the place of a screw, or of the second star. */
-    var finished = false
-        set(value) {
-            if (field != value) {
-                field = value
-                invalidateSelf()
-            }
-        }
-
-    private fun drawScooped(c: Canvas) {
+    private fun drawShaped(c: Canvas) {
         notch = (if (ornate) NOTCH_DP else FAVORITE_NOTCH_DP) * d
         val b = bounds
         val shadow = SHADOW_DP * d
@@ -140,36 +143,37 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         val right = b.right.toFloat()
         val bottom = b.bottom - shadow
         val cy = (top + bottom) / 2
+        val metal = metal
 
         // Shadow, dark rim, then the plate, as on the plain plaque.
         paint.shader = null
         paint.style = Paint.Style.FILL
         paint.color = 0x70000000
         c.drawPath(scooped(left + d, top + shadow, right - d, bottom + shadow), paint)
-        paint.color = 0xFF5E450C.toInt()
+        paint.color = metal.rim
         c.drawPath(scooped(left, top, right, bottom), paint)
         paint.shader = LinearGradient(
-            0f, top, 0f, bottom,
-            intArrayOf(0xFFFFF3B4.toInt(), 0xFFE6C24C.toInt(), 0xFFCDA233.toInt(), 0xFF9C7418.toInt()),
-            floatArrayOf(0f, 0.3f, 0.72f, 1f), Shader.TileMode.CLAMP,
+            0f, top, 0f, bottom, metal.plate, floatArrayOf(0f, 0.3f, 0.72f, 1f), Shader.TileMode.CLAMP,
         )
         c.drawPath(scooped(left + d, top + d, right - d, bottom - d), paint)
         paint.shader = null
+        face.set(path)
+        gloss(c, face, left + d, top + d, right - d, bottom - d)
 
         // Bevel along the straight top and bottom edges.
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = d
-        paint.color = 0xB0FFFBDC.toInt()
+        paint.color = metal.lit
         c.drawLine(left + notch + 2 * d, top + 1.5f * d, right - notch - 2 * d, top + 1.5f * d, paint)
-        paint.color = 0x70402C00
+        paint.color = metal.shade
         c.drawLine(left + notch + 2 * d, bottom - 1.5f * d, right - notch - 2 * d, bottom - 1.5f * d, paint)
 
         // Engraved border that follows the scooped corners.
         paint.strokeWidth = 0.75f * d
         scooped(left + 3.5f * d, top + 3.5f * d, right - 3.5f * d, bottom - 3.5f * d)
-        paint.color = 0x66FFF6C0
+        paint.color = metal.lip
         c.withTranslation(0.7f * d, 0.7f * d) { c.drawPath(path, paint) }
-        paint.color = 0x80503800.toInt()
+        paint.color = metal.groove
         c.drawPath(path, paint)
 
         if (ornate) {
@@ -177,34 +181,30 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
             screw(c, right - ORNATE_SCREW_X_DP * d, cy, 2.3f)
         } else {
             star(c, left + STAR_X_DP * d, cy)
-            if (finished) tick(c, right - STAR_X_DP * d, cy) else star(c, right - STAR_X_DP * d, cy)
+            star(c, right - STAR_X_DP * d, cy)
         }
     }
 
-    /** A domed stud like a screw head, a little larger, with a tick cut into it. */
-    private fun tick(c: Canvas, x: Float, y: Float) {
-        val radius = 3.9f * d
+    /**
+     * The roundness of a polished plate, which bulges a little towards the light: a soft highlight that
+     * is strongest a little under the top and dies away smoothly before the middle, the lower part
+     * growing slightly darker, and the two ends a little darker too. Nothing in it has an edge.
+     * [outline] is the face of the plate, in the box [l], [t], [r], [b].
+     */
+    private fun gloss(c: Canvas, outline: Path, l: Float, t: Float, r: Float, b: Float) {
         paint.style = Paint.Style.FILL
-        paint.color = 0x80302000.toInt()
-        c.drawCircle(x + 0.4f * d, y + 0.6f * d, radius + 0.5f * d, paint)
-        paint.shader = RadialGradient(
-            x - radius * 0.35f, y - radius * 0.4f, radius * 1.5f,
-            intArrayOf(0xFFFFF8D0.toInt(), 0xFFC9A038.toInt(), 0xFF6E5210.toInt()),
-            floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP,
+        paint.shader = LinearGradient(
+            0f, t, 0f, b,
+            intArrayOf(0x44FFFFFF, 0x52FFFFFF, 0x24FFFFFF, 0x00FFFFFF, 0x00000000, 0x1C000000),
+            floatArrayOf(0f, 0.16f, 0.4f, 0.62f, 0.7f, 1f), Shader.TileMode.CLAMP,
         )
-        c.drawCircle(x, y, radius, paint)
+        c.drawPath(outline, paint)
+        paint.shader = LinearGradient(
+            l, 0f, r, 0f, intArrayOf(0x1A000000, 0x00000000, 0x00000000, 0x1A000000),
+            floatArrayOf(0f, 0.14f, 0.86f, 1f), Shader.TileMode.CLAMP,
+        )
+        c.drawPath(outline, paint)
         paint.shader = null
-        star.rewind()
-        star.moveTo(x - 2f * d, y + 0.2f * d)
-        star.lineTo(x - 0.6f * d, y + 1.6f * d)
-        star.lineTo(x + 2.1f * d, y - 1.5f * d)
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 1.1f * d
-        paint.strokeCap = Paint.Cap.ROUND
-        paint.color = 0xFF3E2C06.toInt()
-        c.drawPath(star, paint)
-        paint.strokeCap = Paint.Cap.BUTT
-        paint.style = Paint.Style.FILL
     }
 
     /** A small five-pointed stud, domed like the screws. */
@@ -297,7 +297,29 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         /** The favorite's plate: radius of its scooped corners, and where its stars sit. */
         const val FAVORITE_NOTCH_DP = 5f
         const val STAR_X_DP = 8f
+
+        /** The plain plate held down, which lies in the shadow of its own rim. */
+        private val SUNK = intArrayOf(0xFF4A3306.toInt(), 0xFF6E5210.toInt(), 0xFF83641A.toInt(), 0xFF927222.toInt())
+
+        private val BRASS = Metal(
+            rim = 0xFF5E450C.toInt(),
+            plate = intArrayOf(0xFFFFF3B4.toInt(), 0xFFE6C24C.toInt(), 0xFFCDA233.toInt(), 0xFF9C7418.toInt()),
+            lit = 0xB0FFFBDC.toInt(), shade = 0x70402C00, lip = 0x66FFF6C0, groove = 0x80503800.toInt(),
+        )
+
+        /** The metal of a plate whose book is read to the end. */
+        private val BRONZE = Metal(
+            rim = 0xFF3D2008.toInt(),
+            plate = intArrayOf(0xFFF3C79C.toInt(), 0xFFCB8A52.toInt(), 0xFFA3622F.toInt(), 0xFF6E3F18.toInt()),
+            lit = 0xB0FFE6CC.toInt(), shade = 0x70301400, lip = 0x66FFE0C0, groove = 0x80401C00.toInt(),
+        )
     }
+
+    /**
+     * What a plate is made of: the dark [rim], the [plate] gradient from top to bottom, the [lit] and
+     * [shade] edges of the bevel, and the [lip] and [groove] of the engraved border.
+     */
+    private class Metal(val rim: Int, val plate: IntArray, val lit: Int, val shade: Int, val lip: Int, val groove: Int)
 }
 
 object ShelfArt {

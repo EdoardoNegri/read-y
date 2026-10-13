@@ -78,6 +78,10 @@ class PageEngine(
     }
 
     init {
+        single.pivotX = 0f
+        single.pivotY = 0f
+        list.pivotX = 0f
+        list.pivotY = 0f
         list.layoutManager = lm
         list.adapter = adapter
         list.addOnScrollListener(object : RecyclerView.OnScrollListener() {
@@ -107,7 +111,7 @@ class PageEngine(
     /** Draws page [i] for the current view size in the background and delivers it when done. */
     private fun request(i: Int) {
         if (i !in 0 until count || cache.get(i) != null) return
-        val w = frame.width
+        val w = if (s.vertical) list.width.takeIf { it > 0 } ?: frame.width else frame.width
         val h = if (s.vertical) 0 else frame.height
         if (w == 0 || frame.height == 0 || !pending.add(i)) return
         val gen = generation
@@ -125,7 +129,8 @@ class PageEngine(
                 cache.put(i, result)
                 ratios[i] = result.height.toFloat() / result.width
                 if (!s.vertical) {
-                    if (i == page) single.setImageBitmap(result)
+                    // A page that is enlarged shows the drawing made for its size, see [zoomEnd].
+                    if (i == page && zoom == 1f) single.setImageBitmap(result)
                 } else {
                     (list.findViewHolderForAdapterPosition(i) as? Holder)?.let {
                         it.img.ratio = ratios[i]
@@ -137,6 +142,7 @@ class PageEngine(
     }
 
     private fun showSingle() {
+        resetZoom()
         single.setImageBitmap(cache.get(page))
         request(page)
         request(page + 1)
@@ -149,6 +155,7 @@ class PageEngine(
         generation++
         pending.clear()
         cache.evictAll()
+        resetZoom()
         frame.setBackgroundColor(s.palette.bg)
         // Dark mode shows print with its colours turned round; pictures stay as they are.
         filter = if (s.darkMode && source.print) INVERT else null
@@ -191,6 +198,122 @@ class PageEngine(
         }
     }
 
+    // ---- enlarging the page by pinching ----
+
+    /**
+     * How many times larger than the screen the page is drawn. A page turned one by one is drawn once and
+     * enlarged on the screen, then drawn again for its size once the fingers are lifted. In the
+     * column of pages that scroll the pages themselves grow wider, which is done at the end too,
+     * and until then the column is only enlarged on the screen, about [committed] times too small for [zoom].
+     */
+    private var zoom = 1f
+    private var committed = 1f
+
+    /** Where the enlarged page starts, from the top left of the screen: never positive. */
+    private var tx = 0f
+    private var ty = 0f
+
+    override val zoomable get() = true
+    override val zoomed get() = zoom > 1f
+
+    private fun resetZoom() {
+        for (v in arrayOf(single, list)) {
+            v.scaleX = 1f
+            v.scaleY = 1f
+            v.translationX = 0f
+            v.translationY = 0f
+        }
+        zoom = 1f
+        tx = 0f
+        ty = 0f
+        if (committed != 1f) {
+            committed = 1f
+            list.layoutParams = list.layoutParams.apply { width = ViewGroup.LayoutParams.MATCH_PARENT }
+        }
+        place()
+    }
+
+    /** Shows the page where [tx] and [ty] and the size say it is. */
+    private fun place() {
+        val w = frame.width.toFloat()
+        val h = frame.height.toFloat()
+        tx = tx.coerceIn(w * (1 - zoom), 0f)
+        ty = if (s.vertical) ty.coerceAtMost(0f) else ty.coerceIn(h * (1 - zoom), 0f)
+        val view = if (s.vertical) list else single
+        val visual = zoom / committed
+        view.scaleX = visual
+        view.scaleY = visual
+        view.translationX = tx
+        view.translationY = if (s.vertical && visual == 1f) 0f else ty
+    }
+
+    override fun zoomBy(factor: Float, x: Float, y: Float) {
+        val to = (zoom * factor).coerceIn(MIN_ZOOM, MAX_ZOOM)
+        val by = to / zoom
+        tx = x - (x - tx) * by
+        ty = y - (y - ty) * by
+        zoom = to
+        place()
+    }
+
+    override fun panBy(dx: Float, dy: Float) {
+        tx += dx
+        // The column of pages scrolls itself up and down.
+        if (!s.vertical) ty += dy
+        place()
+    }
+
+    override fun zoomEnd() {
+        if (zoom < SNAP_ZOOM) {
+            val bigger = committed != 1f
+            val page = page
+            zoom = 1f
+            if (s.vertical) commit() else {
+                resetZoom()
+                single.setImageBitmap(cache.get(page))
+            }
+            if (bigger) report()
+            return
+        }
+        if (s.vertical) {
+            commit()
+            return
+        }
+        val w = (frame.width * zoom).toInt()
+        val h = (frame.height * zoom).toInt()
+        val shown = page
+        val gen = generation
+        exec.execute {
+            val bmp = try {
+                if (closed) null else source.render(shown, w, h)
+            } catch (e: Throwable) {
+                null
+            }
+            main.post {
+                if (!closed && bmp != null && gen == generation && shown == page && zoom > 1f) single.setImageBitmap(bmp)
+            }
+        }
+    }
+
+    /** The column of pages is made as wide as [zoom] says, drawn anew, and left standing where it was on the screen. */
+    private fun commit() {
+        val visual = zoom / committed
+        if (visual == 1f) return place()
+        val at = lm.findFirstVisibleItemPosition().coerceAtLeast(0)
+        val top = lm.findViewByPosition(at)?.top ?: 0
+        val offset = (ty + top * visual).toInt()
+        committed = zoom
+        tx = tx.coerceIn(frame.width * (1 - zoom), 0f)
+        ty = 0f
+        list.layoutParams = list.layoutParams.apply { width = (frame.width * committed).toInt() }
+        generation++
+        pending.clear()
+        cache.evictAll()
+        place()
+        adapter.notifyDataSetChanged()
+        lm.scrollToPositionWithOffset(at, offset)
+    }
+
     override fun close() {
         closed = true
         exec.execute { source.close() }
@@ -198,6 +321,11 @@ class PageEngine(
     }
 
     private companion object {
+        const val MIN_ZOOM = 1f
+        const val MAX_ZOOM = 5f
+
+        /** A page pinched to less than this is let go back to the size of the screen. */
+        const val SNAP_ZOOM = 1.1f
         val INVERT = ColorMatrixColorFilter(
             floatArrayOf(
                 -1f, 0f, 0f, 0f, 255f,

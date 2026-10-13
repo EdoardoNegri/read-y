@@ -12,11 +12,13 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.DragEvent
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
@@ -264,6 +266,9 @@ class MainActivity : AppCompatActivity() {
         adapter.showPlaces = results != null && !starred
         adapter.submit(items)
         grant.visibility = View.GONE
+        // The keyboard covers the middle of the screen while searching, where the answer would be.
+        (empty.layoutParams as FrameLayout.LayoutParams).gravity =
+            if (searching) Gravity.TOP or Gravity.CENTER_HORIZONTAL else Gravity.CENTER
         empty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
         emptyText.text = when {
             results != null && starred && query.text.isBlank() -> getString(R.string.favorites_empty)
@@ -433,7 +438,6 @@ class MainActivity : AppCompatActivity() {
         search(query.text.toString())
     }
 
-    /** Puts [chosen] on the shelf [to]; what already stands there stays. */
     /**
      * A book was tapped while things are chosen. One that is chosen is let go of. Another is
      * chosen along with all the books that stand between it and what was chosen last on this

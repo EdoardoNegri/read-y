@@ -1,16 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- See ShelfDialog: a wooden panel with a brass title plate over whichever of these it is given:
      a few words, details in two columns, a text field, a column of choices, one wide brass button. The plates'
-     backgrounds are PlaqueDrawables set in code. The panel takes the first focus, so that a title
+     backgrounds are PlaqueDrawables set in code. The window behind the panel is made
+     transparent in code, so nothing is overdrawn. The panel takes the first focus, so that a title
      that can be edited does not bring the keyboard up by itself. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="@drawable/panel_wood"
     android:focusable="true"
     android:focusableInTouchMode="true"
     android:orientation="vertical"
-    android:padding="18dp">
+    android:padding="18dp"
+    tools:ignore="Overdraw">
 
     <!-- The plate in the middle, between the buttons at its sides: at the left the arrow that
          leads back, at the right the cross. Both sides

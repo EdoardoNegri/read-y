@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- A bookcase: the shelves scroll between two side posts that stay put. Each list item is one
-     whole shelf (widget_row.xml), put together by FavoritesWidget. The case is as many places
-     wide as it is shelves tall, so one of two by two is square, though the cells of a home screen
-     are not: it takes its size from an empty picture of that shape, which is made as large as
-     the widget has room for whatever the home screen says its size is, and stands in the middle.
+     whole shelf (widget_row.xml), put together by FavoritesWidget. The case fills the widget: it
+     takes its size from an empty picture of the widget's shape, which is made as large as the
+     widget has room for whatever the home screen says its size is.
      A home screen that cuts the corners of its widgets round, as Samsung's does whatever the
-     widget says, cuts those of the case: it is not made smaller to keep them. -->
+     widget says, rounds the whole widget, so the id below is on the layout it rounds, and the
+     case, which fills it, has its corners rounded with it. -->
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
+    android:id="@android:id/background"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:gravity="center">
@@ -20,7 +21,6 @@
     android:importantForAccessibility="no" />
 
 <FrameLayout
-    android:id="@android:id/background"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:layout_alignBottom="@id/shape"
@@ -28,9 +28,7 @@
     android:layout_alignRight="@id/shape"
     android:layout_alignTop="@id/shape"
     android:background="@drawable/widget_bg"
-    android:clipToOutline="true"
-    tools:ignore="RtlHardcoded"
-    tools:targetApi="31">
+    tools:ignore="RtlHardcoded">
 
     <ListView
         android:id="@+id/shelves"

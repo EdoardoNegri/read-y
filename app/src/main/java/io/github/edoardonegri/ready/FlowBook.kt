@@ -108,7 +108,8 @@ class TxtBook(file: File) : FlowBook {
         for (p in paragraphs(decode(file.readBytes()))) {
             val heading = p.length < 80 && HEADING.containsMatchIn(p)
             if (size > PART || heading && size > PART / 16) end()
-            if (heading && part.isEmpty()) name = p
+            // The first chapter heading to come names the part, though a title or two may stand before it.
+            if (heading && name == null) name = p
             val tag = if (heading) "h2" else "p"
             part.append('<').append(tag).append('>').append(p.htmlEncode()).append("</").append(tag).append('>')
             size += p.length
@@ -132,8 +133,19 @@ class TxtBook(file: File) : FlowBook {
     private companion object {
         /** About as many letters as a part holds. */
         const val PART = 24_000
+
+        /**
+         * A line that names a chapter: the word for one with its number after it, or a word such
+         * as "Prologue" that stands for one alone. A line that merely begins with one of the
+         * words, such as "Part of the problem is", is none.
+         */
         val HEADING = Regex(
-            "^\\s*(chapter|part|book|prologue|epilogue|capitolo|parte|libro|kapitel|teil|chapitre|cap[ií]tulo)\\b",
+            """^\s*(?:(?:prologue|epilogue|prologo|epilogo|prolog|epilog)\b|""" +
+                """(?:chapter|part|book|capitolo|parte|libro|kapitel|teil|chapitre|cap[ií]tulo)\s+""" +
+                """(?:\d+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|""" +
+                """uno|due|tre|quattro|cinque|sei|sette|otto|nove|dieci|primo|secondo|terzo|""" +
+                """eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|""" +
+                """un|deux|trois|quatre|cinq|sept|huit|neuf|dix|dos|cuatro|cinco|seis|siete|ocho|nueve|diez)\b)""",
             RegexOption.IGNORE_CASE,
         )
 

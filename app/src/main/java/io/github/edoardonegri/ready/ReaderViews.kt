@@ -11,6 +11,7 @@ import android.graphics.Typeface
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
@@ -351,6 +352,17 @@ class GestureFrame @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
 
         /** [direction] is +1 when the finger moved to the right, -1 to the left. */
         fun onSwipe(direction: Int)
+
+        /** Whether the page can be pinched larger, and whether it is, in which case fingers move it about. */
+        fun canZoom(): Boolean = false
+        fun zoomed(): Boolean = false
+
+        /** A pinch changed the size of the page by [factor] around ([x], [y]), and has ended. */
+        fun onZoom(factor: Float, x: Float, y: Float) {}
+        fun onZoomEnd() {}
+
+        /** A finger moved the enlarged page by ([dx], [dy]). */
+        fun onPan(dx: Float, dy: Float) {}
     }
 
     var listener: Listener? = null
@@ -362,25 +374,76 @@ class GestureFrame @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     private val swipeMin = 48 * resources.displayMetrics.density
     private var downX = 0f
     private var downY = 0f
+    private var lastX = 0f
+    private var lastY = 0f
     private var moved = false
 
+    /** Whether the page was pinched since the finger went down: nothing then is a tap or a swipe. */
+    private var pinched = false
+
+    private val pinch = ScaleGestureDetector(ctx, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+            pinched = true
+            moved = true
+            // What lay under the fingers is not scrolled along with them.
+            val cancel = MotionEvent.obtain(0L, 0L, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
+            super@GestureFrame.dispatchTouchEvent(cancel)
+            cancel.recycle()
+            return true
+        }
+
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+            listener?.onZoom(detector.scaleFactor, detector.focusX, detector.focusY)
+            return true
+        }
+
+        override fun onScaleEnd(detector: ScaleGestureDetector) {
+            listener?.onZoomEnd()
+        }
+    }).apply { isQuickScaleEnabled = false }
+
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        val l = listener
+        val zoomable = l != null && l.canZoom()
+        if (zoomable) {
+            pinch.onTouchEvent(ev)
+            if (pinch.isInProgress) {
+                lastX = ev.x
+                lastY = ev.y
+                return true
+            }
+        }
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = ev.x
                 downY = ev.y
+                lastX = ev.x
+                lastY = ev.y
                 moved = false
+                pinched = false
             }
-            MotionEvent.ACTION_MOVE ->
+            MotionEvent.ACTION_MOVE -> {
                 if (abs(ev.x - downX) > slop || abs(ev.y - downY) > slop) moved = true
+                if (zoomable && l.zoomed() && ev.pointerCount == 1 && moved) l.onPan(ev.x - lastX, ev.y - lastY)
+                lastX = ev.x
+                lastY = ev.y
+            }
             MotionEvent.ACTION_POINTER_DOWN -> moved = true
+            MotionEvent.ACTION_POINTER_UP -> {
+                // The finger left behind goes on from where it is, not from where the pinch was.
+                val index = if (ev.actionIndex == 0) 1 else 0
+                lastX = ev.getX(index)
+                lastY = ev.getY(index)
+            }
             MotionEvent.ACTION_UP -> {
                 val dx = ev.x - downX
                 val dy = ev.y - downY
-                if (!moved && ev.eventTime - ev.downTime < 400) {
-                    listener?.onTap(ev.x, ev.y)
-                } else if (ev.pointerCount == 1 && abs(dx) > swipeMin && abs(dx) > abs(dy) * 1.5f) {
-                    listener?.onSwipe(if (dx > 0) 1 else -1)
+                if (pinched) {
+                    // Nothing to do: the fingers were only moving the page.
+                } else if (!moved && ev.eventTime - ev.downTime < 400) {
+                    l?.onTap(ev.x, ev.y)
+                } else if (ev.pointerCount == 1 && !(zoomable && l.zoomed()) && abs(dx) > swipeMin && abs(dx) > abs(dy) * 1.5f) {
+                    l?.onSwipe(if (dx > 0) 1 else -1)
                 }
             }
         }

@@ -60,9 +60,29 @@
                 <data android:mimeType="application/epub+zip" />
                 <data android:mimeType="application/pdf" />
                 <data android:mimeType="application/x-mobipocket-ebook" />
+                <data android:mimeType="application/vnd.amazon.ebook" />
                 <data android:mimeType="application/vnd.comicbook+zip" />
                 <data android:mimeType="application/x-cbz" />
                 <data android:mimeType="text/plain" />
+            </intent-filter>
+            <!-- The same books from the apps that do not say what kind of file it is: they are
+                 told by their endings instead, which a path can only be matched against with a host. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.epub" />
+                <data android:pathPattern=".*\\.EPUB" />
+                <data android:pathPattern=".*\\.mobi" />
+                <data android:pathPattern=".*\\.azw" />
+                <data android:pathPattern=".*\\.prc" />
+                <data android:pathPattern=".*\\.cbz" />
+                <data android:pathPattern=".*\\.pdf" />
+                <data android:pathPattern=".*\\.txt" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

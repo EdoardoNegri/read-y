@@ -12,11 +12,13 @@ import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
 import android.util.TypedValue
 import android.view.ContextThemeWrapper
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -258,6 +260,12 @@ class ShelfDialog(private val ctx: Context) {
         button.setOnClickListener {
             dialog.dismiss()
             action()
+        }
+        // Done on the keyboard of a field is the same as the button.
+        input.setOnEditorActionListener { _, actionId, event ->
+            val done = actionId == EditorInfo.IME_ACTION_DONE ||
+                event?.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN
+            done.also { if (it) button.performClick() }
         }
     }
 

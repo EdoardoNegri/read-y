@@ -1,19 +1,13 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
--->
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What is backed up with the app (Android 12 and later) or moved to a new phone. -->
 <data-extraction-rules>
+    <!-- The covers and the details read from the books are drawn and read again from the books themselves. -->
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="file" path="covers"/>
+        <exclude domain="sharedpref" path="meta.xml"/>
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="file" path="covers"/>
+        <exclude domain="sharedpref" path="meta.xml"/>
     </device-transfer>
-    -->
 </data-extraction-rules>

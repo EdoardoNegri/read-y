@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Rect
@@ -509,11 +508,14 @@ object Library {
 
     /** Takes [f] to [target], which must be free, taking along what is remembered about it. */
     private fun relocate(ctx: Context, f: File, target: File): Boolean {
-        if (target.exists()) return false
+        // Storage that does not tell capitals apart says that a name which only changes them is
+        // taken, by the very thing being renamed; the listing has the name as it is really written.
+        val recapitalized = target.path.equals(f.path, ignoreCase = true) && target.parentFile?.list()?.contains(target.name) != true
+        if (target.exists() && !recapitalized) return false
         val old = f.path
         // Note the covers before the paths change.
         val books = booksIn(f)
-        if (!f.renameTo(target)) return false
+        if (!(if (recapitalized) renameViaTemp(f, target) else f.renameTo(target))) return false
         remember(ctx, old, target.path)
         for ((path, modified) in books) {
             coverFile(ctx, path, modified).renameTo(coverFile(ctx, target.path + path.removePrefix(old), modified))
@@ -521,6 +523,19 @@ object Library {
         stamp++
         FavoritesWidget.refresh(ctx)
         return true
+    }
+
+    /**
+     * Gives [f] the name [target], which only differs from its own by capitals. Storage that does
+     * not tell them apart takes a rename straight to it for done and leaves the name as it was,
+     * so it is passed through a name that is nothing like either.
+     */
+    private fun renameViaTemp(f: File, target: File): Boolean {
+        val temp = File(f.parentFile ?: return false, ".renaming-${System.nanoTime()}")
+        if (!f.renameTo(temp)) return false
+        if (temp.renameTo(target)) return true
+        temp.renameTo(f)
+        return false
     }
 
     /**
@@ -630,6 +645,8 @@ object Library {
 
     /** Reads title, author, date, page count and cover from the file. Blocking; results are cached. */
     fun meta(ctx: Context, f: File): BookMeta {
+        // Gone, e.g. deleted while its cover was being asked for: nothing is made or remembered of it.
+        if (!f.isFile) return BookMeta(f.nameWithoutExtension, "", 0)
         val cover = coverFile(ctx, f)
         cachedMeta(ctx, f)?.let { if (cover.exists()) return it }
 
@@ -876,7 +893,6 @@ object Library {
         statePrefs(ctx).edit { putString(f.path, o.toString()) }
     }
 
-    /** The book currently open in the reader, remembered so that it is reopened after the app was closed. */
     /** The book that was read last, wherever it stands in the library; null if none was ever read. Blocking. */
     fun lastRead(ctx: Context): File? =
         books().map { it to state(ctx, it).lastRead }.filter { it.second > 0 }.maxByOrNull { it.second }?.first

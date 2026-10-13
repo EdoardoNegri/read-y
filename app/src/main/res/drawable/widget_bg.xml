@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The back wall of the bookcase (see shelf_back.xml). Its corners are square, like a bookcase's: a home
-     screen that rounds the corners of widgets leaves those alone that have a background of their own shape
-     (widget_favorites.xml). -->
+<!-- The back wall of the bookcase (see shelf_back.xml). Its corners are square, like a bookcase's;
+     a home screen that rounds the corners of widgets rounds those of the whole widget, and so
+     of the case, which fills it (widget_favorites.xml). -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape>

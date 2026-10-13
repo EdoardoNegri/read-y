@@ -304,13 +304,15 @@ class FlowEngine(
     }
 
     override fun tap(x: Float, y: Float, done: (handled: Boolean) -> Unit) {
-        // In vertical mode the WebView receives the touch itself and follows links natively.
-        if (s.vertical || !ready) {
+        if (!ready) {
             done(false)
             return
         }
+        // In vertical mode the WebView receives the touch itself and follows links natively; all
+        // that is asked here is whether there is a link, which is not also a tap for the page or the menu.
         val d = act.resources.displayMetrics.density
-        web.evaluateJavascript("window.__r?__r.tap(${x / d},${y / d}):false") { done(it == "true") }
+        val ask = if (s.vertical) "linked" else "tap"
+        web.evaluateJavascript("window.__r?__r.$ask(${x / d},${y / d}):false") { done(it == "true") }
     }
 
     override fun close() {
@@ -447,6 +449,15 @@ class FlowEngine(
     if (p < 0 || p >= R.pages) return false;
     R.go(p, slide);
     return true;
+  };
+
+  R.linked = function (x, y) {
+    var el = document.elementFromPoint(x, y);
+    while (el && el.nodeType === 1) {
+      if ((el.localName || '').toLowerCase() === 'a' && (el.getAttribute('href') || el.getAttribute('xlink:href'))) return true;
+      el = el.parentNode;
+    }
+    return false;
   };
 
   R.tap = function (x, y) {

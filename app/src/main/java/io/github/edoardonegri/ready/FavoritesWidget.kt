@@ -56,8 +56,6 @@ class FavoritesWidget : AppWidgetProvider() {
         /** How long [refresh] waits for more changes to come, e.g. the other books of a shelf that is being moved. */
         private const val SETTLE_MS = 300L
 
-        /** The side of a place in the picture the case takes its shape from, in pixels. */
-        private const val SHAPE = 32
         private val pending = Any()
 
         /**
@@ -83,12 +81,12 @@ class FavoritesWidget : AppWidgetProvider() {
             val manager = AppWidgetManager.getInstance(ctx)
             for (id in ids) {
                 val views = RemoteViews(ctx.packageName, R.layout.widget_favorites)
-                // The case has the shape of this picture: a place wide and a place tall for every
-                // book and shelf. It says it is larger than any screen, and is fitted into the widget.
+                // The case has the shape of this picture, that of the widget. It says it is larger
+                // than any screen, and is fitted into the widget, which it then fills.
                 val shelf = WidgetShelf(ctx, manager, id)
                 views.setImageViewBitmap(
                     R.id.shape,
-                    createBitmap(shelf.columns * SHAPE, shelf.shelves * SHAPE, Bitmap.Config.ALPHA_8).apply { density = 4 },
+                    createBitmap(shelf.width, shelf.height, Bitmap.Config.ALPHA_8).apply { density = 4 },
                 )
                 if (Build.VERSION.SDK_INT >= 31) {
                     val shelves = Shelves(ctx, shelf)
@@ -140,10 +138,11 @@ class FavoritesWidget : AppWidgetProvider() {
  * How the shelves are laid out in one placed widget. A book has one cell of the home screen to
  * itself and is as tall as that allows, whatever the widget's size: a widget four cells wide holds
  * four places on a shelf, a narrower one fewer (the others move to the shelf below), and every cell
- * of height shows one more shelf, empty if there are no books left for it. A place is as wide as
- * it is tall, so a case of two by two is square: the cells of a home screen are not, and the case
- * leaves free what it does not need of them (widget_favorites.xml). All sizes are in dp and mirror
- * widget_favorites.xml and widget_row.xml.
+ * of height shows one more shelf, empty if there are no books left for it. The case fills the
+ * widget, so a place is as wide and as tall as its share of it; a book is never stretched to
+ * fit, and stands at the foot of its place with free room above it if that is taller than it
+ * needs (widget_favorites.xml). All sizes are in dp and mirror widget_favorites.xml and
+ * widget_row.xml.
  */
 private class WidgetShelf(ctx: Context, manager: AppWidgetManager, id: Int) {
     val columns: Int
@@ -157,14 +156,28 @@ private class WidgetShelf(ctx: Context, manager: AppWidgetManager, id: Int) {
     /** Shelves the widget has room for. */
     val shelves: Int
 
+    /** Size of the widget, which the case fills. */
+    val width: Int
+    val height: Int
+
+    /**
+     * How much smaller than it says the home screen shows the widget, 1 if it is shown as it is.
+     * Samsung's does so (0.83 on a screen set to a denser grid): the sizes it reports are those
+     * of the widget unscaled, and so are the bounds it gives of a place that is tapped.
+     */
+    val shown: Float
+
     init {
         val o = manager.getAppWidgetOptions(id)
         // The launcher reports the portrait size as min width x max height. The home screen may be
         // portrait while this app is not, so the size for a landscape home screen is not used.
         val reportedW = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
         val reportedH = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)
+        shown = o.getFloat(SHOWN, 1f).takeIf { it in 0.4f..1f } ?: 1f
         val w = if (reportedW > 0) reportedW else 250
         val h = if (reportedH > 0) reportedH else 110
+        width = w
+        height = h
         val between = (w - 2 * POST).coerceAtLeast(1)
 
         // The launcher never says how many cells a size is. A widget is dropped two cells wide
@@ -195,14 +208,12 @@ private class WidgetShelf(ctx: Context, manager: AppWidgetManager, id: Int) {
         shelves = (h / (two / 2f)).roundToInt().coerceAtLeast(1)
         // A cell less is a little less than a place less, because of the gaps between cells.
         columns = (between / cellW + 0.3f).toInt().coerceIn(1, MAX_COLUMNS)
-        // A place is as wide as it is tall, and as large as lets all of them into the widget.
-        val place = minOf(w.toFloat() / columns, h.toFloat() / shelves)
         // The shelves share the height of the case exactly, so that it ends on the plank of the
         // last one it shows, and the books are as tall as that leaves room for.
-        placeH = (place - TOP - PLANK).coerceAtLeast(18f)
+        placeH = (h.toFloat() / shelves - TOP - PLANK).coerceAtLeast(18f)
         // The posts take their share of the width, so the book stays narrow enough to stand in its place.
-        val inner = (place * columns - 2 * POST).coerceAtLeast(1f)
-        coverW = minOf(placeH / 1.5f, inner / columns - 2 * SIDE).coerceAtLeast(12f)
+        val inner = (w - 2 * POST).coerceAtLeast(1)
+        coverW = minOf(placeH / 1.5f, inner.toFloat() / columns - 2 * SIDE).coerceAtLeast(12f)
     }
 
     companion object {
@@ -210,6 +221,9 @@ private class WidgetShelf(ctx: Context, manager: AppWidgetManager, id: Int) {
         private const val TOP = 5
         private const val PLANK = 7
         private const val SIDE = 3
+
+        /** Where Samsung's home screen says how small it shows its widgets. */
+        private const val SHOWN = "hsResizeRatio"
 
         /** About the height of a cell of a home screen, for as long as that of this one is not known. */
         private const val USUAL_CELL_H = 105
@@ -270,7 +284,10 @@ private class Shelves(private val ctx: Context, private val shelf: WidgetShelf) 
             }
             row.setImageViewBitmap(COVERS[i], cover(f))
             row.setContentDescription(COVERS[i], Library.meta(ctx, f).title)
-            row.setOnClickFillInIntent(COVERS[i], Intent().putExtra(ReaderActivity.EXTRA_PATH, f.path))
+            row.setOnClickFillInIntent(
+                COVERS[i],
+                Intent().putExtra(ReaderActivity.EXTRA_PATH, f.path).putExtra(WidgetOpenActivity.EXTRA_SHOWN, shelf.shown),
+            )
         }
         return row
     }
@@ -320,6 +337,8 @@ private class Shelves(private val ctx: Context, private val shelf: WidgetShelf) 
      * book shape and bound.
      */
     private fun cover(f: File): Bitmap {
+        // A book the bookshelf has not shown yet, e.g. after the library came from another phone, has no cover to draw.
+        if (!Library.coverFile(ctx, f).exists()) Library.meta(ctx, f)
         val bmp = sized(Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val area = RectF(0f, bmp.height - bmp.width * 1.5f, bmp.width.toFloat(), bmp.height.toFloat())

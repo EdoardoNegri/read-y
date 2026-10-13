@@ -75,6 +75,18 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         fromShelf = intent.getBooleanExtra(EXTRA_FROM_SHELF, false)
         fromWidget = intent.getBooleanExtra(EXTRA_FROM_WIDGET, false)
         if (fromShelf && Build.VERSION.SDK_INT >= 34) overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
+        if (fromWidget) {
+            // The reader joins the bookshelf's task from the widget's own, so the system switches
+            // tasks and may play its transition for that whatever the intent flags say; the
+            // opened book is already there to take over from without one.
+            window.setWindowAnimations(0)
+            if (Build.VERSION.SDK_INT >= 34) {
+                overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, 0, 0)
+            } else {
+                @Suppress("DEPRECATION")
+                overridePendingTransition(0, 0)
+            }
+        }
         percentRead = findViewById(R.id.percent)
         chapterPage = findViewById(R.id.chapterPage)
         bookPage = findViewById(R.id.bookPage)
@@ -163,7 +175,6 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
 
         applyBrightness()
         applyLayout()
-
         if (!s.hintShown) {
             s.hintShown = true
             Toast.makeText(this, R.string.reader_hint, Toast.LENGTH_LONG).show()
@@ -335,12 +346,28 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         val w = content.width
         e.tap(x - content.paddingLeft, y - content.paddingTop) { handled ->
             if (!handled) when {
-                !s.tapToTurn -> menu.visibility = View.VISIBLE
+                // The sides of a page that is enlarged are not the sides of the screen.
+                !s.tapToTurn || e.zoomed -> menu.visibility = View.VISIBLE
                 x > w * 0.7f -> turn(1)
                 x < w * 0.3f -> turn(-1)
                 else -> menu.visibility = View.VISIBLE
             }
         }
+    }
+
+    override fun canZoom() = engine?.zoomable == true && !menu.isVisible
+    override fun zoomed() = engine?.zoomed == true
+
+    override fun onZoom(factor: Float, x: Float, y: Float) {
+        engine?.zoomBy(factor, x - content.paddingLeft, y - content.paddingTop)
+    }
+
+    override fun onZoomEnd() {
+        engine?.zoomEnd()
+    }
+
+    override fun onPan(dx: Float, dy: Float) {
+        engine?.panBy(dx, dy)
     }
 
     override fun onSwipe(direction: Int) {
