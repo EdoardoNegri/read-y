@@ -167,9 +167,9 @@ class ShelfAdapter(
         // A favorite is told by its plate, which leaves the cover free.
         plate.favorite = Library.isFavorite(ctx, f)
         plate.finished = Library.isFinished(ctx, f)
-        // A book marked as read is read to the end, wherever it was last left open.
-        h.progress.visibility = if (st.percent > 0f || plate.finished) View.VISIBLE else View.GONE
-        h.progress.progress = if (plate.finished) 100 else (st.percent * 100).roundToInt()
+        // A book read to the end has no bar any more: its bronze plate says so.
+        h.progress.visibility = if (st.percent > 0f && !plate.finished) View.VISIBLE else View.GONE
+        h.progress.progress = (st.percent * 100).roundToInt()
         h.plaque.text = Library.cachedMeta(ctx, f)?.title ?: f.nameWithoutExtension
         val cached = Library.cachedCover(f)
         h.cover.setImageBitmap(cached)
