@@ -24,10 +24,11 @@
             android:layout_height="match_parent"
             android:text="@string/sample_page" />
 
-        <View
-            android:id="@+id/warmth"
+        <io.github.edoardonegri.ready.LampView
+            android:id="@+id/lamp"
             android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+            android:layout_height="match_parent"
+            android:visibility="gone" />
     </FrameLayout>
 
     <ScrollView

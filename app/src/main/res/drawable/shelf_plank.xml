@@ -9,6 +9,11 @@
                 android:startColor="#FF8B5A2B" />
         </shape>
     </item>
+    <!-- The grain of the wood, which runs along the board. It fills the board whatever size the
+         picture of it has, which the board would otherwise take for its own. -->
+    <item android:width="1dp" android:height="1dp" android:gravity="fill">
+        <bitmap android:src="@drawable/wood_grain" android:tileMode="repeat" />
+    </item>
     <item android:height="1dp" android:gravity="top">
         <shape>
             <solid android:color="#40FFE2B0" />

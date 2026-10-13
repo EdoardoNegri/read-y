@@ -32,7 +32,7 @@ class OptionsPanel(
      * Adds a control for every setting; [epub] includes the ones that only affect re-flowable text.
      * The callbacks run after the matching setting was saved, so an open book can follow it.
      */
-    fun build(epub: Boolean, onBrightness: () -> Unit = {}, onWarmth: () -> Unit = {}, onLayout: () -> Unit = {}) {
+    fun build(epub: Boolean, onBrightness: () -> Unit = {}, onLayout: () -> Unit = {}) {
         section("Light")
         slider("Brightness", 0, 100, 1, s.brightness.coerceAtLeast(0), true, { if (it == 0) "system" else "$it%" }) {
             s.brightness = if (it == 0) -1 else it
@@ -40,7 +40,7 @@ class OptionsPanel(
         }
         slider("Warmth", 0, 100, 1, s.warmth, true, { "$it%" }) {
             s.warmth = it
-            onWarmth()
+            onLayout()
         }
         toggle("Dark mode", s.darkMode) {
             s.darkMode = it
@@ -91,7 +91,7 @@ class OptionsPanel(
         }
 
         section("Turning pages")
-        toggle("Slide the pages across", s.slidePages) { s.slidePages = it }
+        toggle("Turn the pages like paper", s.slidePages) { s.slidePages = it }
         toggle("Tap the sides to turn pages", s.tapToTurn) { s.tapToTurn = it }
         toggle("Swipe the other way", s.reverseSwipe) { s.reverseSwipe = it }
         toggle("Volume up for the next page", s.volumeUpNext) { s.volumeUpNext = it }
@@ -106,6 +106,8 @@ class OptionsPanel(
         section = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundResource(R.drawable.panel_wood)
+            // The grain of the board ends at its round corners.
+            clipToOutline = true
             setPadding(dp(16), dp(12), dp(16), dp(10))
             // The knobs of the sliders reach a little into the padding.
             clipToPadding = false

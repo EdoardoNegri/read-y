@@ -4,7 +4,7 @@ import java.io.File
 import java.io.RandomAccessFile
 
 /**
- * Reads the title and author a PDF carries in its information dictionary. Android's PdfRenderer
+ * Reads the title, the author and the date a PDF carries in its information dictionary. Android's PdfRenderer
  * gives no access to them, so the file is searched for the dictionary directly. That finds it in
  * most files; where it is packed away in a compressed stream, or the file is encrypted, nothing is
  * found and the book goes by its file name.
@@ -14,8 +14,8 @@ object PdfInfo {
     private const val OVERLAP = 256
     private const val MAX_SIZE = 300L shl 20
 
-    /** Title and author, either of which may be empty; null if the file names neither. */
-    fun read(f: File): Pair<String, String>? = try {
+    /** Title, author and the date the file was made, any of which may be empty; null if the file gives none. */
+    fun read(f: File): Triple<String, String, String>? = try {
         if (f.length() > MAX_SIZE) null
         else RandomAccessFile(f, "r").use { file ->
             val info = last(file, Regex("/Info\\s+(\\d+)\\s+(\\d+)\\s+R"))
@@ -36,7 +36,8 @@ object PdfInfo {
                 it.equals("untitled", true) || it.startsWith("Microsoft Word -") || it.endsWith(".doc", true) ||
                     it.endsWith(".docx", true) || it.endsWith(".tex", true) || it.endsWith(".dvi", true)
             }.orEmpty()
-            if (real.isEmpty() && author.isEmpty()) null else real to author
+            val date = text?.let { value(it, "CreationDate") }.orEmpty().trim()
+            if (real.isEmpty() && author.isEmpty() && date.isEmpty()) null else Triple(real, author, date)
         }
     } catch (e: Exception) {
         null

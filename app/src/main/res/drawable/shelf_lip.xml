@@ -1,8 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The top surface of a shelf plank, seen between the books standing on it. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <gradient
-        android:angle="270"
-        android:endColor="#FFA9743F"
-        android:startColor="#FF4A2E1A" />
-</shape>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <gradient
+                android:angle="270"
+                android:endColor="#FFA9743F"
+                android:startColor="#FF4A2E1A" />
+        </shape>
+    </item>
+    <item android:width="1dp" android:height="1dp" android:gravity="fill">
+        <bitmap android:src="@drawable/wood_grain" android:tileMode="repeat" />
+    </item>
+</layer-list>

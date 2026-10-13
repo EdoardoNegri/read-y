@@ -18,11 +18,15 @@ import android.view.View
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 import androidx.core.content.edit
+import androidx.core.os.HandlerCompat
 import androidx.core.graphics.createBitmap
 import java.io.File
 import kotlin.math.roundToInt
 
-/** Home-screen widget: a small bookcase holding the favorite books; tapping one opens it. */
+/**
+ * Home-screen widget: a small bookcase holding the books the reader put on it; tapping one opens
+ * it (WidgetOpenActivity). After the last of them stands a place to tap for choosing the books (WidgetBooksActivity).
+ */
 class FavoritesWidget : AppWidgetProvider() {
 
     override fun onUpdate(ctx: Context, manager: AppWidgetManager, ids: IntArray) = later { show(ctx, ids) }
@@ -49,11 +53,24 @@ class FavoritesWidget : AppWidgetProvider() {
         /** About as many covers as the launcher can be sent in one go. */
         private const val MAX_BYTES = 6 shl 20
 
-        /** Puts the shelves of every placed widget together again, e.g. when the favorites change. */
+        /** How long [refresh] waits for more changes to come, e.g. the other books of a shelf that is being moved. */
+        private const val SETTLE_MS = 300L
+
+        /** The side of a place in the picture the case takes its shape from, in pixels. */
+        private const val SHAPE = 32
+        private val pending = Any()
+
+        /**
+         * Puts the shelves of every placed widget together again, e.g. when a book is put on it:
+         * once, a moment after the last of the changes that follow each other closely.
+         */
         fun refresh(ctx: Context) {
             val app = ctx.applicationContext
-            val ids = AppWidgetManager.getInstance(app).getAppWidgetIds(ComponentName(app, FavoritesWidget::class.java))
-            if (ids.isNotEmpty()) Library.io.execute { show(app, ids) }
+            Library.main.removeCallbacksAndMessages(pending)
+            HandlerCompat.postDelayed(Library.main, {
+                val ids = AppWidgetManager.getInstance(app).getAppWidgetIds(ComponentName(app, FavoritesWidget::class.java))
+                if (ids.isNotEmpty()) Library.io.execute { show(app, ids) }
+            }, pending, SETTLE_MS)
         }
 
         /**
@@ -66,8 +83,15 @@ class FavoritesWidget : AppWidgetProvider() {
             val manager = AppWidgetManager.getInstance(ctx)
             for (id in ids) {
                 val views = RemoteViews(ctx.packageName, R.layout.widget_favorites)
+                // The case has the shape of this picture: a place wide and a place tall for every
+                // book and shelf. It says it is larger than any screen, and is fitted into the widget.
+                val shelf = WidgetShelf(ctx, manager, id)
+                views.setImageViewBitmap(
+                    R.id.shape,
+                    createBitmap(shelf.columns * SHAPE, shelf.shelves * SHAPE, Bitmap.Config.ALPHA_8).apply { density = 4 },
+                )
                 if (Build.VERSION.SDK_INT >= 31) {
-                    val shelves = Shelves(ctx, id)
+                    val shelves = Shelves(ctx, shelf)
                     val items = RemoteViews.RemoteCollectionItems.Builder().setViewTypeCount(1)
                     for (i in 0 until shelves.count) {
                         items.addItem(i.toLong(), shelves.row(i))
@@ -83,19 +107,24 @@ class FavoritesWidget : AppWidgetProvider() {
                 }
                 views.setEmptyView(R.id.shelves, R.id.empty)
 
-                // The path of the tapped book is filled in per item, so the template must be mutable.
+                // Every place on the shelves opens WidgetOpenActivity, the one thing they can be
+                // told to open: it opens a tapped book where it stands, and leads on to the
+                // choosing of the books. The path of the book is filled in per item, so the
+                // template must be mutable.
                 val mutable = if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
                 views.setPendingIntentTemplate(
                     R.id.shelves,
                     PendingIntent.getActivity(
-                        ctx, 0, Intent(ctx, ReaderActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        ctx, 0,
+                        Intent(ctx, WidgetOpenActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
                         PendingIntent.FLAG_UPDATE_CURRENT or mutable,
                     ),
                 )
                 views.setOnClickPendingIntent(
                     R.id.empty,
                     PendingIntent.getActivity(
-                        ctx, 1, Intent(ctx, MainActivity::class.java),
+                        ctx, 1, Intent(ctx, WidgetBooksActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                     ),
                 )
@@ -110,9 +139,11 @@ class FavoritesWidget : AppWidgetProvider() {
 /**
  * How the shelves are laid out in one placed widget. A book has one cell of the home screen to
  * itself and is as tall as that allows, whatever the widget's size: a widget four cells wide holds
- * four books on a shelf, a narrower one fewer (the others move to the shelf below), and every cell
- * of height shows one more shelf, empty if there are no books left for it. All sizes are in dp and
- * mirror widget_favorites.xml and widget_row.xml.
+ * four places on a shelf, a narrower one fewer (the others move to the shelf below), and every cell
+ * of height shows one more shelf, empty if there are no books left for it. A place is as wide as
+ * it is tall, so a case of two by two is square: the cells of a home screen are not, and the case
+ * leaves free what it does not need of them (widget_favorites.xml). All sizes are in dp and mirror
+ * widget_favorites.xml and widget_row.xml.
  */
 private class WidgetShelf(ctx: Context, manager: AppWidgetManager, id: Int) {
     val columns: Int
@@ -134,60 +165,86 @@ private class WidgetShelf(ctx: Context, manager: AppWidgetManager, id: Int) {
         val reportedH = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)
         val w = if (reportedW > 0) reportedW else 250
         val h = if (reportedH > 0) reportedH else 110
-        val inner = (w - 2 * POST).coerceAtLeast(1)
+        val between = (w - 2 * POST).coerceAtLeast(1)
 
-        // The launcher never says how many cells a size is. A widget is dropped four cells wide
-        // and two tall (favorites_widget_info.xml), so its first size gives the size of a cell.
+        // The launcher never says how many cells a size is. A widget is dropped two cells wide
+        // and two tall (favorites_widget_info.xml), so the size it has then gives the size of a
+        // cell, and is remembered. Not every size is one of two cells, though: a home screen may
+        // drop the widget otherwise or report another size first, and a widget placed long ago
+        // was dropped at another size. So a size is only taken for one of two cells if it can
+        // be one on this screen, and what was remembered is dropped if it cannot. Until there
+        // is one, the cells are taken to be of the usual size.
+        val screen = ctx.resources.configuration.smallestScreenWidthDp
+        fun twoWide(inner: Int) = (inner + 2 * POST) / screen.coerceAtLeast(1).toFloat() in 0.28f..0.52f
+        fun twoTall(height: Int) = height in 130..270
         val prefs = prefs(ctx)
         var two = prefs.getInt(TWO + id, 0)
-        var four = prefs.getInt(FOUR + id, 0)
-        if (two == 0 && reportedH > 0) prefs.edit { putInt(TWO + id, h) }
-        if (four == 0 && reportedW > 0) prefs.edit { putInt(FOUR + id, inner) }
-        if (two == 0) two = h
-        if (four == 0) four = inner
-        val cellW = four / 4f
-        // One shelf per cell of height. They share the widget's height exactly, so that it ends
-        // on the plank of the last one it shows, and the books are as tall as that leaves room for.
+        var pair = prefs.getInt(PAIR + id, 0)
+        if (!twoTall(two)) {
+            two = if (reportedH > 0 && twoTall(h)) h else 0
+            prefs.edit { if (two > 0) putInt(TWO + id, two) else remove(TWO + id) }
+        }
+        if (!twoWide(pair)) {
+            pair = if (reportedW > 0 && twoWide(between)) between else 0
+            prefs.edit { if (pair > 0) putInt(PAIR + id, pair) else remove(PAIR + id).remove(FOUR + id) }
+        }
+        if (two == 0) two = 2 * USUAL_CELL_H
+        if (pair == 0) pair = (screen * 0.45f).toInt() - 2 * POST
+        val cellW = pair / 2f
+        // One shelf per cell of height.
         shelves = (h / (two / 2f)).roundToInt().coerceAtLeast(1)
-        placeH = (h.toFloat() / shelves - TOP - PLANK).coerceAtLeast(18f)
         // A cell less is a little less than a place less, because of the gaps between cells.
-        columns = (inner / cellW + 0.3f).toInt().coerceIn(1, MAX_COLUMNS)
-        // A place can be narrower than a cell, most of all in a widget one cell wide, where the
-        // posts take their share; the book then stays narrow enough to stand in it.
-        coverW = minOf(placeH / 1.5f, inner.toFloat() / columns - 2 * SIDE).coerceAtLeast(12f)
+        columns = (between / cellW + 0.3f).toInt().coerceIn(1, MAX_COLUMNS)
+        // A place is as wide as it is tall, and as large as lets all of them into the widget.
+        val place = minOf(w.toFloat() / columns, h.toFloat() / shelves)
+        // The shelves share the height of the case exactly, so that it ends on the plank of the
+        // last one it shows, and the books are as tall as that leaves room for.
+        placeH = (place - TOP - PLANK).coerceAtLeast(18f)
+        // The posts take their share of the width, so the book stays narrow enough to stand in its place.
+        val inner = (place * columns - 2 * POST).coerceAtLeast(1f)
+        coverW = minOf(placeH / 1.5f, inner / columns - 2 * SIDE).coerceAtLeast(12f)
     }
 
     companion object {
         private const val POST = 11
-        private const val TOP = 8
-        private const val PLANK = 8
+        private const val TOP = 5
+        private const val PLANK = 7
         private const val SIDE = 3
+
+        /** About the height of a cell of a home screen, for as long as that of this one is not known. */
+        private const val USUAL_CELL_H = 105
 
         /** The number of places widget_row.xml has. */
         const val MAX_COLUMNS = 8
         private const val TWO = "row"
         private const val FOUR = "four"
+        private const val PAIR = "pair"
 
         private fun prefs(ctx: Context) = ctx.getSharedPreferences("widget", Context.MODE_PRIVATE)
 
         fun forget(ctx: Context, ids: IntArray) {
-            prefs(ctx).edit { for (id in ids) remove(TWO + id).remove(FOUR + id) }
+            prefs(ctx).edit { for (id in ids) remove(TWO + id).remove(FOUR + id).remove(PAIR + id) }
         }
     }
 }
 
-/** The shelves of one placed widget as they are right now, with the favorite books standing on them. Blocking. */
-private class Shelves(private val ctx: Context, id: Int) {
-    private val shelf = WidgetShelf(ctx, AppWidgetManager.getInstance(ctx), id)
-    private val items = if (Library.hasAccess(ctx)) Library.favorites(ctx) else emptyList()
+/** The shelves of one placed widget as they are right now, with its books standing on them. Blocking. */
+private class Shelves(private val ctx: Context, private val shelf: WidgetShelf) {
+    constructor(ctx: Context, id: Int) : this(ctx, WidgetShelf(ctx, AppWidgetManager.getInstance(ctx), id))
+
+    private val access = Library.hasAccess(ctx)
+    private val items = if (access) Library.widgetBooks(ctx) else emptyList()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
     /** Memory taken by the pictures of the shelves made so far. */
     var bytes = 0
         private set
 
-    /** As many shelves as the books need, and at least those the widget has room for, empty or not. */
-    val count = if (items.isEmpty()) 0 else maxOf((items.size + shelf.columns - 1) / shelf.columns, shelf.shelves)
+    /**
+     * As many shelves as the books and the place for choosing them need, and at least those the
+     * widget has room for, empty or not. None while the library cannot be read.
+     */
+    val count = if (!access) 0 else maxOf(items.size / shelf.columns + 1, shelf.shelves)
 
     /** A whole shelf (widget_row.xml), showing as many of its places as the widget is cells wide. */
     fun row(position: Int): RemoteViews {
@@ -196,6 +253,14 @@ private class Shelves(private val ctx: Context, id: Int) {
         for (i in PLACES.indices) {
             val f = if (i < shelf.columns) items.getOrNull(first + i) else null
             row.setViewVisibility(PLACES[i], if (i < shelf.columns) View.VISIBLE else View.GONE)
+            // The place after the last book is the one to tap for choosing the books.
+            if (i < shelf.columns && first + i == items.size) {
+                row.setViewVisibility(COVERS[i], View.VISIBLE)
+                row.setImageViewBitmap(COVERS[i], chooser())
+                row.setContentDescription(COVERS[i], ctx.getString(R.string.widget_choose))
+                row.setOnClickFillInIntent(COVERS[i], Intent())
+                continue
+            }
             // An empty place keeps its room on the shelf through an empty picture of the same
             // size, and an invisible cover cannot be tapped.
             row.setViewVisibility(COVERS[i], if (f == null) View.INVISIBLE else View.VISIBLE)
@@ -225,9 +290,34 @@ private class Shelves(private val ctx: Context, id: Int) {
             .also { bytes += it.allocationByteCount }
     }
 
+    /** The place to tap for choosing the books: the outline of a book with a plus on it. */
+    private fun chooser(): Bitmap {
+        val bmp = sized(Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val d = bmp.width / shelf.coverW
+        val w = bmp.width.toFloat()
+        val top = bmp.height - w * 1.5f
+        paint.shader = null
+        paint.style = Paint.Style.FILL
+        paint.color = 0x33000000
+        c.drawRect(0f, top, w, bmp.height.toFloat(), paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 1.5f * d
+        paint.color = 0xFFB8922A.toInt()
+        c.drawRect(d, top + d, w - d, bmp.height - d, paint)
+        paint.strokeWidth = 2.5f * d
+        paint.color = 0xFFF6E27A.toInt()
+        val arm = w * 0.2f
+        val y = top + w * 0.75f
+        c.drawLine(w / 2 - arm, y, w / 2 + arm, y, paint)
+        c.drawLine(w / 2, y - arm, w / 2, y + arm, paint)
+        paint.style = Paint.Style.FILL
+        return bmp
+    }
+
     /**
      * The cover as it looks on the shelf, standing at the foot of its place: cropped to the
-     * book shape, bound, with the reading progress along its foot.
+     * book shape and bound.
      */
     private fun cover(f: File): Bitmap {
         val bmp = sized(Bitmap.Config.ARGB_8888)
@@ -241,7 +331,6 @@ private class Shelves(private val ctx: Context, id: Int) {
             BitmapFactory.Options().apply { inSampleSize = 2 },
         )?.let { Library.drawCropped(c, it, area, paint) }
         ShelfArt.drawBinding(c, area, d, paint)
-        Library.drawProgress(c, area, Library.state(ctx, f).percent, d, paint)
         return bmp
     }
 

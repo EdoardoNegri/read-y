@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The bottom 44dp (plaque plus margins) sits on the plank drawn by ShelfDecoration. The plaque's
+<!-- A place on a shelf; its paddings at the sides are ShelfSpec.gap. The bottom 44dp (plaque plus margins) sits on the plank drawn by ShelfDecoration. The plaque's
      background is a PlaqueDrawable set in code; its paddings keep the title clear of the screws.
      Tapping the plaque shows the details; tapping anywhere else opens the book or the shelf. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -9,29 +9,32 @@
     android:background="?attr/selectableItemBackground"
     tools:ignore="Overdraw"
     android:orientation="vertical"
-    android:paddingEnd="9dp"
-    android:paddingStart="9dp">
+    android:clipToPadding="false"
+    android:paddingEnd="7dp"
+    android:paddingStart="7dp">
 
     <!-- The free space under the shelf above. It holds the bar that shows how far a book is read,
-         clear of the cover; ShelfAdapter makes it lower for a case, which stands taller. -->
+         right under that shelf and clear of the cover, and as long as the book is
+         wide; ShelfAdapter makes it lower for a case, which stands taller. -->
     <FrameLayout
         android:id="@+id/gap"
         android:layout_width="match_parent"
-        android:layout_height="16dp">
+        android:layout_height="14dp">
 
         <ProgressBar
             android:id="@+id/progress"
             style="?android:attr/progressBarStyleHorizontal"
             android:layout_width="match_parent"
-            android:layout_height="9dp"
-            android:layout_gravity="bottom"
-            android:layout_marginBottom="3dp"
+            android:layout_height="7dp"
+            android:layout_gravity="top"
             android:max="100"
             android:progressDrawable="@drawable/reading_progress"
             android:visibility="gone" />
     </FrameLayout>
 
+    <!-- ShelfAdapter lets it reach into the paddings at the sides for a case, which is wider than a book. -->
     <FrameLayout
+        android:id="@+id/coverFrame"
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
@@ -67,9 +70,9 @@
     <TextView
         android:id="@+id/plaque"
         android:layout_width="match_parent"
-        android:layout_height="34dp"
-        android:layout_marginBottom="5dp"
-        android:layout_marginTop="5dp"
+        android:layout_height="32dp"
+        android:layout_marginBottom="6dp"
+        android:layout_marginTop="6dp"
         android:ellipsize="end"
         android:fontFamily="serif"
         android:gravity="center"

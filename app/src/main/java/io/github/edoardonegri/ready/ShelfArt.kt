@@ -35,6 +35,18 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
             }
         }
 
+    /**
+     * The plain plate as a button that is held down: it lies where its shadow was, and is lit
+     * from below its rim, dark at the top.
+     */
+    var sunk = false
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidateSelf()
+            }
+        }
+
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
     private val star = Path()
@@ -49,36 +61,45 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         val b = bounds
         val shadow = SHADOW_DP * d
         val left = b.left.toFloat()
-        val top = b.top.toFloat()
+        val top = if (sunk) b.top + shadow else b.top.toFloat()
         val right = b.right.toFloat()
-        val bottom = b.bottom - shadow
+        val bottom = if (sunk) b.bottom.toFloat() else b.bottom - shadow
 
-        // Shadow the plate casts on the plank.
         paint.shader = null
         paint.style = Paint.Style.FILL
-        paint.color = 0x70000000
-        r.set(left + d, top + shadow, right - d, bottom + shadow)
-        c.drawRoundRect(r, 3 * d, 3 * d, paint)
+        if (!sunk) {
+            // Shadow the plate casts on the plank.
+            paint.color = 0x70000000
+            r.set(left + d, top + shadow, right - d, bottom + shadow)
+            c.drawRoundRect(r, 3 * d, 3 * d, paint)
+        }
 
         // Dark rim, then the plate: bright where the light hits the top, darker towards the bottom.
+        // Held down, it lies in the shadow of its own rim instead.
         paint.color = 0xFF5E450C.toInt()
         r.set(left, top, right, bottom)
         c.drawRoundRect(r, 3 * d, 3 * d, paint)
         paint.shader = LinearGradient(
             0f, top, 0f, bottom,
-            intArrayOf(0xFFFFF3B4.toInt(), 0xFFE6C24C.toInt(), 0xFFCDA233.toInt(), 0xFF9C7418.toInt()),
+            if (sunk) intArrayOf(0xFF4A3306.toInt(), 0xFF6E5210.toInt(), 0xFF83641A.toInt(), 0xFF927222.toInt())
+            else intArrayOf(0xFFFFF3B4.toInt(), 0xFFE6C24C.toInt(), 0xFFCDA233.toInt(), 0xFF9C7418.toInt()),
             floatArrayOf(0f, 0.3f, 0.72f, 1f), Shader.TileMode.CLAMP,
         )
         r.inset(d, d)
         c.drawRoundRect(r, 2 * d, 2 * d, paint)
+        if (sunk) {
+            // The rim it has gone down behind casts its shadow on it from above.
+            paint.shader = LinearGradient(0f, r.top, 0f, r.top + 6 * d, 0x99000000.toInt(), 0, Shader.TileMode.CLAMP)
+            c.drawRoundRect(r, 2 * d, 2 * d, paint)
+        }
         paint.shader = null
 
-        // Bevel: a lit upper edge and a shaded lower edge just inside the rim.
+        // Bevel: a lit upper edge and a shaded lower edge just inside the rim, or the other way round.
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = d
-        paint.color = 0xB0FFFBDC.toInt()
+        paint.color = if (sunk) 0x90402C00.toInt() else 0xB0FFFBDC.toInt()
         c.drawLine(left + 3 * d, top + 1.5f * d, right - 3 * d, top + 1.5f * d, paint)
-        paint.color = 0x70402C00
+        paint.color = if (sunk) 0x70FFFBDC else 0x70402C00
         c.drawLine(left + 3 * d, bottom - 1.5f * d, right - 3 * d, bottom - 1.5f * d, paint)
 
         // Engraved border: a dark groove with a lighter lip just below and right of it.
@@ -302,4 +323,66 @@ object ShelfArt {
         c.drawRect(cover.right - 3 * d, cover.top, cover.right, cover.bottom, paint)
         paint.shader = null
     }
+
+    /**
+     * Gives the flat picture of a case some depth, the way the real case has it: stout side
+     * posts with dark edges in place of the hair-thin ones of the picture, the shadows they and
+     * the shelf above cast into it, and a darker foot where it stands on its plank.
+     */
+    fun drawDepth(c: Canvas, case: RectF, d: Float, paint: Paint) {
+        val post = POST_DP * d
+        val wood = intArrayOf(0xFF3E2513.toInt(), 0xFFA9743F.toInt(), 0xFF5C3A1E.toInt())
+        paint.style = Paint.Style.FILL
+        paint.alpha = 255
+        // The inside lies in the shadow of the shelf above and of its own posts.
+        paint.shader = LinearGradient(0f, case.top, 0f, case.top + 10 * d, 0x66000000, 0, Shader.TileMode.CLAMP)
+        c.drawRect(case.left, case.top, case.right, case.top + 10 * d, paint)
+        paint.shader = LinearGradient(0f, case.bottom - 5 * d, 0f, case.bottom, 0, 0x38000000, Shader.TileMode.CLAMP)
+        c.drawRect(case.left, case.bottom - 5 * d, case.right, case.bottom, paint)
+        val reach = 5 * d
+        paint.shader = LinearGradient(
+            case.left + post, 0f, case.left + post + reach, 0f, 0x60000000, 0, Shader.TileMode.CLAMP,
+        )
+        c.drawRect(case.left + post, case.top, case.left + post + reach, case.bottom, paint)
+        paint.shader = LinearGradient(
+            case.right - post - reach, 0f, case.right - post, 0f, 0, 0x60000000, Shader.TileMode.CLAMP,
+        )
+        c.drawRect(case.right - post - reach, case.top, case.right - post, case.bottom, paint)
+        for (left in floatArrayOf(case.left, case.right - post)) {
+            paint.shader = LinearGradient(left, 0f, left + post, 0f, wood, null, Shader.TileMode.CLAMP)
+            c.drawRect(left, case.top, left + post, case.bottom, paint)
+            paint.shader = null
+            // A lit front edge beside a dark one rounds the post off.
+            paint.color = 0x50FFE2B0
+            c.drawRect(left + 1.5f * d, case.top, left + 2.5f * d, case.bottom, paint)
+            paint.color = 0x90000000.toInt()
+            c.drawRect(left, case.top, left + 0.75f * d, case.bottom, paint)
+            c.drawRect(left + post - 0.75f * d, case.top, left + post, case.bottom, paint)
+        }
+        paint.alpha = 255
+    }
+
+    /** The gradients of [drawCastShadow] for a screen of the density [d], kept because the shelf draws them at every step it scrolls. */
+    private class Cast(val d: Float) {
+        val reach = 4 * d
+        val left = LinearGradient(-reach, 0f, 0f, 0f, 0, 0x50000000, Shader.TileMode.CLAMP)
+        val right = LinearGradient(0f, 0f, reach, 0f, 0x50000000, 0, Shader.TileMode.CLAMP)
+    }
+
+    private var cast: Cast? = null
+
+    /** The shadow a case standing between [left] and [right] casts on the wall behind it, at both sides. */
+    fun drawCastShadow(c: Canvas, left: Float, top: Float, right: Float, bottom: Float, d: Float, paint: Paint) {
+        val s = cast?.takeIf { it.d == d } ?: Cast(d).also { cast = it }
+        paint.style = Paint.Style.FILL
+        paint.alpha = 255
+        paint.shader = s.left
+        c.withTranslation(left, 0f) { drawRect(-s.reach, top, 0f, bottom, paint) }
+        paint.shader = s.right
+        c.withTranslation(right, 0f) { drawRect(0f, top, s.reach, bottom, paint) }
+        paint.shader = null
+    }
+
+    /** Width of the posts [drawDepth] gives a case. */
+    private const val POST_DP = 5
 }

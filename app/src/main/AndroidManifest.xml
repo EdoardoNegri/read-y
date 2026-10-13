@@ -59,12 +59,19 @@
                 <data android:scheme="file" />
                 <data android:mimeType="application/epub+zip" />
                 <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/x-mobipocket-ebook" />
+                <data android:mimeType="application/vnd.comicbook+zip" />
+                <data android:mimeType="application/x-cbz" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/epub+zip" />
                 <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/x-mobipocket-ebook" />
+                <data android:mimeType="application/vnd.comicbook+zip" />
+                <data android:mimeType="application/x-cbz" />
             </intent-filter>
         </activity>
 
@@ -72,6 +79,29 @@
             android:name=".SettingsActivity"
             android:exported="false"
             android:theme="@style/Theme.Ready.Settings"
+            android:screenOrientation="portrait"
+            tools:ignore="DiscouragedApi,LockedOrientationActivity" />
+
+        <!-- What a tap on the widget opens: see-through, over the home screen, where a tapped
+             book opens before the reader shows it. It is no part of the bookshelf's task, which
+             would otherwise come to the front with it. -->
+        <activity
+            android:name=".WidgetOpenActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Ready.Clear" />
+
+        <!-- Opened from the widget, to choose the books that stand on it. It is kept apart from
+             the bookshelf, so that leaving it leads back to the home screen the widget is on. -->
+        <activity
+            android:name=".WidgetBooksActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:windowSoftInputMode="adjustNothing"
             android:screenOrientation="portrait"
             tools:ignore="DiscouragedApi,LockedOrientationActivity" />
 

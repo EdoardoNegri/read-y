@@ -13,13 +13,11 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
-import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
-import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import android.text.Layout
 import android.text.StaticLayout
@@ -39,7 +37,8 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.ceil
 
-data class BookMeta(val title: String, val author: String, val pages: Int, val chapters: Int)
+/** What a book says about itself. [published] is a day, a month or a year, as 2011-05-17, 2011-05 or 2011; empty if unknown. */
+data class BookMeta(val title: String, val author: String, val pages: Int, val published: String = "")
 
 /** Reading position. For PDFs [chapter] is the page index; for EPUBs it is the spine index. */
 data class BookState(
@@ -49,18 +48,22 @@ data class BookState(
     var lastRead: Long = 0,
 )
 
-/** The ways a shelf can be put in order; folders always come before books except in [MANUAL]. */
-enum class Sort(val label: Int) {
+/**
+ * The ways a shelf can be put in order. A shelf standing on it takes its place among the books:
+ * by its name, or by the book on it, or on a shelf inside it, that would come first. Each can be
+ * turned round; [descends] is the way it runs until the reader does so.
+ */
+enum class Sort(val label: Int, val descends: Boolean = false) {
     /** The order the reader gave the shelf by dragging; until then folders first, then by file name. */
     MANUAL(R.string.sort_manual),
     TITLE(R.string.sort_title),
     AUTHOR(R.string.sort_author),
 
     /** Most recently read first. */
-    LAST_READ(R.string.sort_last_read),
+    LAST_READ(R.string.sort_last_read, descends = true),
 
     /** Furthest read first. */
-    PROGRESS(R.string.sort_progress),
+    PROGRESS(R.string.sort_progress, descends = true),
 }
 
 /** The geometry of the bookshelf grid (see item_book.xml), shared by the real shelf and its miniatures. */
@@ -69,37 +72,67 @@ class ShelfSpec(val width: Int, val columns: Int, val density: Float) {
 
     /** Thickness of the bookcase's side posts. */
     val post get() = px(12)
-    val itemW get() = (width - 2 * post) / columns
-    val coverW get() = itemW - 2 * px(9)
-    val coverH get() = (coverW * 1.5f).toInt()
-    val rowH get() = px(16) + coverH + px(5) + px(34) + px(5)
 
-    /** Height of the case's top rail (top_bar.xml without the status bar inset): a plank with its lip. */
-    val rail get() = px(49)
+    /** The room a place leaves free at either side of its book: half of what lies between two books. */
+    val gap get() = px(7)
 
     /**
-     * A miniature shows the case from its top rail down to the plank of this row, so that it has a
-     * board at both ends. That is at least as tall as a book, which it stands beside.
+     * How far from the edge the places start: clear of the post, and by as much more as keeps
+     * the outer books further from the posts than the books are from each other.
      */
-    val miniRows get() = ceil((width * 1.5f - rail) / rowH).toInt().coerceAtLeast(1)
-    val miniH get() = rail + miniRows * rowH
+    val side get() = post + px(2)
+    val itemW get() = (width - 2 * side) / columns
+    val coverW get() = itemW - 2 * gap
+    val coverH get() = (coverW * BOOK).toInt()
+    val rowH get() = miniRise + coverH + plank
 
-    /** How far a miniature reaches above the top of the books beside it, into the gap under the shelf above. */
-    val miniRise get() = px(11)
+    /**
+     * How far a miniature reaches above the top of the books beside it: all the way up to the
+     * shelf above, so that it fills the space between the two shelves.
+     */
+    val miniRise get() = px(14)
+
+    /** The part of a row that lies on its plank: the plaque and the space around it. */
+    val plank get() = px(44)
+
+    /**
+     * The rows of the case a miniature shows, from under its top rail down: as few as let it
+     * stand between its neighbours, which makes it as large as it can be. The books of the last
+     * row stand on the plank the miniature itself stands on.
+     */
+    val miniRows get() =
+        ceil((width.toFloat() * (coverH + miniRise) / (itemW - px(4)).coerceAtLeast(1) + plank) / rowH.coerceAtLeast(1))
+            .toInt().coerceAtLeast(1)
+
+    /** The height of the part of the case a miniature shows, which ends where the plank of its last row begins. */
+    val miniH get() = (miniRows * rowH - plank).coerceAtLeast(1)
+
+    /** The width of a miniature, as tall as a book and [miniRise]: a little more than a book's. */
+    val miniW get() = (width.toLong() * (coverH + miniRise) / miniH).toInt()
+
+    companion object {
+        /** How many times as tall as wide a book stands on the shelf. */
+        const val BOOK = 1.6f
+    }
 }
 
 /** The on-disk library: the "Read-y" folder in shared storage, plus cached metadata and reading state. */
 object Library {
     private const val TAG = "Library"
     private const val COVER_W = 360
+
+    /** How much shows of what stands beside the chosen things in a miniature, of 255; as on the shelf (ShelfAdapter). */
+    private const val FAINT_ALPHA = 102
     private const val FAVORITES = "favorites"
-    private const val OPEN_BOOK = "open"
     private const val SORT = "sort"
+    private const val DESCENDING = "descending"
     private const val ORDER = "order:"
     private const val TITLE = "title:"
     private const val FINISHED = "finished"
+    private const val WIDGET = "widget"
+    private const val WIDGET_ORDER = "widgetOrder"
     private const val BIN = ".bin"
-    private const val META_VERSION = 2
+    private const val META_VERSION = 3
     private const val SHELF_BACK = 0xFF2A1A10.toInt()
     private const val SHELF_BACK_LIGHT = 0xFF3A2416.toInt()
 
@@ -117,22 +150,12 @@ object Library {
         else ContextCompat.checkSelfPermission(ctx, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
             PackageManager.PERMISSION_GRANTED
 
-    fun isEpub(f: File) = f.extension.equals("epub", true)
-    fun isPdf(f: File) = f.extension.equals("pdf", true)
-    fun isBook(f: File) = f.isFile && (isEpub(f) || isPdf(f))
-
-    /**
-     * The shelf of favorite books. It is not a real folder, but it stands at the top of the
-     * library and is shown and opened like one.
-     */
-    fun favoritesShelf(): File = File(root(), ".favorites")
-
-    /** Whether [f] opens as a shelf of its own rather than as a book. */
-    fun isShelf(f: File) = f.isDirectory || f == favoritesShelf()
+    /** A book of flowing text, which FlowEngine lays out, rather than one of fixed pages for PageEngine. */
+    fun isFlowing(f: File) = f.extension.lowercase() in FlowBook.EXTENSIONS
+    fun isBook(f: File) = f.isFile && f.extension.lowercase().let { it in FlowBook.EXTENSIONS || it in PageSource.EXTENSIONS }
 
     /** What stands on the shelf [dir], in the order chosen for the library. */
-    fun shelf(ctx: Context, dir: File): List<File> =
-        arrange(ctx, dir, if (dir == favoritesShelf()) favorites(ctx) else list(dir))
+    fun shelf(ctx: Context, dir: File): List<File> = arrange(ctx, dir, list(dir))
 
     // ---- order ----
 
@@ -144,10 +167,26 @@ object Library {
     fun sort(ctx: Context): Sort =
         Sort.values().getOrElse(libraryPrefs(ctx).getInt(SORT, 0)) { Sort.MANUAL }
 
+    /** Puts the library in the order [sort], the way round that order usually runs. */
     fun setSort(ctx: Context, sort: Sort) {
-        libraryPrefs(ctx).edit { putInt(SORT, sort.ordinal) }
+        libraryPrefs(ctx).edit { putInt(SORT, sort.ordinal).remove(DESCENDING) }
         stamp++
     }
+
+    /** Whether the order runs from the last to the first: Z to A, the most recently or the furthest read first. */
+    fun descending(ctx: Context): Boolean = libraryPrefs(ctx).getBoolean(DESCENDING, sort(ctx).descends)
+
+    fun setDescending(ctx: Context, on: Boolean) {
+        libraryPrefs(ctx).edit { putBoolean(DESCENDING, on) }
+        stamp++
+    }
+
+    /**
+     * What is being carried about on the shelves. It has left its place, so the miniatures of
+     * the shelves do not show it either until it is put down.
+     */
+    @Volatile
+    var carried: Set<File> = emptySet()
 
     /** The names on the shelf [dir] in the order the reader gave them; empty if it was never touched. */
     private fun order(ctx: Context, dir: File): List<String> {
@@ -169,21 +208,44 @@ object Library {
      * order [Sort.MANUAL] follows; search results, from several shelves, have none.
      */
     fun arrange(ctx: Context, dir: File?, items: List<File>): List<File> {
-        fun title(f: File) = (if (f.isDirectory) f.name else cachedMeta(ctx, f)?.title ?: f.nameWithoutExtension).lowercase()
         val byName = items.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+        // Everything is looked up once, however often the sorting compares it.
+        val titles by lazy {
+            byName.associateWith { (if (it.isDirectory) it.name else cachedMeta(ctx, it)?.title ?: it.nameWithoutExtension).lowercase() }
+        }
+        fun title(f: File) = titles.getValue(f)
+
+        /** What [of] is for the book [f], or the most it is for any book on the shelf [f] and the shelves inside it. */
+        fun <T : Comparable<T>> most(f: File, of: (BookState) -> T): T? =
+            if (f.isDirectory) books(f).maxOfOrNull { of(state(ctx, it)) } else of(state(ctx, f))
+        val down = descending(ctx)
+
+        /** By [key], the way round that was chosen; what is the same by it stands by its title. */
+        fun <T : Comparable<T>> by(key: (File) -> T): Comparator<File> =
+            (if (down) compareByDescending(key) else compareBy(key)).thenBy(::title)
         return when (sort(ctx)) {
             Sort.MANUAL -> {
                 val order = if (dir == null) emptyList() else order(ctx, dir)
                 // What was added since stays behind the rest, in its usual order.
                 byName.sortedBy { f -> order.indexOf(f.name).let { if (it < 0) Int.MAX_VALUE else it } }
+                    .let { if (down) it.asReversed() else it }
             }
-            Sort.TITLE -> byName.sortedWith(compareBy({ !it.isDirectory }, ::title))
-            Sort.AUTHOR -> byName.sortedWith(
-                // Books without a known author go last.
-                compareBy({ !it.isDirectory }, { cachedMeta(ctx, it)?.author?.lowercase().orEmpty().ifEmpty { "\uFFFF" } }, ::title),
-            )
-            Sort.LAST_READ -> byName.sortedWith(compareBy({ !it.isDirectory }, { -state(ctx, it).lastRead }, ::title))
-            Sort.PROGRESS -> byName.sortedWith(compareBy({ !it.isDirectory }, { -state(ctx, it).percent }, ::title))
+            Sort.TITLE -> byName.sortedWith(by(::title))
+            Sort.AUTHOR -> {
+                // A shelf stands among the authors under its own name; books without a known author go last.
+                val authors = byName.associateWith {
+                    if (it.isDirectory) title(it) else cachedMeta(ctx, it)?.author?.lowercase().orEmpty().ifEmpty { "\uFFFF" }
+                }
+                byName.sortedWith(by { authors.getValue(it) })
+            }
+            Sort.LAST_READ -> {
+                val read = byName.associateWith { f -> most(f) { it.lastRead } ?: 0L }
+                byName.sortedWith(by { read.getValue(it) })
+            }
+            Sort.PROGRESS -> {
+                val far = byName.associateWith { f -> most(f) { it.percent } ?: 0f }
+                byName.sortedWith(by { far.getValue(it) })
+            }
         }
     }
 
@@ -233,8 +295,8 @@ object Library {
     private var binned = 0
 
     /**
-     * Takes a book, or a folder with all it holds, off its shelf. It is not gone yet: it lies in
-     * a hidden folder of the library until [purge] or [emptyBin], and [restore] puts it back.
+     * Takes a book, or a folder with all it holds, off its shelf, which is quick. It is not gone
+     * yet: it lies in a hidden folder of the library until [purge] or [emptyBin].
      * Returns where it lies, or null if it could not be taken away.
      */
     fun delete(ctx: Context, f: File): File? {
@@ -245,14 +307,10 @@ object Library {
         return if (relocate(ctx, f, target)) target else null
     }
 
-    /** Puts what [delete] took away back [to] where it was, with all that was remembered about it. */
-    fun restore(ctx: Context, binned: File, to: File): Boolean =
-        to.parentFile?.isDirectory == true && relocate(ctx, binned, to).also { if (it) binned.parentFile?.delete() }
-
     /** Deletes for good what [delete] took away to [binned], and forgets what was remembered about it. Blocking. */
     fun purge(ctx: Context, binned: File) = erase(ctx, binned.parentFile ?: binned)
 
-    /** Deletes for good whatever is left in the bin, e.g. after the app was closed before the undo ran out. Blocking. */
+    /** Deletes for good whatever is left in the bin, e.g. after the app was closed in the middle of deleting. Blocking. */
     fun emptyBin(ctx: Context) {
         if (bin().exists()) erase(ctx, bin())
     }
@@ -266,15 +324,63 @@ object Library {
 
     // ---- backup ----
 
-    /** Where the backup is kept: in the library folder, so that it moves with the books. */
-    fun backupFile() = File(root(), "Read-y backup.json")
+    /** Where the backup is kept: hidden in the library folder, so that it moves with the books. */
+    private fun backupFile() = File(root(), ".backup.json")
+
+    /** What the backup file looked like when this app last wrote or read it. */
+    private const val BACKUP_SIG = "backup"
+
+    /** Whether [adoptBackup] has looked at the backup file since the app was started. */
+    private var adopted = false
+
+    /** What was last written to the backup file, to leave it alone while nothing changes. */
+    private var written: String? = null
 
     /**
-     * Writes reading positions, favorites, finished books, the order of the shelves, the names
-     * given to books and the reader settings to [backupFile]. Books are named by where they are
-     * in the library, so the backup also fits the same library on another phone.
+     * Takes over the backup file if it is not this app's own writing: one that came with a
+     * library folder copied from another phone, or that was here before the app was installed.
+     * Until this has looked, nothing is written over the file. True if something was taken over.
      */
-    fun saveBackup(ctx: Context): Boolean = try {
+    @Synchronized
+    fun adoptBackup(ctx: Context): Boolean {
+        if (adopted || !hasAccess(ctx)) return false
+        adopted = true
+        val file = backupFile()
+        if (!file.isFile || sig(file) == libraryPrefs(ctx).getString(BACKUP_SIG, null)) return false
+        val taken = restoreBackup(ctx)
+        libraryPrefs(ctx).edit { putString(BACKUP_SIG, sig(file)) }
+        return taken
+    }
+
+    /** Brings the backup file up to date in the background; called whenever the app is left. */
+    fun backUp(ctx: Context) {
+        val app = ctx.applicationContext
+        io.execute { saveBackup(app) }
+    }
+
+    /**
+     * Writes reading positions, favorites, the books on the widget, finished books, the order of
+     * the shelves, the names given to books and the reader settings to [backupFile]. Books are
+     * named by where they are in the library, so the backup also fits the same library on
+     * another phone. Blocking.
+     */
+    @Synchronized
+    private fun saveBackup(ctx: Context) {
+        if (!hasAccess(ctx)) return
+        adoptBackup(ctx)
+        try {
+            val text = backupText(ctx)
+            if (text == written) return
+            root().mkdirs()
+            backupFile().writeText(text)
+            written = text
+            libraryPrefs(ctx).edit { putString(BACKUP_SIG, sig(backupFile())) }
+        } catch (e: Exception) {
+            Log.w(TAG, "Cannot save the backup", e)
+        }
+    }
+
+    private fun backupText(ctx: Context): String {
         val base = root().path
         fun inLibrary(path: String) = path.startsWith(base + File.separator) || path == base
         val positions = JSONObject()
@@ -296,27 +402,36 @@ object Library {
         val o = JSONObject().put("version", 1).put("positions", positions)
             .put("favorites", set(FAVORITES)).put("finished", set(FINISHED))
             .put("orders", orders).put("titles", titles).put("sort", sort(ctx).ordinal).put("settings", settings)
-        root().mkdirs()
-        backupFile().writeText(o.toString(1))
-        true
-    } catch (e: Exception) {
-        Log.w(TAG, "Cannot save the backup", e)
-        false
+        if (libraryPrefs(ctx).contains(DESCENDING)) o.put("descending", descending(ctx))
+        // Left out until the reader has chosen the books for the widget, which shows the favorites till then.
+        if (statePrefs(ctx).contains(WIDGET)) {
+            // In the order they stand in on the widget.
+            o.put("widget", JSONArray(widgetList(ctx).filter(::inLibrary).map { it.removePrefix(base) }))
+        }
+        return o.toString(1)
     }
 
     /** Takes over what [saveBackup] wrote, in place of what is remembered now. */
-    fun restoreBackup(ctx: Context): Boolean = try {
+    private fun restoreBackup(ctx: Context): Boolean = try {
         val o = JSONObject(backupFile().readText())
         val base = root().path
         fun paths(key: String) = o.optJSONArray(key).let { a -> if (a == null) emptySet() else List(a.length()) { base + a.getString(it) }.toHashSet() }
         statePrefs(ctx).edit {
             o.optJSONObject("positions")?.let { for (key in it.keys()) putString(base + key, it.getString(key)) }
             putStringSet(FAVORITES, paths("favorites")).putStringSet(FINISHED, paths("finished"))
+            if (o.has("widget")) {
+                // The backup lists them in the order they stand in on the widget.
+                val listed = o.getJSONArray("widget").let { a -> List(a.length()) { base + a.getString(it) } }
+                putStringSet(WIDGET, listed.toHashSet()).putString(WIDGET_ORDER, JSONArray(listed).toString())
+            } else {
+                remove(WIDGET).remove(WIDGET_ORDER)
+            }
         }
         libraryPrefs(ctx).edit {
             o.optJSONObject("orders")?.let { for (key in it.keys()) putString(ORDER + base + key, it.getString(key)) }
             o.optJSONObject("titles")?.let { for (key in it.keys()) putString(TITLE + base + key, it.getString(key)) }
             putInt(SORT, o.optInt("sort"))
+            if (o.has("descending")) putBoolean(DESCENDING, o.optBoolean("descending")) else remove(DESCENDING)
         }
         ctx.getSharedPreferences("reader", Context.MODE_PRIVATE).edit {
             o.optJSONObject("settings")?.let {
@@ -339,7 +454,7 @@ object Library {
     /**
      * Copies the book another app handed over as [uri] onto the first shelf of the library and
      * returns it there; a book that already is in the library is returned as it is. Null if it
-     * is neither an EPUB nor a PDF. [mime] is what the other app said it is. Blocking.
+     * is not a book of a kind that can be read. [mime] is what the other app said it is. Blocking.
      */
     fun import(ctx: Context, uri: Uri, mime: String?): File? {
         if (uri.scheme == "file") uri.path?.let(::File)?.let {
@@ -359,16 +474,20 @@ object Library {
         }
         root().mkdirs()
         val temp = File(root(), ".import")
-        val head = ByteArray(4)
+        val head = ByteArray(68)
         (ctx.contentResolver.openInputStream(uri) ?: return null).use { ins ->
             FileOutputStream(temp).use { ins.copyTo(it) }
         }
         temp.inputStream().use { it.read(head) }
         // What the file starts with says best what it is.
+        val start = String(head, Charsets.ISO_8859_1)
+        val zipped = start.startsWith("PK")
         val ext = when {
-            String(head, Charsets.ISO_8859_1) == "%PDF" -> "pdf"
-            head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte() &&
-                (name.endsWith(".epub", true) || mime == "application/epub+zip" || mime == "application/octet-stream" || mime == null) -> "epub"
+            start.startsWith("%PDF") -> "pdf"
+            zipped && (name.endsWith(".cbz", true) || mime?.contains("cbz") == true || mime?.contains("comicbook") == true) -> "cbz"
+            zipped && (name.endsWith(".epub", true) || mime == "application/epub+zip" || mime == "application/octet-stream" || mime == null) -> "epub"
+            start.startsWith("BOOKMOBI", 60) -> "mobi"
+            name.endsWith(".txt", true) || mime == "text/plain" -> "txt"
             else -> {
                 temp.delete()
                 return null
@@ -406,8 +525,8 @@ object Library {
 
     /**
      * Everything remembered under the path [old] or a path inside it (reading positions, details,
-     * favorites, finished books, the open book, orders and names) is remembered under [new]
-     * instead, or forgotten if that is null.
+     * favorites, the books on the widget, finished books, orders and names) is
+     * remembered under [new] instead, or forgotten if that is null.
      */
     private fun remember(ctx: Context, old: String, new: String?) {
         fun within(path: String) = path == old || path.startsWith(old + File.separator)
@@ -418,14 +537,18 @@ object Library {
                 if (new != null) putString(moved(key), value)
             }
         }
-        for (key in arrayOf(FAVORITES, FINISHED)) {
+        for (key in arrayOf(FAVORITES, FINISHED, WIDGET)) {
             val paths = statePrefs(ctx).getStringSet(key, null) ?: continue
             if (paths.none(::within)) continue
             val kept = HashSet<String>()
             for (path in paths) if (!within(path)) kept.add(path) else if (new != null) kept.add(moved(path))
             statePrefs(ctx).edit { putStringSet(key, kept) }
         }
-        openBook(ctx)?.let { if (within(it.path)) setOpenBook(ctx, if (new == null) null else File(moved(it.path))) }
+        val order = widgetOrder(ctx)
+        if (order.any(::within)) statePrefs(ctx).edit {
+            val kept = order.mapNotNull { if (!within(it)) it else if (new != null) moved(it) else null }
+            putString(WIDGET_ORDER, JSONArray(kept).toString())
+        }
         val library = libraryPrefs(ctx)
         library.edit {
             for ((key, value) in library.all) for (kind in arrayOf(ORDER, TITLE)) {
@@ -440,19 +563,24 @@ object Library {
 
     /**
      * The books on the shelf [dir] and on every shelf inside it whose title, author or file name
-     * contains [query]. Blocking: reads the details of books not seen before.
+     * contains [query]; with [starred], the favorites among all the books of the library
+     * instead, and all of them if nothing is asked for. Blocking: reads the details of books not
+     * seen before.
      */
-    fun search(ctx: Context, dir: File, query: String): List<File> {
+    fun search(ctx: Context, dir: File, query: String, starred: Boolean): List<File> {
         val q = query.trim().lowercase()
-        if (q.isEmpty()) return emptyList()
+        if (q.isEmpty() && !starred) return emptyList()
         val books =
-            if (dir == favoritesShelf()) favorites(ctx).asSequence()
-            else dir.walkTopDown().onEnter { !it.name.startsWith(".") }.filter(::isBook)
+            if (starred) favorites(ctx).asSequence()
+            else books(dir)
         return books.filter { f ->
             val m = meta(ctx, f)
-            q in m.title.lowercase() || q in m.author.lowercase() || q in f.name.lowercase()
+            q.isEmpty() || q in m.title.lowercase() || q in m.author.lowercase() || q in f.name.lowercase()
         }.toList()
     }
+
+    /** Every book on the shelf [dir] and the shelves inside it: by default, every book in the library. */
+    fun books(dir: File = root()): Sequence<File> = dir.walkTopDown().onEnter { !it.name.startsWith(".") }.filter(::isBook)
 
     /** Sub-folders first, then books, both alphabetical. */
     fun list(dir: File): List<File> =
@@ -478,52 +606,63 @@ object Library {
         return try {
             val o = JSONObject(json)
             if (o.optString("sig") != sig(f) || o.optInt("v") != META_VERSION) null
-            else named(ctx, f, BookMeta(o.optString("title"), o.optString("author"), o.optInt("pages"), o.optInt("chapters")))
+            else named(
+                ctx, f,
+                BookMeta(o.optString("title"), o.optString("author"), o.optInt("pages"), o.optString("published")),
+            )
         } catch (e: Exception) {
             null
         }
     }
 
-    /** Reads title, author, page count and cover from the file. Blocking; results are cached. */
+    private val DATE = Regex("(?<!\\d)(\\d{4})(?:-?(\\d{2})(?:-?(\\d{2}))?)?")
+
+    /** The date in [raw], as a book file gives it, the way [BookMeta.published] has it; empty if there is none. */
+    private fun date(raw: String): String {
+        val (year, month, day) = DATE.find(raw)?.destructured ?: return ""
+        return when {
+            year.toInt() !in 1000..2999 -> ""
+            month.toIntOrNull() !in 1..12 -> year
+            day.toIntOrNull() !in 1..31 -> "$year-$month"
+            else -> "$year-$month-$day"
+        }
+    }
+
+    /** Reads title, author, date, page count and cover from the file. Blocking; results are cached. */
     fun meta(ctx: Context, f: File): BookMeta {
         val cover = coverFile(ctx, f)
         cachedMeta(ctx, f)?.let { if (cover.exists()) return it }
 
         var title = f.nameWithoutExtension
         var author = ""
+        var published = ""
         var pages = 0
-        var chapters = 0
         var bmp: Bitmap? = null
         try {
-            if (isEpub(f)) {
-                EpubBook.open(f).use { b ->
+            if (isFlowing(f)) {
+                FlowBook.open(f).use { b ->
                     if (b.title.isNotBlank()) title = b.title
                     author = b.author
-                    chapters = b.spine.size
-                    pages = (b.weights.sum() / 2600).toInt().coerceAtLeast(1)
+                    published = date(b.published)
+                    pages = (b.weights.sum() / b.pageWeight).toInt().coerceAtLeast(1)
                     bmp = b.coverBitmap(COVER_W)
                 }
             } else {
-                PdfInfo.read(f)?.let { (named, by) ->
+                if (f.extension.equals("pdf", true)) PdfInfo.read(f)?.let { (named, by, made) ->
                     if (named.isNotEmpty()) title = named
                     author = by
+                    published = date(made)
                 }
-                PdfRenderer(ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)).use { r ->
-                    pages = r.pageCount
-                    if (pages > 0) r.openPage(0).use { p ->
-                        val h = (COVER_W.toFloat() * p.height / p.width).toInt().coerceIn(1, COVER_W * 3)
-                        val b = createBitmap(COVER_W, h, Bitmap.Config.ARGB_8888)
-                        b.eraseColor(Color.WHITE)
-                        p.render(b, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        bmp = b
-                    }
+                PageSource.open(f).use { p ->
+                    pages = p.count
+                    bmp = p.render(0, COVER_W, 0)
                 }
             }
         } catch (e: Throwable) {
             Log.w(TAG, "Cannot read ${f.path}", e)
         }
 
-        val meta = BookMeta(title, author, pages, chapters)
+        val meta = BookMeta(title, author, pages, published)
         try {
             cover.parentFile?.mkdirs()
             FileOutputStream(cover).use { (bmp ?: placeholder(title, author)).compress(Bitmap.CompressFormat.JPEG, 85, it) }
@@ -531,7 +670,7 @@ object Library {
             Log.w(TAG, "Cannot save cover for ${f.path}", e)
         }
         val o = JSONObject().put("sig", sig(f)).put("v", META_VERSION).put("title", title).put("author", author)
-            .put("pages", pages).put("chapters", chapters)
+            .put("pages", pages).put("published", published)
         metaPrefs(ctx).edit { putString(f.path, o.toString()) }
         return named(ctx, f, meta)
     }
@@ -552,22 +691,39 @@ object Library {
         return bmp
     }
 
+    /**
+     * What is chosen on the shelves, to be carried or marked together. The miniature of a shelf
+     * that has any of it shows it standing out from the rest, as the shelf itself does.
+     */
+    var chosen: Set<File> = emptySet()
+
+    /** Those of [things] that stand somewhere on the shelf [dir], or on the shelves on it. */
+    private fun within(dir: File, things: Set<File>) = things.filter { it.path.startsWith(dir.path + File.separator) }
+
+    // A miniature drawn while things are carried lacks them, and is a picture of its own. So is
+    // one that shows what is chosen.
     private fun folderKey(dir: File, spec: ShelfSpec) =
-        "dir:${dir.path}:${dir.lastModified()}:$stamp:${spec.width}:${spec.columns}"
+        "dir:${dir.path}:${dir.lastModified()}:$stamp:${spec.width}:${spec.columns}" +
+            carried.let { if (it.isEmpty()) "" else ":${it.hashCode()}" } +
+            within(dir, chosen).let { if (it.isEmpty()) "" else ":c${it.hashCode()}" }
 
     fun cachedFolderPreview(dir: File, spec: ShelfSpec): Bitmap? = bitmaps.get(folderKey(dir, spec))
 
     /**
      * A picture of the case that [dir] opens into, drawn with the same geometry as the real one
-     * ([spec]) and scaled down, so that opening the folder is a pure enlargement: the bare top
-     * rail, then [ShelfSpec.miniRows] shelves, the last plank closing it at the bottom.
+     * ([spec]) and scaled down, so that opening the folder is a pure enlargement: its first
+     * [ShelfSpec.miniRows] shelves, from under the top rail to the foot of the books on the last
+     * of them, whose plank is the one the miniature stands on.
      * Blocking.
      */
     fun folderPreview(ctx: Context, dir: File, spec: ShelfSpec, depth: Int = 0): Bitmap {
         if (depth == 0) cachedFolderPreview(dir, spec)?.let { return it }
+        val key = folderKey(dir, spec)
+        val held = carried
+        val picked = within(dir, chosen).toSet()
+        ShelfDecoration.prepare(ctx)
         val w = spec.width.toFloat()
         val h = spec.miniH.toFloat()
-        val rail = spec.rail.toFloat()
         val bmp = createBitmap(COVER_W, (COVER_W * h / w).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         // Draw in real case pixels.
@@ -578,10 +734,11 @@ object Library {
         paint.shader = LinearGradient(
             0f, 0f, w, 0f, intArrayOf(SHELF_BACK, SHELF_BACK_LIGHT, SHELF_BACK), null, Shader.TileMode.CLAMP,
         )
-        c.drawRect(0f, rail, w, h, paint)
-        paint.shader = null
+        c.drawRect(0f, 0f, w, h, paint)
+        ShelfDecoration.drawWallGrain(c, w, h, paint)
         val rowH = spec.rowH
-        for (row in 1..spec.miniRows) ShelfDecoration.drawPlank(c, w, rail + row * rowH, spec.density, paint)
+        for (row in 1..spec.miniRows) ShelfDecoration.drawPlank(c, w, (row * rowH).toFloat(), spec.density, paint, row - 1)
+        ShelfDecoration.drawShade(c, w, spec.density, paint)
         paint.shader = null
 
         val title = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -590,20 +747,24 @@ object Library {
             typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
         }
         // Cases nested deeper than this are too small to show what stands in them.
-        val items = if (depth > 1) emptyList() else shelf(ctx, dir).take(spec.columns * spec.miniRows)
+        val items = if (depth > 1) emptyList() else shelf(ctx, dir).filter { it !in held }.take(spec.columns * spec.miniRows)
         items.forEachIndexed { i, f ->
-            val left = spec.post + (i % spec.columns) * spec.itemW + spec.px(9).toFloat()
-            val top = rail + (i / spec.columns) * rowH + spec.px(16)
+            val left = spec.side + (i % spec.columns) * spec.itemW + spec.gap.toFloat()
+            val top = (i / spec.columns) * rowH + spec.miniRise.toFloat()
             val cover = RectF(left, top, left + spec.coverW, top + spec.coverH)
+            // Beside what is chosen, the rest is faint. A case that holds some of it sees to that itself.
+            val faint = picked.isNotEmpty() && f !in picked && picked.none { it.path.startsWith(f.path + File.separator) }
+            val layer = if (faint) c.saveLayerAlpha(0f, 0f, w, h, FAINT_ALPHA) else -1
             val name: String
-            if (isShelf(f)) {
+            if (f.isDirectory) {
                 name = f.name
-                // A case is narrower than a book but stands taller, centred in its place.
+                // A case is a little wider than a book and stands taller, up to the shelf above.
                 val inner = folderPreview(ctx, f, spec, depth + 1)
-                val top = cover.top - spec.miniRise
-                val innerW = (cover.bottom - top) * inner.width / inner.height
-                val x = cover.centerX() - innerW / 2
-                c.drawBitmap(inner, null, RectF(x, top, x + innerW, cover.bottom), paint)
+                val half = spec.miniW / 2f
+                c.drawBitmap(
+                    inner, null,
+                    RectF(cover.centerX() - half, cover.top - spec.miniRise, cover.centerX() + half, cover.bottom), paint,
+                )
             } else {
                 name = meta(ctx, f).title
                 paint.color = 0xFF24160D.toInt()
@@ -613,12 +774,12 @@ object Library {
             }
 
             val plaque = Rect(
-                left.toInt(), (cover.bottom + spec.px(5)).toInt(),
-                cover.right.toInt(), (cover.bottom + spec.px(5) + spec.px(34)).toInt(),
+                left.toInt(), (cover.bottom + spec.px(6)).toInt(),
+                cover.right.toInt(), (cover.bottom + spec.px(6) + spec.px(32)).toInt(),
             )
             PlaqueDrawable(spec.density).apply {
-                favorite = !isShelf(f) && isFavorite(ctx, f)
-                finished = !isShelf(f) && isFinished(ctx, f)
+                favorite = !f.isDirectory && isFavorite(ctx, f)
+                finished = !f.isDirectory && isFinished(ctx, f)
                 bounds = plaque
                 draw(c)
             }
@@ -632,30 +793,13 @@ object Library {
                 .setEllipsize(TextUtils.TruncateAt.END)
                 .build()
             c.withTranslation((plaque.left + inset).toFloat(), plaque.top + (faceHeight - text.height) / 2f) { text.draw(c) }
+            if (layer >= 0) c.restoreToCount(layer)
         }
 
-        c.withTranslation(0f, rail) { ShelfDecoration.drawCase(c, w, h - rail, spec, paint) }
-        ShelfDecoration.drawRail(c, w, rail, spec.density, paint)
+        ShelfDecoration.drawCase(c, w, h, spec, paint)
         paint.shader = null
-        if (depth == 0) bitmaps.put(folderKey(dir, spec), bmp)
+        if (depth == 0) bitmaps.put(key, bmp)
         return bmp
-    }
-
-    /**
-     * How far a book is read, as a band along the foot of its [cover], for the widget, which has
-     * no room for the rod the shelf shows above a book (reading_progress.xml). Nothing for a book
-     * not begun. [d] is the density.
-     */
-    fun drawProgress(c: Canvas, cover: RectF, percent: Float, d: Float, paint: Paint) {
-        if (percent <= 0f) return
-        val top = cover.bottom - 6 * d
-        paint.shader = null
-        paint.style = Paint.Style.FILL
-        paint.color = 0xE61A0F08.toInt()
-        c.drawRect(cover.left, top, cover.right, cover.bottom, paint)
-        paint.color = 0xFFEBCB5C.toInt()
-        c.drawRect(cover.left, top + d, cover.left + cover.width() * percent, cover.bottom, paint)
-        paint.alpha = 255
     }
 
     /** Draws [b] into [dst] the way an ImageView with centerCrop does. */
@@ -733,11 +877,9 @@ object Library {
     }
 
     /** The book currently open in the reader, remembered so that it is reopened after the app was closed. */
-    fun openBook(ctx: Context): File? = statePrefs(ctx).getString(OPEN_BOOK, null)?.let(::File)
-
-    fun setOpenBook(ctx: Context, f: File?) {
-        statePrefs(ctx).edit { if (f == null) remove(OPEN_BOOK) else putString(OPEN_BOOK, f.path) }
-    }
+    /** The book that was read last, wherever it stands in the library; null if none was ever read. Blocking. */
+    fun lastRead(ctx: Context): File? =
+        books().map { it to state(ctx, it).lastRead }.filter { it.second > 0 }.maxByOrNull { it.second }?.first
 
     private fun favoritePaths(ctx: Context): Set<String> =
         statePrefs(ctx).getStringSet(FAVORITES, null) ?: emptySet()
@@ -762,9 +904,50 @@ object Library {
         stamp++
     }
 
-    fun favorites(ctx: Context): List<File> =
-        favoritePaths(ctx).map(::File)
-            // A deleted book lies in the bin until it is gone for good, and is no favorite there.
+    fun favorites(ctx: Context): List<File> = standing(favoritePaths(ctx)).sortedBy { it.name.lowercase() }
+
+    /** The books under [paths] that are in the library. */
+    private fun standing(paths: Collection<String>): List<File> =
+        paths.map(::File)
+            // A deleted book lies in the bin until it is gone for good, and counts for nothing there.
             .filter { it.isFile && !it.path.startsWith(bin().path + File.separator) }
-            .sortedBy { it.name.lowercase() }
+
+    /**
+     * The books put on the home-screen widget. Until the reader puts one on it or takes one off,
+     * it holds the favorites, as it always did before the two were told apart.
+     */
+    private fun widgetPaths(ctx: Context): Set<String> =
+        statePrefs(ctx).getStringSet(WIDGET, null) ?: favoritePaths(ctx)
+
+    fun isOnWidget(ctx: Context, f: File) = f.path in widgetPaths(ctx)
+
+    /** The order the reader gave the books on the widget. */
+    private fun widgetOrder(ctx: Context): List<String> = try {
+        statePrefs(ctx).getString(WIDGET_ORDER, null)?.let(::JSONArray)?.let { a -> List(a.length()) { a.getString(it) } }.orEmpty()
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    /** The books on the widget in the order they stand in: those never given a place come last, by name. */
+    private fun widgetList(ctx: Context): List<String> {
+        val on = widgetPaths(ctx)
+        val order = widgetOrder(ctx).filter { it in on }
+        return order + (on - order.toSet()).sortedBy { File(it).name.lowercase() }
+    }
+
+    /** Puts [f] on the widget, behind the books already there, or takes it off. */
+    fun setOnWidget(ctx: Context, f: File, on: Boolean) {
+        val list = widgetList(ctx) - f.path
+        saveWidget(ctx, if (on) list + f.path else list)
+    }
+
+    /** Puts the books on the widget in the order of [books], which must be all of them. */
+    fun setWidgetOrder(ctx: Context, books: List<File>) = saveWidget(ctx, books.map { it.path })
+
+    private fun saveWidget(ctx: Context, paths: List<String>) {
+        statePrefs(ctx).edit { putStringSet(WIDGET, paths.toHashSet()).putString(WIDGET_ORDER, JSONArray(paths).toString()) }
+        FavoritesWidget.refresh(ctx)
+    }
+
+    fun widgetBooks(ctx: Context): List<File> = standing(widgetList(ctx))
 }

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Every book of the library on one case; those standing on the widget are the bright ones. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <include layout="@layout/top_bar" />
+
+    <!-- Shown while searching; what is typed is looked for among all the books, or among the
+         favorites while the star is on. -->
+    <LinearLayout
+        android:id="@+id/searchRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/shelf_plank"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingBottom="8dp"
+        android:paddingEnd="0dp"
+        android:paddingStart="0dp"
+        android:paddingTop="4dp"
+        android:visibility="gone">
+
+        <ImageButton
+            android:id="@+id/starred"
+            android:layout_width="48dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/favorites"
+            android:src="@drawable/ic_star_outline" />
+
+        <EditText
+            android:id="@+id/query"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:background="@drawable/field"
+            android:fontFamily="serif"
+            android:hint="@string/search_hint"
+            android:imeOptions="actionSearch|flagNoExtractUi"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:paddingEnd="12dp"
+            android:paddingStart="12dp"
+            android:textColor="@color/cream"
+            android:textColorHint="@color/gold_dark"
+            android:textSize="16sp" />
+
+        <ImageButton
+            android:id="@+id/closeSearch"
+            android:layout_width="48dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/close"
+            android:src="@drawable/ic_close" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/shelf"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/shelf_back"
+            android:clipToPadding="false" />
+    </FrameLayout>
+</LinearLayout>

@@ -15,13 +15,14 @@ import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.IOException
+import kotlin.math.roundToInt
 
 /**
- * Renders one EPUB chapter at a time in a WebView. Horizontal mode lays the chapter out in
+ * Renders a book of flowing text (see [FlowBook]), one chapter at a time, in a WebView. Horizontal mode lays the chapter out in
  * screen-sized CSS columns and moves between them; vertical mode is a normal scrolling page.
  */
 @SuppressLint("SetJavaScriptEnabled")
-class EpubEngine(
+class FlowEngine(
     private val act: Activity,
     file: File,
     private val s: ReaderSettings,
@@ -29,7 +30,7 @@ class EpubEngine(
     private val host: ReaderHost,
 ) : ReaderEngine {
 
-    private val book = EpubBook.open(file)
+    private val book = FlowBook.open(file)
     private val total: Long
     private val web = WebView(act)
     override val view: View get() = web
@@ -44,7 +45,7 @@ class EpubEngine(
     init {
         if (book.spine.isEmpty()) {
             book.close()
-            throw IOException("EPUB has no readable content")
+            throw IOException("The book has no readable content")
         }
         total = book.weights.sum().coerceAtLeast(1)
         chapter = start.chapter.coerceIn(0, book.spine.lastIndex)
@@ -106,14 +107,18 @@ class EpubEngine(
                 if (closed) return@runOnUiThread
                 reveal()
                 val n = book.spine.size
-                val label =
-                    if (s.vertical) "Chapter ${chapter + 1}/$n"
-                    else "Chapter ${chapter + 1}/$n · page ${page + 1}/$pages"
+                val inChapter = if (s.vertical) "" else "page ${page + 1}/$pages"
+                val label = listOf("Chapter ${chapter + 1}/$n", inChapter).filter { it.isNotEmpty() }.joinToString(" · ")
                 // In the last chapter the pages are spread up to the very end of the line, so
                 // that the last page of the book stands there.
                 val last = chapter == book.spine.lastIndex && !s.vertical && pages > 1
                 shown = if (last) page.toFloat() / (pages - 1) else fraction.toFloat()
-                host.onPosition(chapter, fraction.toFloat(), bookPercent(progress.toFloat()), label)
+                if (!s.vertical) measure(pages)
+                host.onPosition(
+                    chapter, fraction.toFloat(), bookPercent(progress.toFloat()), label, inChapter,
+                    if (s.vertical) null else page + 1 to pages,
+                    if (s.vertical) null else inBook(page),
+                )
             }
         }
 
@@ -188,7 +193,7 @@ class EpubEngine(
 
     private fun step(direction: Int) {
         if (!ready) return
-        web.evaluateJavascript("window.__r?__r.step($direction,${s.slidePages}):null") { moved ->
+        web.evaluateJavascript("window.__r?__r.step($direction,${s.slidePages && s.vertical}):null") { moved ->
             val target = chapter + direction
             if (moved == "false" && !closed && target in book.spine.indices) {
                 chapter = target
@@ -199,6 +204,39 @@ class EpubEngine(
     }
 
     override val contents get() = book.toc.map { it.title to it.depth }
+
+    /**
+     * The pages of the chapters shown so far, as the text is laid out now: [laidOut] says for
+     * which size of text, margins and screen they were counted, and they are forgotten when
+     * that changes.
+     */
+    private val counted = HashMap<Int, Int>()
+    private var laidOut = ""
+
+    /** Notes that the chapter being shown has [pages] pages. */
+    private fun measure(pages: Int) {
+        val layout = "${config()}:${s.fontSize}:${web.width}x${web.height}"
+        if (layout != laidOut) counted.clear()
+        laidOut = layout
+        counted[chapter] = pages
+    }
+
+    /**
+     * Which page of the whole book the page [page] of this chapter is, and how many the book
+     * has, with the text as large as it is now. The chapters shown so far are known by their
+     * count; the others are taken to hold as many pages for their length as those do.
+     */
+    private fun inBook(page: Int): Pair<Int, Int> {
+        val perByte = counted.values.sum().toDouble() / counted.keys.sumOf { book.weights[it] }.coerceAtLeast(1)
+        var before = 0
+        var all = 0
+        for (i in book.spine.indices) {
+            val pages = counted[i] ?: (book.weights[i] * perByte).roundToInt().coerceAtLeast(1)
+            if (i < chapter) before += pages
+            all += pages
+        }
+        return before + page + 1 to all
+    }
 
     /** How far into the chapter, 0..1, the page being shown begins. */
     private var shown = 0f

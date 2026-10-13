@@ -3,11 +3,14 @@ package io.github.edoardonegri.ready
 import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Typeface
 import android.text.SpannableStringBuilder
 import android.text.Spanned
+import android.text.TextPaint
 import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
+import android.util.TypedValue
 import android.view.ContextThemeWrapper
 import android.view.LayoutInflater
 import android.view.View
@@ -16,16 +19,17 @@ import android.view.Window
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
-import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.toDrawable
+import androidx.core.view.doOnLayout
 import androidx.core.view.isVisible
+import androidx.core.widget.doAfterTextChanged
 
 /**
  * A dialog built like the bookcase (dialog_shelf.xml): a wooden panel with a brass title plate,
- * a cross to close it and whatever it is given below: details in gold lettering, a text field, a
+ * a cross to close it and whatever it is given below: details named in gold, a text field, a
  * column of choices, a brass button.
  */
 class ShelfDialog(private val ctx: Context) {
@@ -36,7 +40,6 @@ class ShelfDialog(private val ctx: Context) {
     private val d = ctx.resources.displayMetrics.density
     private val input: EditText = view.findViewById(R.id.dialogInput)
     private val column: LinearLayout = view.findViewById(R.id.dialogOptions)
-    private var abandoned = false
 
     /** What was typed into the field asked for with [input]. */
     val text: String get() = input.text.toString()
@@ -46,47 +49,75 @@ class ShelfDialog(private val ctx: Context) {
         view.findViewById<View>(R.id.dialogTitle).background = PlaqueDrawable(d, ornate = true)
         view.findViewById<View>(R.id.dialogPrimary).background = PlaqueDrawable(d)
         view.findViewById<View>(R.id.dialogClose).setOnClickListener { dialog.dismiss() }
+        // The grain of the board ends at its round corners.
+        view.clipToOutline = true
     }
 
     fun title(text: CharSequence) = apply { view.findViewById<TextView>(R.id.dialogTitle).text = text }
 
-    /** One line per row: the name in gold, then its value. */
+    /**
+     * What there is to say about a book or a shelf, two to a line: each with its name in gold
+     * over its value. A last one that is left over has the line to itself.
+     */
     fun details(rows: List<Pair<String, String>>) = apply {
         val gold = ContextCompat.getColor(ctx, R.color.gold)
-        val text = SpannableStringBuilder()
-        for ((name, value) in rows) {
-            if (text.isNotEmpty()) text.append('\n')
-            val start = text.length
-            text.append(name).append("  ")
-            text.setSpan(ForegroundColorSpan(gold), start, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            text.append(value)
+        val grid = view.findViewById<LinearLayout>(R.id.dialogGrid)
+        grid.visibility = View.VISIBLE
+        for (pair in rows.chunked(2)) {
+            val line = LinearLayout(ctx)
+            line.isBaselineAligned = false
+            pair.forEachIndexed { i, (name, value) ->
+                val text = SpannableStringBuilder(name).append('\n').append(value)
+                text.setSpan(ForegroundColorSpan(gold), 0, name.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                text.setSpan(RelativeSizeSpan(0.85f), 0, name.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                val cell = TextView(ctx)
+                cell.text = text
+                cell.typeface = Typeface.SERIF
+                cell.textSize = 14f
+                cell.setTextColor(ContextCompat.getColor(ctx, R.color.cream))
+                line.addView(
+                    cell,
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                        .apply { if (i > 0) marginStart = (12 * d).toInt() },
+                )
+            }
+            grid.addView(
+                line,
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    .apply { topMargin = (10 * d).toInt() },
+            )
         }
-        message(text)
     }
 
     /** A few words in place of the details. */
     fun message(text: CharSequence) = apply {
-        view.findViewById<TextView>(R.id.dialogDetails).text = text
-        view.findViewById<View>(R.id.dialogBody).visibility = View.VISIBLE
-    }
-
-    /** Shows the book standing beside the details. */
-    fun cover(bmp: Bitmap?) = apply {
-        val cover = view.findViewById<RatioImageView>(R.id.dialogCover)
-        cover.binding = true
-        cover.setImageBitmap(bmp)
-        cover.visibility = View.VISIBLE
+        val words = view.findViewById<TextView>(R.id.dialogDetails)
+        words.text = text
+        words.visibility = View.VISIBLE
     }
 
     /**
      * Makes the title a field holding [name] that can be typed into. What it holds when the dialog
-     * is closed, if it was changed, is given to [onRename] - unless [abandon] was called first.
+     * is closed, if it was changed, is given to [onRename].
      */
     fun name(name: String, onRename: (String) -> Unit) = apply {
         val field = view.findViewById<EditText>(R.id.dialogName)
         view.findViewById<View>(R.id.dialogTitle).visibility = View.GONE
         field.visibility = View.VISIBLE
         field.background = PlaqueDrawable(d, ornate = true)
+        // A long name runs on to a second line, though Enter still means Done, and is written
+        // smaller for the two to fit the plate, as the titles that cannot be changed are.
+        field.setHorizontallyScrolling(false)
+        field.maxLines = 2
+        val measure = TextPaint(field.paint).apply { textSize = TITLE_DP * d }
+        fun fit() {
+            val room = field.width - field.paddingLeft - field.paddingRight
+            if (room <= 0) return
+            val long = measure.measureText(field.text.toString()) > room
+            field.setTextSize(TypedValue.COMPLEX_UNIT_PX, (if (long) LONG_TITLE_DP else TITLE_DP) * d)
+        }
+        field.doOnLayout { fit() }
+        field.doAfterTextChanged { fit() }
         field.setText(name)
         // Done puts the keyboard away; the name is taken when the dialog closes.
         field.setOnEditorActionListener { v, _, _ ->
@@ -96,14 +127,8 @@ class ShelfDialog(private val ctx: Context) {
         }
         dialog.setOnDismissListener {
             val typed = field.text.toString().trim()
-            if (!abandoned && typed.isNotEmpty() && typed != name) onRename(typed)
+            if (typed.isNotEmpty() && typed != name) onRename(typed)
         }
-    }
-
-    /** Closes the dialog without taking over a changed [name]. */
-    fun abandon() {
-        abandoned = true
-        dialog.dismiss()
     }
 
     /** An arrow at the top left closes the dialog, in place of the cross. */
@@ -114,48 +139,48 @@ class ShelfDialog(private val ctx: Context) {
         arrow.setOnClickListener { dialog.dismiss() }
     }
 
-    /** A button at the top right; the dialog stays open unless [onClick] closes it. */
-    fun icon(icon: Int, description: Int, onClick: () -> Unit) = apply { addIcon(icon, description).setOnClickListener { onClick() } }
+    /** The dialog has no cross: it is closed by a tap beside it, or by going back. */
+    fun uncrossed() = apply { view.findViewById<View>(R.id.dialogClose).visibility = View.GONE }
 
-    /** A button at the top right that is switched in place, such as the favorite star. */
-    fun switch(on: Boolean, iconOn: Int, iconOff: Int, description: Int, onSwitch: (Boolean) -> Unit) = apply {
-        var state = on
-        val button = addIcon(if (state) iconOn else iconOff, description)
-        button.setOnClickListener {
-            state = !state
-            button.setImageResource(if (state) iconOn else iconOff)
-            onSwitch(state)
+    /** Shows anew which of the pair at the foot is held down, see [either]. */
+    private var showPair = {}
+
+    /**
+     * Two buttons side by side under a line, [first] and [second], of which one is held down:
+     * the first if [isFirst] says so. Pressing the other tells [onPick], and the dialog stays open.
+     */
+    fun either(first: Int, second: Int, isFirst: () -> Boolean, onPick: (first: Boolean) -> Unit) = apply {
+        val buttons = listOf(R.id.dialogFirst to first, R.id.dialogSecond to second).map { (id, label) ->
+            view.findViewById<TextView>(id).apply {
+                setText(label)
+                background = PlaqueDrawable(d)
+            }
         }
-    }
-
-    private fun addIcon(icon: Int, description: Int): ImageButton {
-        val icons = view.findViewById<LinearLayout>(R.id.dialogIcons)
-        val button = LayoutInflater.from(ctx).inflate(R.layout.dialog_icon, icons, false) as ImageButton
-        button.setImageResource(icon)
-        button.contentDescription = ctx.getString(description)
-        icons.addView(button, icons.childCount - 1)
-        return button
+        showPair = {
+            val one = isFirst()
+            hold(buttons[0], one)
+            hold(buttons[1], !one)
+        }
+        showPair()
+        view.findViewById<View>(R.id.dialogRule).visibility = View.VISIBLE
+        view.findViewById<View>(R.id.dialogPair).visibility = View.VISIBLE
+        buttons.forEachIndexed { i, b ->
+            b.setOnClickListener {
+                onPick(i == 0)
+                showPair()
+            }
+        }
     }
 
     /**
-     * The wide brass button at the foot as a switch: its wording says how things stand, and
-     * pressing it changes that in place, without closing the dialog.
+     * Shows the brass [button] as held [down], or as standing out again. Its wording goes down
+     * with it, and is bright on the darkened plate.
      */
-    fun primarySwitch(on: Boolean, whenOn: Int, whenOff: Int, onSwitch: (Boolean) -> Unit) = apply {
-        val button = view.findViewById<TextView>(R.id.dialogPrimary)
-        val plate = button.background as PlaqueDrawable
-        var state = on
-        fun show() {
-            button.setText(if (state) whenOn else whenOff)
-            plate.finished = state
-        }
-        show()
-        button.visibility = View.VISIBLE
-        button.setOnClickListener {
-            state = !state
-            show()
-            onSwitch(state)
-        }
+    private fun hold(button: TextView, down: Boolean) {
+        (button.background as PlaqueDrawable).sunk = down
+        button.setTextColor(ContextCompat.getColor(ctx, if (down) R.color.gold_light else R.color.plaque_text))
+        val shadow = (PlaqueDrawable.SHADOW_DP * d).toInt()
+        button.setPadding(0, if (down) shadow else 0, 0, if (down) 0 else shadow)
     }
 
     /** A text field holding [initial], opened with the keyboard up; read it with [text]. */
@@ -187,19 +212,19 @@ class ShelfDialog(private val ctx: Context) {
     }
 
     /**
-     * A column of brass buttons of which one is chosen, marked with a tick. Choosing another
-     * moves the tick and tells [onPick], and the dialog stays open.
+     * A column of brass buttons of which one is chosen: it is held down. Choosing another lets
+     * it go, holds that one down and tells [onPick], and the dialog stays open.
      */
     fun pick(labels: List<String>, chosen: Int, onPick: (Int) -> Unit) = apply {
         val buttons = labels.map { option(it) }
-        fun mark(index: Int) = buttons.forEachIndexed { i, b ->
-            b.text = if (i == index) ctx.getString(R.string.chosen, labels[i]) else labels[i]
-        }
+        fun mark(index: Int) = buttons.forEachIndexed { i, b -> hold(b, i == index) }
         mark(chosen)
         buttons.forEachIndexed { i, b ->
             b.setOnClickListener {
                 mark(i)
                 onPick(i)
+                // What was picked may have changed which of the pair at the foot is held down.
+                showPair()
             }
         }
     }
@@ -234,6 +259,12 @@ class ShelfDialog(private val ctx: Context) {
             dialog.dismiss()
             action()
         }
+    }
+
+    private companion object {
+        /** The size of the letters of a name on its plate, and of one that takes two lines. */
+        const val TITLE_DP = 18
+        const val LONG_TITLE_DP = 14
     }
 
     fun show() {

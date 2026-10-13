@@ -11,6 +11,13 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- Shows a page being turned, over the one the reader has changed to underneath. -->
+    <io.github.edoardonegri.ready.PageTurnView
+        android:id="@+id/pageTurn"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
     <!-- The page being read, in small print at the foot of the page, if the reader asked for it. -->
     <TextView
         android:id="@+id/pageNumber"
@@ -22,11 +29,12 @@
         android:textSize="11sp"
         android:visibility="gone" />
 
-    <!-- Orange tint over the pages: the "light temperature" filter. The menu lies above it. -->
-    <View
-        android:id="@+id/warmth"
+    <!-- The warm light, which falls on the page but not on the menu. -->
+    <io.github.edoardonegri.ready.LampView
+        android:id="@+id/lamp"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="match_parent"
+        android:visibility="gone" />
 
     <!-- The space above the panel is not clickable, so taps there reach the book and close the menu. -->
     <LinearLayout
@@ -41,6 +49,18 @@
             android:layout_height="0dp"
             android:layout_weight="1" />
 
+        <!-- The shadow the panel casts on the page, which sets it apart from a dark page too. -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="12dp"
+            android:background="@drawable/panel_shade" />
+
+        <!-- Its brass upper edge. -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="2dp"
+            android:background="@color/gold_dark" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -49,7 +69,7 @@
             android:clipChildren="false"
             android:focusable="true"
             android:orientation="vertical"
-            android:paddingBottom="14dp">
+            android:paddingBottom="16dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -91,24 +111,32 @@
                     android:src="@drawable/ic_settings" />
             </LinearLayout>
 
+            <!-- The chapter being read by its name; that of another one while a finger is on its
+                 number or drags the knob over it. -->
             <TextView
-                android:id="@+id/position"
+                android:id="@+id/chapterName"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:ellipsize="end"
                 android:fontFamily="serif"
                 android:gravity="center"
+                android:paddingEnd="24dp"
+                android:paddingStart="24dp"
+                android:singleLine="true"
                 android:textColor="@color/cream"
-                android:textSize="14sp" />
+                android:textSize="16sp"
+                android:visibility="gone" />
 
             <!-- The numbers of the chapters; their marks are drawn across the line of the seek bar
-                 below. Tapping a number opens its chapter. -->
+                 below. Tapping a number opens its chapter. It is tall enough for the lens that
+                 shows the chapters around the one being read, as large as a finger makes it. -->
             <io.github.edoardonegri.ready.ChapterMarks
                 android:id="@+id/chapters"
                 android:layout_width="match_parent"
-                android:layout_height="26dp"
+                android:layout_height="40dp"
                 android:layout_marginEnd="8dp"
                 android:layout_marginStart="8dp"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="4dp"
                 android:contentDescription="@string/contents"
                 android:visibility="gone" />
 
@@ -119,6 +147,94 @@
                 android:layout_marginEnd="8dp"
                 android:layout_marginStart="8dp"
                 android:max="1000" />
+
+            <!-- Three figures under the line, which they start and end with: the page of the
+                 chapter, how much of the book is read, and the page of the book. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:baselineAligned="false"
+                android:orientation="horizontal"
+                android:paddingEnd="24dp"
+                android:paddingStart="24dp"
+                android:paddingTop="6dp">
+
+                <LinearLayout
+                    android:id="@+id/inChapter"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="start"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/chapterPage"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="serif"
+                        android:textColor="@color/cream"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="serif"
+                        android:text="@string/in_chapter"
+                        android:textColor="#99F3E6C8"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/read"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center_horizontal"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/percent"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="serif"
+                        android:textColor="@color/gold_light"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="serif"
+                        android:text="@string/read"
+                        android:textColor="#99F3E6C8"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/inBook"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="end"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/bookPage"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="serif"
+                        android:textColor="@color/cream"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="serif"
+                        android:text="@string/in_book"
+                        android:textColor="#99F3E6C8"
+                        android:textSize="11sp" />
+                </LinearLayout>
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>

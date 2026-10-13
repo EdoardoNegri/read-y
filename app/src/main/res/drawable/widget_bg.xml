@@ -1,10 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The back wall of the bookcase (see shelf_back.xml), with the launcher's widget corners. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <corners android:radius="@dimen/widget_radius" />
-    <gradient
-        android:angle="0"
-        android:centerColor="@color/shelf_back_light"
-        android:endColor="@color/shelf_back"
-        android:startColor="@color/shelf_back" />
-</shape>
+<!-- The back wall of the bookcase (see shelf_back.xml). Its corners are square, like a bookcase's: a home
+     screen that rounds the corners of widgets leaves those alone that have a background of their own shape
+     (widget_favorites.xml). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <gradient
+                android:angle="0"
+                android:centerColor="@color/shelf_back_light"
+                android:endColor="@color/shelf_back"
+                android:startColor="@color/shelf_back" />
+        </shape>
+    </item>
+    <!-- The grain of the boards it is made of, which stand upright. -->
+    <item android:width="1dp" android:height="1dp" android:gravity="fill">
+        <bitmap android:src="@drawable/wood_grain_upright" android:tileMode="repeat" />
+    </item>
+</layer-list>

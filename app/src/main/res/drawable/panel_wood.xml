@@ -16,6 +16,10 @@
                 android:startColor="@color/wood" />
         </shape>
     </item>
+    <!-- The grain of the board. Its corners are cut round by the view, which is clipped to its outline. -->
+    <item android:width="1dp" android:height="1dp" android:gravity="fill" android:bottom="2dp" android:left="2dp" android:right="2dp" android:top="2dp">
+        <bitmap android:src="@drawable/wood_grain" android:tileMode="repeat" />
+    </item>
     <!-- A lit line just inside the top edge. -->
     <item android:height="1dp" android:gravity="top" android:left="14dp" android:right="14dp" android:top="3dp">
         <shape>

@@ -7,58 +7,8 @@
 
     <include layout="@layout/top_bar" />
 
-    <!-- Shown while several books and shelves are being chosen, to move or delete them together. -->
-    <LinearLayout
-        android:id="@+id/selectRow"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="@drawable/shelf_plank"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingBottom="8dp"
-        android:paddingEnd="12dp"
-        android:paddingStart="0dp"
-        android:paddingTop="4dp"
-        android:visibility="gone">
-
-        <ImageButton
-            android:id="@+id/closeSelect"
-            android:layout_width="48dp"
-            android:layout_height="40dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/close"
-            android:src="@drawable/ic_close" />
-
-        <TextView
-            android:id="@+id/selectCount"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:fontFamily="serif"
-            android:textColor="@color/gold_light"
-            android:textSize="16sp"
-            android:textStyle="bold" />
-
-        <!-- The backgrounds are PlaqueDrawables set in code. -->
-        <TextView
-            android:id="@+id/moveSelected"
-            style="@style/BrassButton"
-            android:layout_width="wrap_content"
-            android:paddingEnd="18dp"
-            android:paddingStart="18dp"
-            android:text="@string/move" />
-
-        <TextView
-            android:id="@+id/deleteSelected"
-            style="@style/BrassButton"
-            android:layout_width="wrap_content"
-            android:layout_marginStart="10dp"
-            android:paddingEnd="18dp"
-            android:paddingStart="18dp"
-            android:text="@string/delete" />
-    </LinearLayout>
-
-    <!-- Shown while searching; what is typed is looked for on this shelf and all those inside it. -->
+    <!-- Shown while searching; what is typed is looked for on this shelf and all those inside it,
+         or among the favorites of the whole library while the star is on. -->
     <LinearLayout
         android:id="@+id/searchRow"
         android:layout_width="match_parent"
@@ -68,9 +18,17 @@
         android:orientation="horizontal"
         android:paddingBottom="8dp"
         android:paddingEnd="0dp"
-        android:paddingStart="12dp"
+        android:paddingStart="0dp"
         android:paddingTop="4dp"
         android:visibility="gone">
+
+        <ImageButton
+            android:id="@+id/starred"
+            android:layout_width="48dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/favorites"
+            android:src="@drawable/ic_star_outline" />
 
         <EditText
             android:id="@+id/query"
@@ -119,52 +77,64 @@
             android:scaleType="fitXY"
             android:visibility="gone" />
 
-        <!-- The shadow the top rail casts into the case. -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="10dp"
-            android:background="@drawable/shelf_shade"
-            android:translationZ="2dp" />
-
-        <!-- Shown for a few seconds after something was deleted. -->
+        <!-- Hangs under the name plate while books are chosen: the star that makes
+             favorites of them, the tick that marks them as read, the bin that deletes them, and
+             a cross that lets go of them all. Books can be dropped on the three as well. It lies
+             over the shelf, which stays where it is. -->
         <LinearLayout
-            android:id="@+id/undoBar"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_gravity="bottom"
-            android:layout_marginBottom="16dp"
-            android:layout_marginEnd="20dp"
-            android:layout_marginStart="20dp"
+            android:id="@+id/pickRow"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginTop="4dp"
             android:background="@drawable/panel_wood"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingBottom="10dp"
-            android:paddingEnd="12dp"
-            android:paddingStart="16dp"
-            android:paddingTop="10dp"
-            android:translationZ="4dp"
+            android:paddingEnd="2dp"
+            android:paddingStart="6dp"
+            android:translationZ="3dp"
             android:visibility="gone">
 
-            <TextView
-                android:id="@+id/undoText"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:ellipsize="middle"
-                android:fontFamily="serif"
-                android:singleLine="true"
-                android:textColor="@color/cream"
-                android:textSize="15sp" />
+            <ImageButton
+                android:id="@+id/pickStar"
+                android:layout_width="42dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/favorite"
+                android:src="@drawable/ic_star_outline" />
 
-            <!-- The background is a PlaqueDrawable set in code. -->
-            <TextView
-                android:id="@+id/undo"
-                style="@style/BrassButton"
-                android:layout_width="wrap_content"
-                android:layout_marginStart="12dp"
-                android:paddingEnd="22dp"
-                android:paddingStart="22dp"
-                android:text="@string/undo" />
+            <ImageButton
+                android:id="@+id/pickRead"
+                android:layout_width="42dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/finished"
+                android:src="@drawable/ic_check_outline" />
+
+            <ImageButton
+                android:id="@+id/bin"
+                android:layout_width="42dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/delete"
+                android:src="@drawable/ic_delete" />
+
+            <!-- Set apart from the three by a brass line. -->
+            <View
+                android:layout_width="1dp"
+                android:layout_height="20dp"
+                android:layout_marginStart="4dp"
+                android:background="@color/gold_dark" />
+
+            <ImageButton
+                android:id="@+id/closePick"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/close"
+                android:scaleX="0.8"
+                android:scaleY="0.8"
+                android:src="@drawable/ic_close" />
         </LinearLayout>
 
         <LinearLayout

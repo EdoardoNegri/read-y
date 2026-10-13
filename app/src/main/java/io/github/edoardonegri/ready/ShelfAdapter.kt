@@ -12,8 +12,8 @@ import java.io.File
 import kotlin.math.roundToInt
 
 /**
- * The places on a shelf. Tapping one opens it, tapping its plaque shows its details, and a long
- * press picks it up.
+ * The places on a shelf. Tapping one opens it, tapping its plaque shows its details, or chooses
+ * it while things are being chosen, and a long press picks it up.
  */
 class ShelfAdapter(
     private val onOpen: (File, View) -> Unit,
@@ -30,13 +30,22 @@ class ShelfAdapter(
     /** While several things are being chosen: those chosen so far, which stand out from the rest. */
     var picked: Set<File>? = null
 
+    /** Sets [picked] and shows it on the shelf as it stands, without laying it out anew. */
+    fun choose(chosen: Set<File>?) {
+        picked = chosen
+        notifyItemRangeChanged(0, items.size, "drag")
+    }
+
+    /** Things are being carried about: the whole shelf shows in full meanwhile, chosen or not. */
+    var moving = false
+
     /** Shows on each book the shelf it stands on, for books gathered from several shelves. */
     var showPlaces = false
 
-    /** The item being dragged; its place on the shelf stays empty while it is carried about. */
-    var dragging: File? = null
+    /** What is being dragged; its places on the shelf stay empty while it is carried about. */
+    var carried: Set<File> = emptySet()
         set(value) {
-            val changed = listOfNotNull(field, value)
+            val changed = field + value
             field = value
             // Said to be a small change, so that the place is not faded over into a new view.
             for (f in changed) indexOf(f).let { if (it >= 0) notifyItemChanged(it, "drag") }
@@ -45,6 +54,7 @@ class ShelfAdapter(
     class Holder(v: View) : RecyclerView.ViewHolder(v) {
         val cover: RatioImageView = v.findViewById(R.id.cover)
         val gap: View = v.findViewById(R.id.gap)
+        val frame: View = v.findViewById(R.id.coverFrame)
         val progress: ProgressBar = v.findViewById(R.id.progress)
         val place: TextView = v.findViewById(R.id.place)
         val plaque: TextView = v.findViewById(R.id.plaque)
@@ -60,6 +70,21 @@ class ShelfAdapter(
         notifyDataSetChanged()
     }
 
+    /** Takes [gone] off the shelf, the others closing up. */
+    fun remove(gone: Set<File>) {
+        for (f in gone) indexOf(f).let {
+            if (it >= 0) {
+                items.removeAt(it)
+                notifyItemRemoved(it)
+            }
+        }
+    }
+
+    /** Shows [f] anew where it stands, e.g. after it was chosen or let go of. */
+    fun changed(f: File) {
+        indexOf(f).let { if (it >= 0) notifyItemChanged(it, "drag") }
+    }
+
     /** Takes the item at [from] to the place [to], the others closing up behind it. */
     fun move(from: Int, to: Int) {
         items.add(to, items.removeAt(from))
@@ -67,6 +92,10 @@ class ShelfAdapter(
     }
 
     override fun getItemCount() = items.size
+
+    private companion object {
+        const val FAINT = 0.4f
+    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
         Holder(LayoutInflater.from(parent.context).inflate(R.layout.item_book, parent, false)).also {
@@ -85,35 +114,44 @@ class ShelfAdapter(
         }
         // What is carried leaves its place empty. Its parts are hidden rather than the place as a
         // whole, which the list makes visible again whenever it moves it.
-        val carried = f == dragging
+        val carried = f in carried
         val place = h.itemView as ViewGroup
-        val faint = picked.let { it != null && f !in it }
+        val faint = !moving && picked.let { it != null && f !in it }
+        // A shelf with something chosen on it shows that: its miniature is faint but for that.
+        val holds = faint && f.isDirectory && picked.orEmpty().any { it.path.startsWith(f.path + File.separator) }
         for (i in 0 until place.childCount) place.getChildAt(i).apply {
             visibility = if (carried) View.INVISIBLE else View.VISIBLE
-            alpha = if (faint) 0.35f else 1f
+            alpha = if (faint && !(holds && this === h.frame)) FAINT else 1f
         }
         // A recycled view may have been left enlarged as the shelf something was dragged over.
         h.itemView.scaleX = 1f
         h.itemView.scaleY = 1f
-        h.place.visibility = if (showPlaces && !Library.isShelf(f)) View.VISIBLE else View.GONE
+        h.place.visibility = if (showPlaces && !f.isDirectory) View.VISIBLE else View.GONE
         if (showPlaces) h.place.text = f.parentFile.let {
             if (it == null || it == Library.root()) ctx.getString(R.string.app_name) else it.name
         }
         val shelfSpec = spec()
-        h.cover.binding = !Library.isShelf(f)
-        // A book fills its place; a case is narrower, stands in the middle of it and rises above
-        // the books into the gap under the shelf above, which the row's top padding gives up.
-        val rise = if (Library.isShelf(f) && shelfSpec.width > 0) shelfSpec.miniRise else 0
-        h.cover.scaleType = if (Library.isShelf(f)) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
-        h.cover.setBackgroundColor(if (Library.isShelf(f)) 0 else 0xFF24160D.toInt())
-        h.cover.ratio = 1.5f + if (rise > 0) rise.toFloat() / shelfSpec.coverW else 0f
-        h.gap.layoutParams.height = shelfSpec.px(16) - rise
+        h.cover.binding = !f.isDirectory
+        h.cover.cased = f.isDirectory
+        // A book fills its place; a case rises above the books, through the gap the row leaves
+        // at its top, up to the shelf above, and is wider by as much as that makes it larger.
+        val rise = if (f.isDirectory && shelfSpec.width > 0) shelfSpec.miniRise else 0
+        h.cover.scaleType = if (f.isDirectory) ImageView.ScaleType.FIT_XY else ImageView.ScaleType.CENTER_CROP
+        h.cover.setBackgroundColor(if (f.isDirectory) 0 else 0xFF24160D.toInt())
+        val wider = if (rise > 0) (shelfSpec.miniW - shelfSpec.coverW) / 2 else 0
+        (h.frame.layoutParams as ViewGroup.MarginLayoutParams).apply {
+            leftMargin = -wider
+            rightMargin = -wider
+        }
+        h.cover.ratio =
+            if (rise > 0) (shelfSpec.coverH + rise).toFloat() / (shelfSpec.coverW + 2 * wider).coerceAtLeast(1) else ShelfSpec.BOOK
+        h.cover.tall = if (shelfSpec.width > 0) shelfSpec.coverH + rise else 0
+        h.gap.layoutParams.height = shelfSpec.miniRise - rise
         h.gap.requestLayout()
         val plate = h.plaque.background as PlaqueDrawable
-        if (Library.isShelf(f)) {
-            h.plaque.text = if (f == Library.favoritesShelf()) ctx.getString(R.string.favorites) else f.name
-            // The shelf of the favorites wears their plate.
-            plate.favorite = f == Library.favoritesShelf()
+        if (f.isDirectory) {
+            h.plaque.text = f.name
+            plate.favorite = false
             plate.finished = false
             h.progress.visibility = View.GONE
             if (shelfSpec.width <= 0) return
@@ -129,8 +167,9 @@ class ShelfAdapter(
         // A favorite is told by its plate, which leaves the cover free.
         plate.favorite = Library.isFavorite(ctx, f)
         plate.finished = Library.isFinished(ctx, f)
-        h.progress.visibility = if (st.percent > 0f) View.VISIBLE else View.GONE
-        h.progress.progress = (st.percent * 100).roundToInt()
+        // A book marked as read is read to the end, wherever it was last left open.
+        h.progress.visibility = if (st.percent > 0f || plate.finished) View.VISIBLE else View.GONE
+        h.progress.progress = if (plate.finished) 100 else (st.percent * 100).roundToInt()
         h.plaque.text = Library.cachedMeta(ctx, f)?.title ?: f.nameWithoutExtension
         val cached = Library.cachedCover(f)
         h.cover.setImageBitmap(cached)

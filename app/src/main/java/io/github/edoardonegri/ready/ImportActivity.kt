@@ -34,8 +34,7 @@ class ImportActivity : Activity() {
                 if (book == null) {
                     Toast.makeText(this, R.string.cannot_import, Toast.LENGTH_LONG).show()
                 } else {
-                    // The shelf below, the book on top; whatever was open before is left.
-                    Library.setOpenBook(this, null)
+                    // The shelf below, the book on top.
                     startActivities(
                         arrayOf(
                             Intent(this, MainActivity::class.java)

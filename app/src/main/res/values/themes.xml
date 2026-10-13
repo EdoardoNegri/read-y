@@ -24,12 +24,14 @@
     </style>
 
     <!-- The plate that names the bookcase on its top rail, and every dialog; its background is an
-         ornate PlaqueDrawable set in code. -->
+         ornate PlaqueDrawable set in code. It is as wide as the place it is given, whatever it
+         says. A name too long for one line is written smaller, in two. -->
     <style name="TitlePlate">
-        <item name="android:layout_width">wrap_content</item>
-        <item name="android:layout_height">40dp</item>
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">45dp</item>
         <item name="android:layout_gravity">center</item>
-        <item name="android:minWidth">132dp</item>
+        <item name="android:layout_marginStart">4dp</item>
+        <item name="android:layout_marginEnd">4dp</item>
         <item name="android:gravity">center</item>
         <item name="android:paddingStart">26dp</item>
         <item name="android:paddingEnd">26dp</item>
@@ -39,7 +41,13 @@
         <item name="android:textStyle">bold</item>
         <item name="android:textSize" tools:ignore="SpUsage">18dp</item>
         <item name="android:textColor">@color/plaque_text</item>
-        <item name="android:singleLine">true</item>
+        <item name="android:maxLines">2</item>
+        <item name="autoSizeTextType">uniform</item>
+        <item name="autoSizeMinTextSize">12dp</item>
+        <item name="autoSizeMaxTextSize">18dp</item>
+        <item name="autoSizeStepGranularity">1dp</item>
+        <item name="android:lineSpacingMultiplier">0.85</item>
+        <item name="android:includeFontPadding">false</item>
         <item name="android:ellipsize">end</item>
         <item name="android:shadowColor">#99FFF6C8</item>
         <item name="android:shadowDy">1</item>
@@ -50,7 +58,20 @@
         <item name="android:windowBackground">@color/panel</item>
     </style>
 
+    <!-- Nothing but what is drawn in it: the home screen shows through (WidgetOpenActivity). -->
+    <style name="Theme.Ready.Clear">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <!-- No picture stands in for the reader while it starts: what it takes over from, the page a
+         book was opened to, stays in view until then. -->
     <style name="Theme.Ready.Reader">
+        <item name="android:windowDisablePreview">true</item>
         <item name="android:windowBackground">@color/black</item>
     </style>
 </resources>

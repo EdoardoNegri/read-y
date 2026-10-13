@@ -1,37 +1,87 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- How far a book is read, in the free space above its cover: a rounded brass rod filling a dark
-     groove with a brass rim. -->
+<!-- How far a book is read, in the free space above its cover: a polished brass rod in a dark
+     groove with a fine bronze rim. Both hang from the shelf above, whose wood is their upper edge:
+     they are square there, and the rim along the top lies outside the picture. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:id="@android:id/background">
+    <!-- The groove, darkest under the shelf that shades it. -->
+    <item
+        android:id="@android:id/background"
+        android:top="-2dp">
         <shape>
-            <corners android:radius="5dp" />
+            <corners
+                android:radius="4dp"
+                android:bottomLeftRadius="4dp"
+                android:bottomRightRadius="4dp"
+                android:topLeftRadius="0dp"
+                android:topRightRadius="0dp" />
             <gradient
                 android:angle="270"
-                android:endColor="#FF2E1C10"
-                android:startColor="#FF0E0804" />
+                android:centerColor="#FF160D06"
+                android:centerY="0.55"
+                android:endColor="#FF3A2412"
+                android:startColor="#FF060301" />
             <stroke
                 android:width="1dp"
-                android:color="@color/gold_dark" />
+                android:color="#FF9A7420" />
         </shape>
     </item>
-    <!-- Scaled rather than clipped, so that the rod keeps its round end. -->
+    <!-- The rod. Scaled rather than clipped, so that it keeps its round end. -->
     <item
         android:id="@android:id/progress"
         android:bottom="2dp"
         android:left="2dp"
-        android:right="2dp"
-        android:top="2dp">
+        android:right="2dp">
         <scale
             android:scaleGravity="left"
             android:scaleWidth="100%">
-            <shape>
-                <corners android:radius="3dp" />
-                <gradient
-                    android:angle="270"
-                    android:centerColor="#FFE9C44C"
-                    android:endColor="#FFA87C1C"
-                    android:startColor="#FFFFF6C0" />
-            </shape>
+            <layer-list>
+                <item>
+                    <shape>
+                        <corners
+                            android:radius="2.5dp"
+                            android:bottomLeftRadius="2.5dp"
+                            android:bottomRightRadius="2.5dp"
+                            android:topLeftRadius="0dp"
+                            android:topRightRadius="0dp" />
+                        <gradient
+                            android:angle="270"
+                            android:centerColor="#FFF0C850"
+                            android:centerY="0.45"
+                            android:endColor="#FF8E6614"
+                            android:startColor="#FFD9AE3C" />
+                    </shape>
+                </item>
+                <!-- The light it catches along its length, and the shade of its far end. -->
+                <item
+                    android:bottom="2.5dp"
+                    android:left="1.5dp"
+                    android:right="1.5dp"
+                    android:top="1dp">
+                    <shape>
+                        <corners android:radius="1dp" />
+                        <gradient
+                            android:angle="270"
+                            android:endColor="#00FFF8D8"
+                            android:startColor="#D0FFF8D8" />
+                    </shape>
+                </item>
+                <item
+                    android:width="3dp"
+                    android:gravity="right">
+                    <shape>
+                        <corners
+                            android:radius="2.5dp"
+                            android:bottomLeftRadius="0dp"
+                            android:bottomRightRadius="2.5dp"
+                            android:topLeftRadius="0dp"
+                            android:topRightRadius="0dp" />
+                        <gradient
+                            android:angle="0"
+                            android:endColor="#66402C00"
+                            android:startColor="#00402C00" />
+                    </shape>
+                </item>
+            </layer-list>
         </scale>
     </item>
 </layer-list>

@@ -3,8 +3,17 @@ package io.github.edoardonegri.ready
 import android.view.View
 
 interface ReaderHost {
-    /** [percent] is progress through the whole book, 0..1. */
-    fun onPosition(chapter: Int, fraction: Float, percent: Float, label: String)
+    /**
+     * [percent] is progress through the whole book, 0..1. [label] says where that is. [page] is
+     * the part of it that says where in the chapter, for a host that names the chapter itself
+     * after the book's contents; null if the book is not read by chapters. [pageOfChapter] is the
+     * page of the chapter being shown, counted from 1, and how many the chapter has, if it has pages;
+     * [pageOfBook] is the same for the whole book, if the engine can tell.
+     */
+    fun onPosition(
+        chapter: Int, fraction: Float, percent: Float, label: String, page: String?,
+        pageOfChapter: Pair<Int, Int>? = null, pageOfBook: Pair<Int, Int>? = null,
+    )
 }
 
 interface ReaderEngine {

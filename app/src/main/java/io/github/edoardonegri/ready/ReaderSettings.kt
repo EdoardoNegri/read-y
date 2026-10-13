@@ -2,10 +2,11 @@ package io.github.edoardonegri.ready
 
 import android.content.Context
 import android.graphics.Color
-import android.view.View
 import android.view.Window
 import android.view.WindowManager
 import androidx.core.content.edit
+import kotlin.math.ln
+import kotlin.math.roundToInt
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
 
@@ -30,7 +31,7 @@ class ReaderSettings(ctx: Context) {
     /** 1..100, or -1 to follow the system brightness. */
     var brightness by int(-1)
 
-    /** 0..100 strength of the warm (orange) light filter. */
+    /** 0..100: how warm the light on the page is, from white daylight to the amber of a small lamp. See [lamp]. */
     var warmth by int(0)
 
     /** Light lettering on dark pages. */
@@ -62,8 +63,11 @@ class ReaderSettings(ctx: Context) {
     var reverseSwipe by bool(false)
     var volumeUpNext by bool(true)
 
-    /** Pages slide across when turned, instead of changing at once. */
-    var slidePages by bool(false)
+    /**
+     * Pages are turned like paper, instead of changing at once; while scrolling, the text glides
+     * on. The name is that of the sliding pages it once stood for.
+     */
+    var slidePages by bool(true)
 
     /** A tap on the left or right part of the page turns it; off, every tap brings up the menu. */
     var tapToTurn by bool(true)
@@ -72,7 +76,34 @@ class ReaderSettings(ctx: Context) {
     var keepScreenOn by bool(false)
     var hintShown by bool(false)
 
-    val palette get() = if (darkMode) DARK else LIGHT
+    /** The colours of the page in white light. */
+    val palette: Palette get() = if (darkMode) DARK else LIGHT
+
+    /**
+     * The colour of the light on the page at the [warmth] chosen, as on a reader with a warm
+     * front light: everything on the page is seen in it, paper, print and pictures alike
+     * ([LampView] lays it over them). It follows the colours of a glowing body from daylight
+     * down to the amber of a candle, in steps that look equal, so the red stays while first the
+     * blue and then some of the green goes.
+     */
+    val lamp: Int
+        get() {
+            val w = warmth.coerceIn(0, 100) / 100f
+            if (w == 0f) return Color.WHITE
+            // Colour temperatures are evenly spaced by their inverse.
+            val t = 10_000f / (COOL + w * (WARM - COOL))
+            val green = ((99.4708f * ln(t) - 161.1196f) / 255.6f).coerceIn(0f, 1f)
+            val blue = if (t <= 19f) 0f else ((138.5177f * ln(t - 10f) - 305.0448f) / 252.5f).coerceIn(0f, 1f)
+            return Color.rgb(255, (green * 255).roundToInt(), (blue * 255).roundToInt())
+        }
+
+    /** [color] as it looks in the light of the [lamp]. */
+    fun lit(color: Int): Int = lamp.let {
+        Color.rgb(
+            Color.red(color) * Color.red(it) / 255, Color.green(color) * Color.green(it) / 255,
+            Color.blue(color) * Color.blue(it) / 255,
+        )
+    }
 
     /**
      * Gives [window] the brightness chosen for reading, and keeps the screen on if [mayStayOn] and
@@ -88,16 +119,11 @@ class ReaderSettings(ctx: Context) {
         else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
-    /**
-     * Tints [overlay], a view lying over the page, with the warm light chosen. Without any it is
-     * taken away altogether, so that the screen is not blended with an invisible layer on every frame.
-     */
-    fun warm(overlay: View) {
-        overlay.visibility = if (warmth > 0) View.VISIBLE else View.GONE
-        overlay.setBackgroundColor(Color.argb((warmth * 1.4f).toInt(), 255, 140, 30))
-    }
-
     companion object {
+        /** A million over the colour temperature of the light at no warmth, 6600 K, and at all of it, 2400 K. */
+        private const val COOL = 151.5f
+        private const val WARM = 416.7f
+
         private val LIGHT = Palette(0xFFFFFFFF.toInt(), 0xFF1A1A1A.toInt(), 0xFF1A5FB4.toInt())
 
         // True black: on the screens that light every dot by itself, black dots use no power.

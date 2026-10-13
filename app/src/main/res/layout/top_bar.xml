@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The top rail of the bookcase with its name plate in the middle; its top padding is the status
      bar inset. Both sides are equally wide and what is not needed is hidden with "invisible", so
-     the plate stays centred. Its height is repeated in ShelfSpec.rail, for the bare rail drawn on
-     the folder miniatures. -->
+     the plate stays centred. The paddings of the buttons put their pictures where the border, the
+     dots, the lens and the plate are equally far from each other (about 23dp), and the arrow
+     and the open book where the dots and the lens are on the other side. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/bar"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -13,41 +16,60 @@
 
     <ImageButton
         android:id="@+id/up"
-        android:layout_width="48dp"
+        android:layout_width="44dp"
         android:layout_height="48dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="@string/back"
+        android:paddingStart="7dp"
+        android:paddingEnd="0dp"
         android:src="@drawable/ic_back"
         android:visibility="invisible" />
 
-    <Space
-        android:layout_width="40dp"
-        android:layout_height="48dp" />
+    <!-- Shown on the bookshelf, where it goes on with the book that was read last. It stands
+         where the lens does on the other side. -->
+    <ImageButton
+        android:id="@+id/resume"
+        android:layout_width="44dp"
+        android:layout_height="48dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/resume"
+        android:paddingStart="0dp"
+        android:paddingEnd="13dp"
+        android:src="@drawable/ic_resume"
+        android:visibility="invisible" />
 
     <FrameLayout
         android:layout_width="0dp"
-        android:layout_height="49dp"
+        android:layout_height="54dp"
         android:layout_weight="1">
 
-        <!-- The background is a PlaqueDrawable set in code. -->
+        <!-- The background is a PlaqueDrawable set in code. Larger than the plates of the dialogs. -->
         <TextView
             android:id="@+id/barTitle"
-            style="@style/TitlePlate" />
+            style="@style/TitlePlate"
+            android:layout_height="50dp"
+            android:textSize="21dp"
+            app:autoSizeMaxTextSize="21dp"
+            tools:ignore="SpUsage" />
     </FrameLayout>
 
     <ImageButton
         android:id="@+id/search"
-        android:layout_width="40dp"
+        android:layout_width="44dp"
         android:layout_height="48dp"
         android:background="?attr/selectableItemBackgroundBorderless"
+        android:paddingStart="13dp"
+        android:paddingEnd="0dp"
         android:contentDescription="@string/search"
         android:src="@drawable/ic_search" />
 
     <ImageButton
         android:id="@+id/more"
-        android:layout_width="48dp"
+        android:layout_width="44dp"
         android:layout_height="48dp"
         android:background="?attr/selectableItemBackgroundBorderless"
+        android:paddingStart="0dp"
+        android:paddingEnd="7dp"
         android:contentDescription="@string/more"
         android:src="@drawable/ic_more" />
 </LinearLayout>
