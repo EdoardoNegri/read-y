@@ -128,6 +128,10 @@ object Library {
     private const val ORDER = "order:"
     private const val TITLE = "title:"
     private const val FINISHED = "finished"
+
+    /** How far into a book it counts as read to the end: the last page, with room for rounding. */
+    const val FINISHED_AT = 0.999f
+
     private const val WIDGET = "widget"
     private const val WIDGET_ORDER = "widgetOrder"
     private const val BIN = ".bin"
@@ -399,7 +403,7 @@ object Library {
             if (value is Int || value is Boolean) settings.put(key, value)
         }
         val o = JSONObject().put("version", 1).put("positions", positions)
-            .put("favorites", set(FAVORITES)).put("finished", set(FINISHED))
+            .put("favorites", set(FAVORITES))
             .put("orders", orders).put("titles", titles).put("sort", sort(ctx).ordinal).put("settings", settings)
         if (libraryPrefs(ctx).contains(DESCENDING)) o.put("descending", descending(ctx))
         // Left out until the reader has chosen the books for the widget, which shows the favorites till then.
@@ -417,7 +421,9 @@ object Library {
         fun paths(key: String) = o.optJSONArray(key).let { a -> if (a == null) emptySet() else List(a.length()) { base + a.getString(it) }.toHashSet() }
         statePrefs(ctx).edit {
             o.optJSONObject("positions")?.let { for (key in it.keys()) putString(base + key, it.getString(key)) }
-            putStringSet(FAVORITES, paths("favorites")).putStringSet(FINISHED, paths("finished"))
+            putStringSet(FAVORITES, paths("favorites"))
+            // Older backups name the finished books; adoptFinished puts them at the end of their books.
+            if (o.has("finished")) putStringSet(FINISHED, paths("finished"))
             if (o.has("widget")) {
                 // The backup lists them in the order they stand in on the widget.
                 val listed = o.getJSONArray("widget").let { a -> List(a.length()) { base + a.getString(it) } }
@@ -426,6 +432,7 @@ object Library {
                 remove(WIDGET).remove(WIDGET_ORDER)
             }
         }
+        adoptFinished(ctx)
         libraryPrefs(ctx).edit {
             o.optJSONObject("orders")?.let { for (key in it.keys()) putString(ORDER + base + key, it.getString(key)) }
             o.optJSONObject("titles")?.let { for (key in it.keys()) putString(TITLE + base + key, it.getString(key)) }
@@ -910,15 +917,32 @@ object Library {
         FavoritesWidget.refresh(ctx)
     }
 
-    /** Books the reader marked as read to the end, or read to the end. */
-    fun isFinished(ctx: Context, f: File) = f.path in (statePrefs(ctx).getStringSet(FINISHED, null) ?: emptySet())
+    /** A book is finished while it stands at its very end, and no longer once the reader leaves that page. */
+    fun isFinished(ctx: Context, f: File) = state(ctx, f).percent >= FINISHED_AT
 
+    /**
+     * Marking a book as read puts it on its last page, which is all that finishes it; taking the
+     * mark off puts it back at the start, as if never opened.
+     */
     fun setFinished(ctx: Context, f: File, on: Boolean) {
-        val set = HashSet(statePrefs(ctx).getStringSet(FINISHED, null) ?: emptySet())
-        if (on) set.add(f.path) else set.remove(f.path)
-        statePrefs(ctx).edit { putStringSet(FINISHED, set) }
+        val was = state(ctx, f)
+        // A place beyond the end is taken to be the last page by the engines.
+        saveState(ctx, f, if (on) BookState(Int.MAX_VALUE, 1f, 1f, was.lastRead) else BookState(lastRead = was.lastRead))
         stamp++
     }
+
+    /**
+     * Books that were marked as finished before that was told by the place in the book, which is
+     * now where they are put, and forgotten as a list.
+     */
+    private fun adoptFinished(ctx: Context) {
+        val old = statePrefs(ctx).getStringSet(FINISHED, null) ?: return
+        for (path in old) File(path).let { if (!isFinished(ctx, it)) setFinished(ctx, it, true) }
+        statePrefs(ctx).edit { remove(FINISHED) }
+    }
+
+    /** Takes the books that were marked as finished by an older version of the app into the new way of telling. */
+    fun upgrade(ctx: Context) = adoptFinished(ctx)
 
     fun favorites(ctx: Context): List<File> = standing(favoritePaths(ctx)).sortedBy { it.name.lowercase() }
 

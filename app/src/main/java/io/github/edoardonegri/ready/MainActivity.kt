@@ -101,6 +101,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Library.upgrade(this)
         setContentView(R.layout.activity_main)
         shelf = findViewById(R.id.shelf)
         ghost = findViewById(R.id.ghost)

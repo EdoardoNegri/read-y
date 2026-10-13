@@ -366,6 +366,13 @@ class FlowEngine(
     return s;
   }
 
+  // The pages sit side by side in columns; showing one moves the text rather than scrolling the
+  // window, because the WebView may widen the window to the whole width of the columns, which
+  // leaves nothing to scroll.
+  function shift(page) {
+    document.body.style.setProperty('transform', page ? 'translateX(' + (-page * R.W) + 'px)' : 'none', 'important');
+  }
+
   function maxScroll() {
     return Math.max(0, document.documentElement.scrollHeight - R.H);
   }
@@ -387,8 +394,11 @@ class FlowEngine(
 
   R.go = function (p, slide) {
     R.page = Math.max(0, Math.min(R.pages - 1, p));
-    if (slide) window.scrollTo({ left: R.page * R.W, top: 0, behavior: 'smooth' });
-    else window.scrollTo(R.page * R.W, 0);
+    if (R.cfg.vertical) {
+      window.scrollTo({ left: R.page * R.W, top: 0, behavior: slide ? 'smooth' : 'auto' });
+    } else {
+      shift(R.page);
+    }
     report();
   };
 
@@ -400,7 +410,7 @@ class FlowEngine(
       window.scrollTo(0, Math.max(0, r.top + window.scrollY - R.cfg.mv));
       report();
     } else {
-      R.go(Math.floor((r.left + window.scrollX) / R.W));
+      R.go(Math.floor((r.left + R.page * R.W) / R.W));
     }
   };
 
@@ -410,6 +420,7 @@ class FlowEngine(
     R.H = c.h;
     st.textContent = css(c, R.W, R.H);
     edge.style.left = '0';
+    shift(0);
     window.scrollTo(0, 0);
     var ran = false;
     var done = function () {

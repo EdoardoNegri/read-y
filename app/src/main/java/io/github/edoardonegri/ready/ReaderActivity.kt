@@ -115,7 +115,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
             return
         }
         state = Library.state(this, file)
-        finished = Library.isFinished(this, file)
+        finished = state.percent >= Library.FINISHED_AT
         val opened = try {
             if (Library.isFlowing(file)) FlowEngine(this, file, s, state, this)
             else PageEngine(this, file, s, state, this)
@@ -408,10 +408,11 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         // the storage busy for nothing. It is saved now and then, and whenever the reader leaves.
         unsaved = true
         if (state.lastRead - savedAt > SAVE_EVERY_MS) savePosition()
-        // Reaching the end marks the book as finished; taking the mark off again is up to the reader.
-        if (percent >= 0.999f && !finished) {
-            finished = true
-            Library.setFinished(this, file, true)
+        // The last page finishes the book and leaving it unfinishes it again: the shelf shows that
+        // from what is saved, so a change is written down at once.
+        if ((percent >= Library.FINISHED_AT) != finished) {
+            finished = !finished
+            savePosition()
         }
         // The chapter is counted as on the line below, by the book's contents, where it has any:
         // the files a book is made of, which the engine counts, also hold its cover and the like.
@@ -443,7 +444,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
     private var unsaved = false
     private var savedAt = 0L
 
-    /** The book was marked as finished here, or already was when it was opened. */
+    /** The book stands on its last page, or did when it was opened. */
     private var finished = false
 
     private fun savePosition() {
