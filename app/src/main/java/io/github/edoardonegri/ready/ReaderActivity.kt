@@ -53,7 +53,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
 
     /** The settings, which lead back to the menu if they are left by their arrow. */
     private val settings = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        if (it.resultCode == RESULT_OK) menu.visibility = View.VISIBLE
+        if (it.resultCode == RESULT_OK) openMenu()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -365,10 +365,10 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         e.tap(x - content.paddingLeft, y - content.paddingTop) { handled ->
             if (!handled) when {
                 // The sides of a page that is enlarged are not the sides of the screen.
-                !s.tapToTurn || e.zoomed -> menu.visibility = View.VISIBLE
+                !s.tapToTurn || e.zoomed -> openMenu()
                 x > w * 0.7f -> turn(1)
                 x < w * 0.3f -> turn(-1)
-                else -> menu.visibility = View.VISIBLE
+                else -> openMenu()
             }
         }
     }
@@ -475,6 +475,15 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
             if (mark >= 0) getString(R.string.chapter_of, mark + 1, marked.size) else null,
             page.ifEmpty { null },
         ).joinToString(" · ")
+        // Written only when it changes: a new text lays the screen out anew.
+        if (pageNumber.text.toString() != where) pageNumber.text = where
+        // The menu is closed most of the time. What it would show is written into it only when it
+        // opens, so that a page that scrolls does not lay out a menu nobody sees.
+        if (!menu.isVisible) {
+            behindMenu = { showPosition(chapter, percent, label, page, pageOfChapter, pageOfBook) }
+            return
+        }
+        behindMenu = null
         // What is not known, or does not apply, leaves its place empty, so that the rest stays put.
         inChapter.visibility = if (pageOfChapter == null) View.INVISIBLE else View.VISIBLE
         if (pageOfChapter != null) chapterPage.text = getString(R.string.page_of, pageOfChapter.first, pageOfChapter.second)
@@ -489,9 +498,16 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         percentRead.text = getString(R.string.percent_read, (percent * 100).roundToInt())
         reading = engine?.let { if (mark >= 0) chapterName(it, mark) else "" }.orEmpty()
         name(reading, other = false)
-        pageNumber.text = where
         if (!seeking) seek.progress = (percent * 1000).roundToInt()
         chapters.current = mark
+    }
+
+    /** The place last told while the menu was closed, which it shows once it opens; see [openMenu]. */
+    private var behindMenu: (() -> Unit)? = null
+
+    private fun openMenu() {
+        menu.visibility = View.VISIBLE
+        behindMenu?.invoke()
     }
 
     /** The place in the book has changed since it was last written down, at [savedAt]. */
@@ -520,7 +536,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         /** How long the engine has to come up with the page asked for, and to draw it once it has. */
         private const val TURN_WAIT_MS = 1500L
         private const val TURN_SETTLE_MS = 60L
-        private const val SAVE_EVERY_MS = 5000L
+        private const val SAVE_EVERY_MS = 30_000L
 
         /** How near the place the knob was let go the book must tell it is, and how long it has to get there. */
         private const val SEEK_NEAR = 0.03f

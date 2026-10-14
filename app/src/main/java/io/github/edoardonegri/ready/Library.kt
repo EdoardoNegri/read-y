@@ -34,6 +34,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.ceil
@@ -147,7 +148,8 @@ object Library {
     val io: ExecutorService = Executors.newFixedThreadPool(2)
     val main = Handler(Looper.getMainLooper())
 
-    private val bitmaps = object : LruCache<String, Bitmap>(24 shl 20) {
+    // The covers and miniatures of a whole shelf or two, however many there are on the phone's memory.
+    private val bitmaps = object : LruCache<String, Bitmap>(maxOf(24L shl 20, Runtime.getRuntime().maxMemory() / 6).toInt()) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
 
@@ -216,16 +218,17 @@ object Library {
      * order [Sort.MANUAL] follows; search results, from several shelves, have none.
      */
     fun arrange(ctx: Context, dir: File?, items: List<File>): List<File> {
-        val byName = items.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
-        // Everything is looked up once, however often the sorting compares it.
+        // Everything is looked up once, however often the sorting compares it, the disk included.
+        val shelves = items.filterTo(HashSet()) { it.isDirectory }
+        val byName = items.sortedWith(compareBy({ it !in shelves }, { it.name.lowercase() }))
         val titles by lazy {
-            byName.associateWith { (if (it.isDirectory) it.name else cachedMeta(ctx, it)?.title ?: it.nameWithoutExtension).lowercase() }
+            byName.associateWith { (if (it in shelves) it.name else cachedMeta(ctx, it)?.title ?: it.nameWithoutExtension).lowercase() }
         }
         fun title(f: File) = titles.getValue(f)
 
         /** What [of] is for the book [f], or the most it is for any book on the shelf [f] and the shelves inside it. */
         fun <T : Comparable<T>> most(f: File, of: (BookState) -> T): T? =
-            if (f.isDirectory) books(f).maxOfOrNull { of(state(ctx, it)) } else of(state(ctx, f))
+            if (f in shelves) mostOf(ctx, f.path + File.separator, of)?.second else of(state(ctx, f))
         val down = descending(ctx)
 
         /** By [key], the way round that was chosen; what is the same by it stands by its title. */
@@ -233,16 +236,16 @@ object Library {
             (if (down) compareByDescending(key) else compareBy(key)).thenBy(::title)
         return when (sort(ctx)) {
             Sort.MANUAL -> {
-                val order = if (dir == null) emptyList() else order(ctx, dir)
+                val order = if (dir == null) emptyMap() else order(ctx, dir).withIndex().associate { it.value to it.index }
                 // What was added since stays behind the rest, in its usual order.
-                byName.sortedBy { f -> order.indexOf(f.name).let { if (it < 0) Int.MAX_VALUE else it } }
+                byName.sortedBy { f -> order[f.name] ?: Int.MAX_VALUE }
                     .let { if (down) it.asReversed() else it }
             }
             Sort.TITLE -> byName.sortedWith(by(::title))
             Sort.AUTHOR -> {
                 // A shelf stands among the authors under its own name; books without a known author go last.
                 val authors = byName.associateWith {
-                    if (it.isDirectory) title(it) else cachedMeta(ctx, it)?.author?.lowercase().orEmpty().ifEmpty { "\uFFFF" }
+                    if (it in shelves) title(it) else cachedMeta(ctx, it)?.author?.lowercase().orEmpty().ifEmpty { "\uFFFF" }
                 }
                 byName.sortedWith(by { authors.getValue(it) })
             }
@@ -445,6 +448,8 @@ object Library {
                 remove(WIDGET).remove(WIDGET_ORDER)
             }
         }
+        // What was read of the positions before is out of date now.
+        forgetStates()
         adoptFinished(ctx)
         libraryPrefs(ctx).edit {
             o.optJSONObject("orders")?.let { for (key in it.keys()) putString(ORDER + base + key, it.getString(key)) }
@@ -570,12 +575,16 @@ object Library {
     private fun remember(ctx: Context, old: String, new: String?) {
         fun within(path: String) = path == old || path.startsWith(old + File.separator)
         fun moved(path: String) = new + path.removePrefix(old)
-        for (prefs in arrayOf(statePrefs(ctx), metaPrefs(ctx))) prefs.edit {
-            for ((key, value) in prefs.all) if (value is String && within(key)) {
-                remove(key)
-                if (new != null) putString(moved(key), value)
+        synchronized(statesLock) {
+            for (prefs in arrayOf(statePrefs(ctx), metaPrefs(ctx))) prefs.edit {
+                for ((key, value) in prefs.all) if (value is String && within(key)) {
+                    remove(key)
+                    if (new != null) putString(moved(key), value)
+                }
             }
+            forgetStates()
         }
+        metas.keys.removeAll(::within)
         for (key in arrayOf(FAVORITES, FINISHED, WIDGET)) {
             val paths = statePrefs(ctx).getStringSet(key, null) ?: continue
             if (paths.none(::within)) continue
@@ -641,15 +650,25 @@ object Library {
     private fun coverFile(ctx: Context, path: String, modified: Long): File =
         File(File(ctx.filesDir, "covers"), "${Integer.toHexString(path.hashCode())}_$modified.jpg")
 
+    /**
+     * What the books say about themselves, as [meta] read it, by path: with the size and date of
+     * the file it was read from, which must still be the same for it to hold. Kept so that the
+     * shelf need not read it from the preferences again for every book it shows.
+     */
+    private val metas = ConcurrentHashMap<String, Pair<String, BookMeta>>()
+
     fun cachedMeta(ctx: Context, f: File): BookMeta? {
+        val sig = sig(f)
+        metas[f.path]?.let { (known, m) -> if (known == sig) return named(ctx, f, m) }
         val json = metaPrefs(ctx).getString(f.path, null) ?: return null
         return try {
             val o = JSONObject(json)
-            if (o.optString("sig") != sig(f) || o.optInt("v") != META_VERSION) null
-            else named(
-                ctx, f,
-                BookMeta(o.optString("title"), o.optString("author"), o.optInt("pages"), o.optString("published")),
-            )
+            if (o.optString("sig") != sig || o.optInt("v") != META_VERSION) null
+            else {
+                val m = BookMeta(o.optString("title"), o.optString("author"), o.optInt("pages"), o.optString("published"))
+                metas[f.path] = sig to m
+                named(ctx, f, m)
+            }
         } catch (e: Exception) {
             null
         }
@@ -714,6 +733,7 @@ object Library {
         val o = JSONObject().put("sig", sig(f)).put("v", META_VERSION).put("title", title).put("author", author)
             .put("pages", pages).put("published", published)
         metaPrefs(ctx).edit { putString(f.path, o.toString()) }
+        metas[f.path] = sig(f) to meta
         return named(ctx, f, meta)
     }
 
@@ -989,30 +1009,72 @@ object Library {
 
     // ---- reading state & favorites ----
 
-    fun state(ctx: Context, f: File): BookState {
-        val json = statePrefs(ctx).getString(f.path, null) ?: return BookState()
-        return try {
-            val o = JSONObject(json)
-            BookState(
-                o.optInt("chapter"),
-                o.optDouble("fraction", 0.0).toFloat(),
-                o.optDouble("percent", 0.0).toFloat(),
-                o.optLong("lastRead"),
-            )
-        } catch (e: Exception) {
-            BookState()
-        }
+    /**
+     * Every reading position remembered, by the path of its book: read from the preferences once
+     * and kept as they are written, so that the shelf need not read them again for every book it
+     * shows. Null until it is first asked for, and again whenever paths change all at once.
+     */
+    private var states: HashMap<String, BookState>? = null
+    private val statesLock = Any()
+
+    private fun parseState(json: String): BookState? = try {
+        val o = JSONObject(json)
+        BookState(
+            o.optInt("chapter"),
+            o.optDouble("fraction", 0.0).toFloat(),
+            o.optDouble("percent", 0.0).toFloat(),
+            o.optLong("lastRead"),
+        )
+    } catch (e: Exception) {
+        null
     }
+
+    /** Runs [use] on all the reading positions, under the lock that keeps them. */
+    private fun <T> withStates(ctx: Context, use: (Map<String, BookState>) -> T): T = synchronized(statesLock) {
+        val all = states ?: HashMap<String, BookState>().also { map ->
+            // The preferences also hold the lists of favorites and the like, which are not positions.
+            for ((key, value) in statePrefs(ctx).all) if (value is String) parseState(value)?.let { map[key] = it }
+            states = map
+        }
+        use(all)
+    }
+
+    /** Forgets the reading positions read, after paths have changed; they are read again when next asked for. */
+    private fun forgetStates() = synchronized(statesLock) { states = null }
+
+    /** The reading position in [f]; a copy, which may be changed without changing what is remembered. */
+    fun state(ctx: Context, f: File): BookState = withStates(ctx) { it[f.path]?.copy() } ?: BookState()
 
     fun saveState(ctx: Context, f: File, s: BookState) {
         val o = JSONObject().put("chapter", s.chapter).put("fraction", s.fraction.toDouble())
             .put("percent", s.percent.toDouble()).put("lastRead", s.lastRead)
-        statePrefs(ctx).edit { putString(f.path, o.toString()) }
+        synchronized(statesLock) {
+            statePrefs(ctx).edit { putString(f.path, o.toString()) }
+            states?.put(f.path, s.copy())
+        }
+    }
+
+    /**
+     * Whether [f] is a book standing on a shelf of the library, which a hidden folder such as the
+     * bin is not.
+     */
+    private fun shelved(f: File): Boolean {
+        val base = root().path + File.separator
+        return f.path.startsWith(base) && f.path.removePrefix(base).split(File.separatorChar).none { it.startsWith(".") } && isBook(f)
+    }
+
+    /**
+     * Of the books remembered under [prefix] (all of them if it is empty), the one for which
+     * [of] is the most, of those still on the shelves; null if none is.
+     */
+    private fun <T : Comparable<T>> mostOf(ctx: Context, prefix: String, of: (BookState) -> T): Pair<File, T>? {
+        val all = withStates(ctx) { map -> map.entries.filter { it.key.startsWith(prefix) }.map { it.key to of(it.value) } }
+        // Only the books looked at are asked whether they are still there, the likeliest first.
+        return all.sortedByDescending { it.second }.asSequence().map { File(it.first) to it.second }.firstOrNull { shelved(it.first) }
     }
 
     /** The book that was read last, wherever it stands in the library; null if none was ever read. Blocking. */
-    fun lastRead(ctx: Context): File? =
-        books().map { it to state(ctx, it).lastRead }.filter { it.second > 0 }.maxByOrNull { it.second }?.first
+    fun lastRead(ctx: Context): File? = mostOf(ctx, "") { it.lastRead }?.takeIf { it.second > 0 }?.first
 
     private fun favoritePaths(ctx: Context): Set<String> =
         statePrefs(ctx).getStringSet(FAVORITES, null) ?: emptySet()
@@ -1028,7 +1090,7 @@ object Library {
     }
 
     /** A book is finished while it stands at its very end, and no longer once the reader leaves that page. */
-    fun isFinished(ctx: Context, f: File) = state(ctx, f).percent >= FINISHED_AT
+    fun isFinished(ctx: Context, f: File) = withStates(ctx) { (it[f.path]?.percent ?: 0f) >= FINISHED_AT }
 
     /**
      * Marking a book as read puts it on its last page, which is all that finishes it; taking the

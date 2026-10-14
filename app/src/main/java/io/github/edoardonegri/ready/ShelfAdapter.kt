@@ -167,7 +167,7 @@ class ShelfAdapter(
         val st = Library.state(ctx, f)
         // A favorite is told by its plate, which leaves the cover free.
         plate.favorite = Library.isFavorite(ctx, f)
-        plate.finished = Library.isFinished(ctx, f)
+        plate.finished = st.percent >= Library.FINISHED_AT
         // A book read to the end has no bar any more: its bronze plate says so. Nor has one still
         // at its first page, which older versions of the app saved as some of the book read.
         val begun = st.chapter > 0 || st.fraction > 0f

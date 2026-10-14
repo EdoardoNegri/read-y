@@ -1,12 +1,15 @@
 package io.github.edoardonegri.ready
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
+import android.graphics.drawable.BitmapDrawable
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.withTranslation
 import androidx.core.view.isVisible
 import androidx.recyclerview.widget.RecyclerView
@@ -109,14 +112,16 @@ class ShelfDecoration(ctx: Context, private val columns: Int) : RecyclerView.Ite
      * (shelf_plank.xml), and repeat after [w] by [h] dots along a board.
      */
     private class Grain(ctx: Context) {
-        private val board = BitmapFactory.decodeResource(ctx.resources, R.drawable.wood_grain)
+        // The very pictures the drawables of the bookcase show, which the resources have decoded
+        // once for all of them, rather than copies decoded anew.
+        private val board = picture(ctx, R.drawable.wood_grain)
         val w = board.width
         val h = board.height
         val along = BitmapShader(board, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
-        val upright = BitmapShader(
-            BitmapFactory.decodeResource(ctx.resources, R.drawable.wood_grain_upright),
-            Shader.TileMode.REPEAT, Shader.TileMode.REPEAT,
-        )
+        val upright = BitmapShader(picture(ctx, R.drawable.wood_grain_upright), Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+
+        private fun picture(ctx: Context, id: Int): Bitmap =
+            (ContextCompat.getDrawable(ctx, id) as? BitmapDrawable)?.bitmap ?: BitmapFactory.decodeResource(ctx.resources, id)
     }
 
     companion object {

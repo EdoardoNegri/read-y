@@ -159,6 +159,10 @@ class MainActivity : AppCompatActivity() {
             shelf.setPadding(it.side, shelf.paddingTop, it.side, shelf.paddingBottom)
         }
         shelf.adapter = adapter
+        // The case fills the screen whatever stands in it, so a change on the shelves need not
+        // measure it anew; and rows scrolled just out of sight are kept as they are, not drawn again.
+        shelf.setHasFixedSize(true)
+        shelf.setItemViewCacheSize(columns * 2)
         shelf.setOnDragListener { _, e -> onShelfDrag(e) }
         bar.setOnDragListener { _, e -> onRailDrag(e) }
 

@@ -10,3 +10,8 @@
 #-keepclassmembers class fqcn.of.javascript.interface.for.webview {
 #   public *;
 #}
+
+# The page of a book reports its layout and its links through these, called by name from its script.
+-keepclassmembers class io.github.edoardonegri.ready.FlowEngine$Bridge {
+    @android.webkit.JavascriptInterface <methods>;
+}
