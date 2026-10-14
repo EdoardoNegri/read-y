@@ -72,7 +72,10 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
             }
         }
 
-    private val metal get() = if (finished) BRONZE else BRASS
+    private val metal get() = if (finished || sunk && BRONZE_WHEN_HELD) BRONZE else BRASS
+
+    /** Whether the plate is drawn lying deeper in its rim, see [sunk]. */
+    private val lowered get() = sunk && !BRONZE_WHEN_HELD
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
@@ -89,13 +92,13 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         val b = bounds
         val shadow = SHADOW_DP * d
         val left = b.left.toFloat()
-        val top = if (sunk) b.top + shadow else b.top.toFloat()
+        val top = if (lowered) b.top + shadow else b.top.toFloat()
         val right = b.right.toFloat()
-        val bottom = if (sunk) b.bottom.toFloat() else b.bottom - shadow
+        val bottom = if (lowered) b.bottom.toFloat() else b.bottom - shadow
 
         paint.shader = null
         paint.style = Paint.Style.FILL
-        if (!sunk) {
+        if (!lowered) {
             // Shadow the plate casts on the plank.
             paint.color = 0x70000000
             r.set(left + d, top + shadow, right - d, bottom + shadow)
@@ -110,22 +113,22 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         c.drawRoundRect(r, 3 * d, 3 * d, paint)
         paint.shader = LinearGradient(
             0f, top, 0f, bottom,
-            if (sunk) SUNK else metal.plate,
+            if (lowered) SUNK else metal.plate,
             floatArrayOf(0f, 0.3f, 0.72f, 1f), Shader.TileMode.CLAMP,
         )
         r.inset(d, d)
         c.drawRoundRect(r, 2 * d, 2 * d, paint)
         face.rewind()
         face.addRoundRect(r, 2 * d, 2 * d, Path.Direction.CW)
-        if (sunk) hollow(c, face, r.left, r.top, r.right, r.bottom) else gloss(c, face, r.left, r.top, r.right, r.bottom)
+        if (lowered) hollow(c, face, r.left, r.top, r.right, r.bottom) else gloss(c, face, r.left, r.top, r.right, r.bottom)
         paint.shader = null
 
         // Bevel: a lit upper edge and a shaded lower edge just inside the rim, or the other way round.
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = d
-        paint.color = if (sunk) metal.shade else metal.lit
+        paint.color = if (lowered) metal.shade else metal.lit
         c.drawLine(left + 3 * d, top + 1.5f * d, right - 3 * d, top + 1.5f * d, paint)
-        paint.color = if (sunk) metal.lit else metal.shade
+        paint.color = if (lowered) metal.lit else metal.shade
         c.drawLine(left + 3 * d, bottom - 1.5f * d, right - 3 * d, bottom - 1.5f * d, paint)
 
         // Engraved border: a dark groove with a lighter lip just below and right of it.
@@ -337,6 +340,12 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
     companion object {
         /** Height at the bottom of the bounds left for the shadow. */
         const val SHADOW_DP = 2
+
+        /**
+         * A plain plate held down ([sunk]) turns to bronze, as the plate of a finished book is,
+         * standing out as ever; otherwise it goes down into its rim, hollow.
+         */
+        const val BRONZE_WHEN_HELD = true
 
         /** Distance of the screws from the ends, and the space the title must leave for them. */
         const val SCREW_X_DP = 7f

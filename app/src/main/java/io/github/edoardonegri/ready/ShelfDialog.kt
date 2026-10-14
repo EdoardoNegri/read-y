@@ -344,6 +344,8 @@ class ShelfDialog(private val ctx: Context) {
  */
 fun TextView.holdBrass(down: Boolean) {
     (background as PlaqueDrawable).sunk = down
+    // A plate that only changes its metal stays where it stands, and its wording with it.
+    if (PlaqueDrawable.BRONZE_WHEN_HELD) return
     val shadow = (PlaqueDrawable.SHADOW_DP * resources.displayMetrics.density).toInt()
     setPadding(paddingLeft, if (down) shadow else 0, paddingRight, if (down) 0 else shadow)
 }
