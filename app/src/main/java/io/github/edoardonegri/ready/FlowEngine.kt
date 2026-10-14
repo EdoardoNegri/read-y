@@ -72,6 +72,10 @@ class FlowEngine(
             // Everything is served from the book itself; nothing ever reaches the network.
             val url = request.url
             val path = url.path?.removePrefix("/")
+            if (url.host == HOST && path != null && path.startsWith(FONTS_PATH)) {
+                val font = s.customFont?.takeIf { it.name == path.removePrefix(FONTS_PATH) }
+                if (font != null) return WebResourceResponse("font/${font.extension}", null, font.inputStream())
+            }
             val stream = if (url.host == HOST && path != null) book.stream(path) else null
             if (stream == null || path == null) {
                 return WebResourceResponse(
@@ -107,15 +111,23 @@ class FlowEngine(
                 if (closed) return@runOnUiThread
                 reveal()
                 val n = book.spine.size
-                val inChapter = if (s.vertical) "" else "page ${page + 1}/$pages"
-                val label = listOf("Chapter ${chapter + 1}/$n", inChapter).filter { it.isNotEmpty() }.joinToString(" · ")
-                // In the last chapter the pages are spread up to the very end of the line, so
-                // that the last page of the book stands there.
-                val last = chapter == book.spine.lastIndex && !s.vertical && pages > 1
-                shown = if (last) page.toFloat() / (pages - 1) else fraction.toFloat()
+                val inChapter = if (s.vertical) "" else act.getString(R.string.page_n_of, page + 1, pages)
+                val label = listOf(act.getString(R.string.chapter_of, chapter + 1, n), inChapter).filter { it.isNotEmpty() }.joinToString(" · ")
+                // How much is read is where the page being shown begins, so the first page is
+                // none of the book. In the last chapter the pages are spread up to the very end of
+                // the line, so that the last page of the book is all of it. A book that is all one
+                // page is read once it has been taken to its end, see [atEnd].
+                val last = chapter == book.spine.lastIndex
+                val onePage = if (s.vertical) fraction == 0.0 && progress >= 1.0 else pages == 1
+                shown = when {
+                    !last -> fraction.toFloat()
+                    onePage -> if (book.spine.size > 1 || atEnd) 1f else 0f
+                    s.vertical -> fraction.toFloat()
+                    else -> page.toFloat() / (pages - 1)
+                }
                 if (!s.vertical) measure(pages)
                 host.onPosition(
-                    chapter, fraction.toFloat(), bookPercent(progress.toFloat()), label, inChapter,
+                    chapter, fraction.toFloat(), bookPercent(shown), label, inChapter,
                     if (s.vertical) null else page + 1 to pages,
                     if (s.vertical) null else inBook(page),
                 )
@@ -159,7 +171,9 @@ class FlowEngine(
             .put("link", css(p.link))
             .put("themed", s.darkMode)
             .put("lh", s.lineSpacing / 10.0)
-            .put("font", ReaderSettings.FONTS[s.font.coerceIn(0, ReaderSettings.FONTS.lastIndex)].second)
+            .put("font", if (s.customFont != null) "'$CUSTOM_FONT'" else ReaderSettings.FONTS[s.font.coerceIn(0, ReaderSettings.FONTS.lastIndex)].second)
+            // A font imported from the phone is served alongside the book, see Client.
+            .put("fontUrl", s.customFont?.let { "https://$HOST/$FONTS_PATH" + Uri.encode(it.name) } ?: "")
             .put("mh", s.marginH)
             .put("mv", s.marginV)
             .put("vertical", s.vertical)
@@ -203,7 +217,8 @@ class FlowEngine(
         }
     }
 
-    override val contents get() = book.toc.map { it.title to it.depth }
+    // A part with no name of its own is called after its number.
+    override val contents get() = book.toc.mapIndexed { i, it -> it.title.ifBlank { act.getString(R.string.part_n, i + 1) } to it.depth }
 
     /**
      * The pages of the chapters shown so far, as the text is laid out now: [laidOut] says for
@@ -222,26 +237,50 @@ class FlowEngine(
     }
 
     /**
-     * Which page of the whole book the page [page] of this chapter is, and how many the book
+     * Which page of the whole book the page [page] of the chapter [chapter] is, and how many the book
      * has, with the text as large as it is now. The chapters shown so far are known by their
      * count; the others are taken to hold as many pages for their length as those do.
      */
-    private fun inBook(page: Int): Pair<Int, Int> {
-        val perByte = counted.values.sum().toDouble() / counted.keys.sumOf { book.weights[it] }.coerceAtLeast(1)
-        var before = 0
-        var all = 0
-        for (i in book.spine.indices) {
-            val pages = counted[i] ?: (book.weights[i] * perByte).roundToInt().coerceAtLeast(1)
-            if (i < chapter) before += pages
-            all += pages
-        }
-        return before + page + 1 to all
+    private fun inBook(page: Int, chapter: Int = this.chapter): Pair<Int, Int> {
+        val pages = chapterPages()
+        return pages.take(chapter).sum() + page + 1 to pages.sum()
     }
 
-    /** How far into the chapter, 0..1, the page being shown begins. */
+    /** How many pages each chapter has: as counted, or as many for its length as those counted have. */
+    private fun chapterPages(): List<Int> {
+        val perByte = counted.values.sum().toDouble() / counted.keys.sumOf { book.weights[it] }.coerceAtLeast(1)
+        return book.spine.indices.map { counted[it] ?: (book.weights[it] * perByte).roundToInt().coerceAtLeast(1) }
+    }
+
+    override fun pagesAt(fraction: Float): Pair<Pair<Int, Int>?, Pair<Int, Int>?> {
+        // Scrolled, the book has no pages but those of the printed book the host counts itself.
+        if (s.vertical || counted.isEmpty()) return null to null
+        val (index, into) = place(fraction)
+        val pages = chapterPages()[index]
+        val page = (into * pages).toInt().coerceIn(0, pages - 1)
+        return (page + 1 to pages) to inBook(page, index)
+    }
+
+    /** The chapter that the place [fraction] of the whole book, 0..1, lies in, and how far into it, 0..1. */
+    private fun place(fraction: Float): Pair<Int, Float> {
+        val target = fraction.coerceIn(0f, 1f) * total
+        var before = 0L
+        var index = book.spine.lastIndex
+        for (i in book.spine.indices) {
+            if (target < before + book.weights[i]) {
+                index = i
+                break
+            }
+            before += book.weights[i]
+        }
+        return index to ((target - before) / book.weights[index]).coerceIn(0f, 0.999f)
+    }
+
+    /** How far into the chapter, 0..1, the page being shown begins; 1 for the last page of the book. */
     private var shown = 0f
 
-    override val place get() = bookPercent(shown)
+    /** A book that is all one page has been taken to its end, by the seek bar or by being marked as read. */
+    private var atEnd = start.percent >= Library.FINISHED_AT
 
     override val contentPositions: List<Float>
         get() = book.toc.map { entry ->
@@ -283,17 +322,8 @@ class FlowEngine(
     private fun relayout() = web.evaluateJavascript("window.__r&&__r.apply(${config()},null,null)", null)
 
     override fun seekTo(fraction: Float) {
-        val target = fraction.coerceIn(0f, 1f) * total
-        var before = 0L
-        var index = book.spine.lastIndex
-        for (i in book.spine.indices) {
-            if (target < before + book.weights[i]) {
-                index = i
-                break
-            }
-            before += book.weights[i]
-        }
-        val inChapter = ((target - before) / book.weights[index]).coerceIn(0f, 0.999f)
+        atEnd = fraction >= 1f
+        val (index, inChapter) = place(fraction)
         if (index == chapter && ready) {
             web.evaluateJavascript("__r.apply(${config()},$inChapter,null)", null)
         } else {
@@ -325,6 +355,10 @@ class FlowEngine(
     companion object {
         private const val HOST = "epub.local"
 
+        /** Where on [HOST] the font imported from the phone is served, and the name it goes by there (as in SCRIPT). */
+        private const val FONTS_PATH = ".fonts/"
+        private const val CUSTOM_FONT = "ReadyFont"
+
         // Injected into every chapter. All sizes are whole CSS pixels so that pages never drift.
         private const val SCRIPT = """
 (function () {
@@ -349,6 +383,9 @@ class FlowEngine(
         + 'border-color:' + c.fg + '!important;}a,a *{color:' + c.link + '!important;}';
     }
     s += 'body,body *{line-height:' + c.lh + '!important;}';
+    if (c.fontUrl) {
+      s += "@font-face{font-family:'ReadyFont';src:url('" + c.fontUrl + "');}";
+    }
     if (c.font) {
       s += 'body,body *:not(pre):not(code):not(tt):not(kbd){font-family:' + c.font + '!important;}';
     }

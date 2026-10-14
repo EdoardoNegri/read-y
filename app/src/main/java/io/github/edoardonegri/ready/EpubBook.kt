@@ -114,7 +114,7 @@ class EpubBook private constructor(private val zip: ZipFile) : FlowBook {
             toc.retainAll { it.path in spine }
         }
         // A book that lists no chapters can still be gone through document by document.
-        if (toc.isEmpty() && spine.size > 1) spine.forEachIndexed { i, path -> toc.add(TocEntry("Part ${i + 1}", path, null, 0)) }
+        if (toc.isEmpty() && spine.size > 1) spine.forEachIndexed { i, path -> toc.add(TocEntry("", path, null, 0)) }
         if (coverPath == null) coverPath = coverId?.let { manifest[it] }
         if (coverPath == null) {
             coverPath = manifest.values.firstOrNull {

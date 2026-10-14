@@ -12,8 +12,8 @@ import java.io.File
 import kotlin.math.roundToInt
 
 /**
- * The places on a shelf. Tapping one opens it, tapping its plaque shows its details, or chooses
- * it while things are being chosen, and a long press picks it up.
+ * The places on a shelf. Tapping one opens it, tapping its plaque shows its details, or, while
+ * things are being chosen, lets its name and cover or wood be changed. A long press picks it up.
  */
 class ShelfAdapter(
     private val onOpen: (File, View) -> Unit,
@@ -133,6 +133,7 @@ class ShelfAdapter(
         val shelfSpec = spec()
         h.cover.binding = !f.isDirectory
         h.cover.cased = f.isDirectory
+        if (f.isDirectory) h.cover.wood = Library.wood(ctx, f)
         // A book fills its place; a case rises above the books, through the gap the row leaves
         // at its top, up to the shelf above, and is wider by as much as that makes it larger.
         val rise = if (f.isDirectory && shelfSpec.width > 0) shelfSpec.miniRise else 0
@@ -167,8 +168,10 @@ class ShelfAdapter(
         // A favorite is told by its plate, which leaves the cover free.
         plate.favorite = Library.isFavorite(ctx, f)
         plate.finished = Library.isFinished(ctx, f)
-        // A book read to the end has no bar any more: its bronze plate says so.
-        h.progress.visibility = if (st.percent > 0f && !plate.finished) View.VISIBLE else View.GONE
+        // A book read to the end has no bar any more: its bronze plate says so. Nor has one still
+        // at its first page, which older versions of the app saved as some of the book read.
+        val begun = st.chapter > 0 || st.fraction > 0f
+        h.progress.visibility = if (begun && st.percent > 0f && !plate.finished) View.VISIBLE else View.GONE
         h.progress.progress = (st.percent * 100).roundToInt()
         h.plaque.text = Library.cachedMeta(ctx, f)?.title ?: f.nameWithoutExtension
         val cached = Library.cachedCover(f)

@@ -2,9 +2,14 @@ package io.github.edoardonegri.ready
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Typeface
+import android.net.Uri
+import android.os.Build
+import android.provider.OpenableColumns
 import android.view.Window
 import android.view.WindowManager
 import androidx.core.content.edit
+import java.io.File
 import kotlin.math.ln
 import kotlin.math.roundToInt
 import kotlin.properties.ReadWriteProperty
@@ -14,12 +19,19 @@ class Palette(val bg: Int, val fg: Int, val link: Int)
 
 /** Reader preferences, shared by all books. */
 class ReaderSettings(ctx: Context) {
+    private val app = ctx.applicationContext
     private val p = ctx.getSharedPreferences("reader", Context.MODE_PRIVATE)
 
     private fun int(def: Int) = object : ReadWriteProperty<Any?, Int> {
         override fun getValue(thisRef: Any?, property: KProperty<*>) = p.getInt(property.name, def)
         override fun setValue(thisRef: Any?, property: KProperty<*>, value: Int) =
             p.edit { putInt(property.name, value) }
+    }
+
+    private fun string(def: String) = object : ReadWriteProperty<Any?, String> {
+        override fun getValue(thisRef: Any?, property: KProperty<*>) = p.getString(property.name, def) ?: def
+        override fun setValue(thisRef: Any?, property: KProperty<*>, value: String) =
+            p.edit { putString(property.name, value) }
     }
 
     private fun bool(def: Boolean) = object : ReadWriteProperty<Any?, Boolean> {
@@ -46,8 +58,20 @@ class ReaderSettings(ctx: Context) {
     /** 0 = follow sensor, 1 = portrait, 2 = landscape. */
     var orientation by int(0)
 
-    /** Index into [FONTS]. */
+    /** Index into [FONTS]; see [fontFile]. */
     var font by int(0)
+
+    /** The name of the font among [importedFonts] the text is written in, in place of [font]; empty for none. */
+    var fontFile by string("")
+
+    /** The font imported from the phone that the text is written in, if one was chosen and is still there. */
+    val customFont: File? get() = fontFile.takeIf { it.isNotEmpty() }?.let { File(fontsDir(app), it) }?.takeIf { it.isFile }
+
+    /** The typeface the text is written in, where the book's own fonts cannot stand in for "Original". */
+    fun typeface(): Typeface {
+        customFont?.let { f -> fontFace(f)?.let { return it } }
+        return Typeface.create(FONTS[font.coerceIn(0, FONTS.lastIndex)].second.ifEmpty { "serif" }, Typeface.NORMAL)
+    }
 
     /** Text zoom in percent. */
     var fontSize by int(100)
@@ -120,6 +144,47 @@ class ReaderSettings(ctx: Context) {
     }
 
     companion object {
+        /** Where the fonts imported from the phone are kept. */
+        fun fontsDir(ctx: Context) = File(ctx.filesDir, "fonts")
+
+        /** The fonts imported from the phone, by name. */
+        fun importedFonts(ctx: Context): List<File> =
+            fontsDir(ctx).listFiles()?.filter { it.isFile }?.sortedBy { it.name.lowercase() } ?: emptyList()
+
+        /** The typeface in the font file [f]; null if it holds none that can be used. */
+        fun fontFace(f: File): Typeface? = try {
+            if (Build.VERSION.SDK_INT >= 26) Typeface.Builder(f).build() else Typeface.createFromFile(f)
+        } catch (e: RuntimeException) {
+            null
+        }
+
+        /**
+         * Copies the font [uri] among the [importedFonts] and returns it there; null if it is not a
+         * TrueType or OpenType font. Blocking.
+         */
+        fun importFont(ctx: Context, uri: Uri): File? = try {
+            val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            val head = bytes?.take(4)?.toByteArray()?.let { String(it, Charsets.ISO_8859_1) }
+            val kind = when (head) {
+                "OTTO" -> "otf"
+                "\u0000\u0001\u0000\u0000", "true", "ttcf" -> "ttf"
+                else -> null
+            }
+            if (bytes == null || kind == null) null else {
+                var name = uri.lastPathSegment?.substringAfterLast('/').orEmpty()
+                ctx.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                    if (it.moveToFirst()) it.getString(0)?.let { shown -> name = shown }
+                }
+                val base = name.substringBeforeLast('.').filter { it.isLetterOrDigit() || it in " -_" }.trim().ifEmpty { "Font" }
+                val dir = fontsDir(ctx).apply { mkdirs() }
+                val f = File(dir, "$base.$kind")
+                f.writeBytes(bytes)
+                if (fontFace(f) != null) f else null.also { f.delete() }
+            }
+        } catch (e: Exception) {
+            null
+        }
+
         /** A million over the colour temperature of the light at no warmth, 6600 K, and at all of it, 2400 K. */
         private const val COOL = 151.5f
         private const val WARM = 416.7f
@@ -131,13 +196,13 @@ class ReaderSettings(ctx: Context) {
 
         /** Display name to system font family; an empty family keeps the book's own fonts. */
         val FONTS = listOf(
-            "Original" to "",
-            "Serif" to "serif",
-            "Sans" to "sans-serif",
-            "Condensed" to "sans-serif-condensed",
-            "Mono" to "monospace",
-            "Casual" to "casual",
-            "Cursive" to "cursive",
+            R.string.font_original to "",
+            R.string.font_serif to "serif",
+            R.string.font_sans to "sans-serif",
+            R.string.font_condensed to "sans-serif-condensed",
+            R.string.font_mono to "monospace",
+            R.string.font_casual to "casual",
+            R.string.font_cursive to "cursive",
         )
     }
 }

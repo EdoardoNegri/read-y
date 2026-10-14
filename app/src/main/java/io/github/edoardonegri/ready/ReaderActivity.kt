@@ -22,6 +22,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.isVisible
 import java.io.File
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
@@ -149,13 +150,15 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         }
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
-                // While the knob is dragged, the chapter it is over is named.
+                // While the knob is dragged, the chapter it is over is named, the lens shows where
+                // it is, and the figures under the line say where it would open.
                 val e = engine ?: return
-                val mark = chapters.marks.indexOfLast { it <= progress / 1000f + 0.0005f }
-                if (fromUser && mark >= 0) {
-                    name(chapterName(e, mark), other = true)
-                    chapters.pointed = mark
-                }
+                if (!fromUser) return
+                val at = progress / 1000f
+                val mark = chapters.marks.indexOfLast { it <= at + 0.0005f }
+                if (mark >= 0) name(chapterName(e, mark), other = true)
+                chapters.seeking = at
+                showPlace(e, at)
             }
             override fun onStartTrackingTouch(bar: SeekBar) {
                 seeking = true
@@ -163,8 +166,11 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
 
             override fun onStopTrackingTouch(bar: SeekBar) {
                 seeking = false
-                chapters.pointed = -1
-                engine?.seekTo(bar.progress / 1000f)
+                // The line stays as it was left until the book has been taken there, see onPosition.
+                seekTarget = bar.progress / 1000f
+                content.removeCallbacks(seekSettled)
+                content.postDelayed(seekSettled, SEEK_WAIT_MS)
+                engine?.seekTo(seekTarget)
             }
         })
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -220,6 +226,18 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         chapters.onPick = { mark -> e.openContent(marked[mark]) }
         // The name of the chapter a finger is on takes the place of the one being read until it is let go.
         chapters.onPreview = { mark -> if (mark < 0) name(reading, other = false) else name(chapterName(e, mark), other = true) }
+    }
+
+    /**
+     * Shows how much of the book lies before the place [at], 0..1, and the pages it is on, while
+     * the knob of the seek bar is dragged there; [onPosition] shows the place reached once it is let go.
+     */
+    private fun showPlace(e: ReaderEngine, at: Float) {
+        val (ofChapter, ofBook) = e.pagesAt(at)
+        if (ofChapter != null) chapterPage.text = getString(R.string.page_of, ofChapter.first, ofChapter.second)
+        val book = ofBook ?: bookPages.takeIf { it > 0 }?.let { (1 + (at * (it - 1)).roundToInt()).coerceIn(1, it) to it }
+        if (book != null) bookPage.text = getString(R.string.page_of, book.first, book.second)
+        percentRead.text = getString(R.string.percent_read, (at * 100).roundToInt())
     }
 
     /** Shows [text] as the name of a chapter, brighter if it is [other] than the one being read. */
@@ -414,6 +432,42 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
             finished = !finished
             savePosition()
         }
+        // The page left behind may tell its place once more before the one the knob was taken
+        // to is shown: the line does not go back to it meanwhile.
+        if (seekTarget >= 0) {
+            if (abs(percent - seekTarget) > SEEK_NEAR) {
+                skipped = { showPosition(chapter, percent, label, page, pageOfChapter, pageOfBook) }
+                return
+            }
+            settleSeek()
+        }
+        showPosition(chapter, percent, label, page, pageOfChapter, pageOfBook)
+    }
+
+    /** Where the knob of the seek bar was let go, 0..1, until the book has been taken there; else -1. */
+    private var seekTarget = -1f
+
+    /** The place last told while the knob was let go, which is shown if the book is not taken there after all. */
+    private var skipped: (() -> Unit)? = null
+
+    private val seekSettled = Runnable {
+        val last = skipped
+        settleSeek()
+        last?.invoke()
+    }
+
+    private fun settleSeek() {
+        content.removeCallbacks(seekSettled)
+        seekTarget = -1f
+        skipped = null
+        chapters.seeking = Float.NaN
+    }
+
+    /** Shows the place told by [onPosition] in the menu and at the foot of the page. */
+    private fun showPosition(
+        chapter: Int, percent: Float, label: String, page: String?,
+        pageOfChapter: Pair<Int, Int>?, pageOfBook: Pair<Int, Int>?,
+    ) {
         // The chapter is counted as on the line below, by the book's contents, where it has any:
         // the files a book is made of, which the engine counts, also hold its cover and the like.
         val mark = marked.indexOfLast { it <= (engine?.currentContent ?: -1) }
@@ -428,7 +482,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         // PDF is at the page it shows; an EPUB that scrolls as far into the pages a printed
         // one would have as into its text.
         val book = pageOfBook ?: bookPages.takeIf { it > 0 }?.let {
-            (if (page == null) chapter + 1 else (percent * it).roundToInt()).coerceIn(1, it) to it
+            (if (page == null) chapter + 1 else 1 + (percent * (it - 1)).roundToInt()).coerceIn(1, it) to it
         }
         inBook.visibility = if (book == null) View.INVISIBLE else View.VISIBLE
         if (book != null) bookPage.text = getString(R.string.page_of, book.first, book.second)
@@ -436,7 +490,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         reading = engine?.let { if (mark >= 0) chapterName(it, mark) else "" }.orEmpty()
         name(reading, other = false)
         pageNumber.text = where
-        if (!seeking) seek.progress = ((engine?.place ?: percent) * 1000).roundToInt()
+        if (!seeking) seek.progress = (percent * 1000).roundToInt()
         chapters.current = mark
     }
 
@@ -467,5 +521,9 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         private const val TURN_WAIT_MS = 1500L
         private const val TURN_SETTLE_MS = 60L
         private const val SAVE_EVERY_MS = 5000L
+
+        /** How near the place the knob was let go the book must tell it is, and how long it has to get there. */
+        private const val SEEK_NEAR = 0.03f
+        private const val SEEK_WAIT_MS = 1500L
     }
 }

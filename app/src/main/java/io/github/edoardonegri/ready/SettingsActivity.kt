@@ -1,15 +1,17 @@
 package io.github.edoardonegri.ready
 
-import android.graphics.Typeface
 import android.os.Bundle
 import android.util.TypedValue
 import android.view.View
 import android.widget.ImageButton
 import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.widget.TextViewCompat
+import java.io.File
 import kotlin.math.roundToInt
 
 /**
@@ -52,8 +54,10 @@ class SettingsActivity : AppCompatActivity() {
                 finish()
             }
         }
-        OptionsPanel(findViewById(R.id.options), s, allLive = true)
-            .build(epub = true, ::applyBrightness, ::applyPage)
+        OptionsPanel(findViewById(R.id.options), s, allLive = true) { done ->
+            imported = done
+            pickFont.launch(FONT_TYPES)
+        }.build(epub = true, ::applyBrightness, ::applyPage)
         applyBrightness()
         applyPage()
     }
@@ -63,22 +67,46 @@ class SettingsActivity : AppCompatActivity() {
         super.onPause()
     }
 
+    /** Told the font imported from the file being picked, or null if none was. */
+    private var imported: ((File?) -> Unit)? = null
+
+    private val pickFont = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val done = imported ?: return@registerForActivityResult
+        imported = null
+        if (uri == null) return@registerForActivityResult done(null)
+        val app = applicationContext
+        Library.io.execute {
+            val font = ReaderSettings.importFont(app, uri)
+            runOnUiThread {
+                if (font == null) Toast.makeText(this, R.string.cannot_read_font, Toast.LENGTH_LONG).show()
+                done(font)
+            }
+        }
+    }
+
     private fun applyBrightness() = s.light(window, mayStayOn = false)
 
     /** Lays the sample out the way FlowEngine styles a chapter: 16px text scaled by the zoom, CSS line height. */
     private fun applyPage() {
         val d = resources.displayMetrics.density
         val size = 16f * s.fontSize / 100
-        // A book's own fonts are unknown here; a serif face stands in for "Original".
-        val family = ReaderSettings.FONTS[s.font.coerceIn(0, ReaderSettings.FONTS.lastIndex)].second
         findViewById<LampView>(R.id.lamp).color = s.lamp
         sample.setBackgroundColor(s.palette.bg)
         sample.setTextColor(s.palette.fg)
-        sample.typeface = Typeface.create(family.ifEmpty { "serif" }, Typeface.NORMAL)
+        // A book's own fonts are unknown here; a serif face stands in for "Original".
+        sample.typeface = s.typeface()
         sample.setTextSize(TypedValue.COMPLEX_UNIT_DIP, size)
         TextViewCompat.setLineHeight(sample, (size * d * s.lineSpacing / 10f).roundToInt().coerceAtLeast(1))
         val h = (s.marginH * d).toInt()
         val v = (s.marginV * d).toInt()
         sample.setPadding(h, v, h, v)
+    }
+
+    private companion object {
+        /** What a font file may say it is; some places call it nothing more than a file. */
+        val FONT_TYPES = arrayOf(
+            "font/*", "application/x-font-ttf", "application/x-font-otf", "application/font-sfnt",
+            "application/vnd.ms-opentype", "application/octet-stream",
+        )
     }
 }

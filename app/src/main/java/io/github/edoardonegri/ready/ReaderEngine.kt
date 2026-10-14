@@ -4,7 +4,9 @@ import android.view.View
 
 interface ReaderHost {
     /**
-     * [percent] is progress through the whole book, 0..1. [label] says where that is. [page] is
+     * [percent] is progress through the whole book, 0..1: where the page being shown begins, so
+     * that the first page is 0 and the last 1, and the seek bar's knob stands on the mark of a
+     * chapter when the chapter has just been opened. [label] says where that is. [page] is
      * the part of it that says where in the chapter, for a host that names the chapter itself
      * after the book's contents; null if the book is not read by chapters. [pageOfChapter] is the
      * page of the chapter being shown, counted from 1, and how many the chapter has, if it has pages;
@@ -27,15 +29,15 @@ interface ReaderEngine {
     /** Jumps to a position in the whole book, 0..1. */
     fun seekTo(fraction: Float)
 
+    /**
+     * The page of its chapter and the page of the book that the place [fraction] of the whole
+     * book, 0..1, would be shown on, as [ReaderHost.onPosition] tells them for the place shown:
+     * for the seek bar's knob while it is dragged. Either is null if the engine cannot tell.
+     */
+    fun pagesAt(fraction: Float): Pair<Pair<Int, Int>?, Pair<Int, Int>?> = null to null
+
     /** The book's table of contents: each line's title and how deep it is nested. Empty if it has none. */
     val contents: List<Pair<String, Int>> get() = emptyList()
-
-    /**
-     * Where in the whole book, 0..1, the page being shown begins, if that differs from how much
-     * of the book is read, which counts the page itself too. The seek bar shows this, so that
-     * its knob stands on the mark of a chapter when the chapter has just been opened.
-     */
-    val place: Float? get() = null
 
     /** Where in the whole book, 0..1, each line of [contents] leads. */
     val contentPositions: List<Float> get() = emptyList()

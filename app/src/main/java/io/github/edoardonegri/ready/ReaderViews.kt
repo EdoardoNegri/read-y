@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -15,8 +16,10 @@ import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
+import androidx.appcompat.widget.AppCompatImageButton
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.core.graphics.createBitmap
+import androidx.core.graphics.withClip
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -77,6 +80,15 @@ class RatioImageView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet
             }
         }
 
+    /** The wood of the posts of a bookcase, see [cased]. */
+    var wood = Wood.WALNUT
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
     private val shade = Paint()
     private val area = RectF()
 
@@ -89,7 +101,11 @@ class RatioImageView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet
         super.onDraw(canvas)
         area.set(0f, 0f, width.toFloat(), height.toFloat())
         if (binding) ShelfArt.drawBinding(canvas, area, resources.displayMetrics.density, shade)
-        if (cased) ShelfArt.drawDepth(canvas, area, resources.displayMetrics.density, shade)
+        if (cased) {
+            shade.colorFilter = wood.filter
+            ShelfArt.drawDepth(canvas, area, resources.displayMetrics.density, shade)
+            shade.colorFilter = null
+        }
     }
 }
 
@@ -111,9 +127,14 @@ class LampView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = nu
 
 /**
  * The chapters of a book as marks across the line of the seek bar that lies under this view, each
- * where its chapter begins and with its number above it, the one being read brighter. Tapping a
- * number opens its chapter, and holding a finger on the numbers shows the name of the chapter
- * under it first. The marks are drawn outside this view, so its parent must not clip it.
+ * where its chapter begins: like a ruler's, long and numbered every so many chapters and short
+ * and faint between, the one being read brighter and numbered too. Sliding a finger along the
+ * numbers shows the name of the chapter under it first, and lifting it opens that chapter.
+ * Meanwhile, and while the knob of the seek bar is dragged, a lens lies over the numbers and the
+ * line where the finger or the knob is, and shows that stretch of the line enlarged: its marks as
+ * far apart as on the line, only more, the place itself as a needle that moves on between them,
+ * and the number of the chapter it is in, level with the numbers outside. The marks and the lens
+ * are drawn outside this view, so its parent must not clip it.
  */
 class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = null) : View(ctx, attrs) {
 
@@ -134,13 +155,12 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
             }
         }
 
-    /** The mark the knob of the seek bar is being dragged over, or -1: the lens goes there meanwhile. */
-    var pointed = -1
+    /** Where the knob of the seek bar is being dragged, 0..1 along the line, or NaN: the lens shows it meanwhile. */
+    var seeking = Float.NaN
         set(value) {
-            if (field != value) {
-                field = value
-                invalidate()
-            }
+            if (field.isNaN() && value.isNaN() || field == value) return
+            field = value
+            invalidate()
         }
 
     /** How far the line of the seek bar starts and ends inside its view. */
@@ -157,6 +177,8 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     private val d = resources.displayMetrics.density
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
     private val shape = RectF()
+    private val lens = RectF()
+    private val glass = Path()
 
     /** Every which chapter is numbered along the line; 0 until that is worked out for the marks and the width there are. */
     private var step = 0
@@ -164,19 +186,18 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     /** Where a finger slides along the numbers, which the lens then follows; NaN while none does. */
     private var finger = Float.NaN
 
-    /** The chapter a finger holds in the lens as it rests, or -1. */
-    private var held = -1
-
-    /** The lens as it was last drawn: its outline, the chapter in its first place and the width of a place. */
-    private val lens = RectF()
-    private var lensFirst = 0
-    private var lensPlace = 1f
-
     private fun x(mark: Float) = inset + mark * (width - 2 * inset)
+
+    /** How far along the line, 0..1, the point [x] of the view is. */
+    private fun along(x: Float) = ((x - inset) / (width - 2 * inset).coerceAtLeast(1)).coerceIn(0f, 1f)
+
+    /** The chapter that the place [at], 0..1 along the line, lies in. */
+    private fun chapterAt(at: Float) = marks.indexOfLast { it <= at + 0.0005f }.coerceAtLeast(0)
 
     private fun sp(size: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, size, resources.displayMetrics)
 
-    private fun nearest(x: Float) = marks.indices.minByOrNull { abs(x(marks[it]) - x) } ?: -1
+    /** Where the numbers stand, all on one line, in the lens as outside it. */
+    private val baseline get() = height - 6 * d
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -185,142 +206,139 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
 
     /**
      * Every which chapter can be numbered without the numbers running into each other: all of
-     * them if there is room, else every second, fifth, tenth and so on, as on a ruler.
+     * them if there is room, else every fifth, tenth, fifteenth and so on, as on a ruler.
      */
     private fun step(): Int {
         if (step > 0) return step
         paint.typeface = BOLD
         paint.textSize = sp(NUMBER_SP)
         val gap = 5 * d
-        step = STEPS.firstOrNull { every ->
+        // Past the number of chapters nothing is numbered, which always fits.
+        step = generateSequence(1) { if (it == 1) 5 else it + 5 }.first { every ->
             var free = Float.NEGATIVE_INFINITY
             marks.indices.filter { (it + 1) % every == 0 }.all { i ->
                 val wide = paint.measureText((i + 1).toString()) / 2
                 val x = x(marks[i])
                 (x - wide >= free).also { free = x + wide + gap }
             }
-        } ?: STEPS.last()
+        }
         return step
     }
 
-    /**
-     * The marks are drawn across the line of the seek bar, which runs below this view: like a
-     * ruler's, long where a chapter is numbered and short and faint between. Where not every
-     * chapter can be numbered, a lens stands over the one being read and shows it with those
-     * beside it, drawn apart and joined to their marks, which stay where the chapters are. It
-     * goes with the knob of the seek bar while that is dragged, and grows and follows a finger
-     * that slides along the numbers.
-     */
+    /** The mark of the chapter [i] at [x], across the line at [line], [scale] times its size; brighter if [here]. */
+    private fun mark(canvas: Canvas, i: Int, x: Float, line: Float, scale: Float, here: Boolean) {
+        val numbered = (i + 1) % step() == 0
+        val half = (if (here) 1.75f else if (numbered) 1.25f else 0.6f) * d * scale
+        val reach = (if (here) 7f else if (numbered) 5f else 3f) * d * scale
+        paint.color = if (here) BRIGHT else if (numbered) BRASS else FAINT_BRASS
+        shape.set(x - half, line - reach, x + half, line + reach)
+        canvas.drawRoundRect(shape, half, half, paint)
+    }
+
     override fun onDraw(canvas: Canvas) {
         if (marks.isEmpty()) return
         val line = height + lineBelow
         val every = step()
-        val sliding = !finger.isNaN()
-        val focus = (if (sliding) nearest(finger) else if (pointed >= 0) pointed else current).coerceAtMost(marks.lastIndex)
-        val lensed = every > 1 && focus >= 0
-        lens.setEmpty()
-        if (lensed) {
-            val beside = if (sliding) 3 else 2
-            lensPlace = (if (sliding) 30f else 24f) * d
-            lensFirst = (focus - beside).coerceAtLeast(0)
-            val last = (focus + beside).coerceAtMost(marks.lastIndex)
-            val wide = (last - lensFirst + 1) * lensPlace + 2 * LENS_PAD * d
-            // The chapter in the middle stands over its mark, or under the finger, as far as the view has room.
-            val over = if (sliding) finger else x(marks[focus])
-            val left = (over - (focus - lensFirst + 0.5f) * lensPlace - LENS_PAD * d).coerceIn(0f, (width - wide).coerceAtLeast(0f))
-            val bottom = height - 3 * d
-            lens.set(left, bottom - (if (sliding) 32f else 23f) * d, left + wide, bottom)
-        }
-
+        val at = if (!finger.isNaN()) along(finger) else seeking
+        paint.textSize = sp(NUMBER_SP)
+        // The chapter being read is numbered too, whichever it is; a number of the ruler that
+        // would run into it gives way.
+        paint.typeface = BOLD
+        val reading = marks.getOrNull(current)?.let { x(it) } ?: Float.NaN
+        val readingHalf = if (current >= 0) paint.measureText((current + 1).toString()) / 2 else 0f
         marks.forEachIndexed { i, mark ->
             val here = i == current
-            val numbered = (i + 1) % every == 0
-            val half = (if (here) 1.75f else if (numbered) 1.25f else 0.6f) * d
-            val reach = (if (here) 7f else if (numbered) 5f else 3f) * d
             val x = x(mark)
-            paint.color = if (here) BRIGHT else if (numbered) BRASS else FAINT_BRASS
-            shape.set(x - half, line - reach, x + half, line + reach)
-            canvas.drawRoundRect(shape, half, half, paint)
-
-            // Its number above it. Without a lens, the chapter being read is numbered too, whichever it is.
-            if (!numbered && !(here && !lensed)) return@forEachIndexed
-            val number = (i + 1).toString()
+            mark(canvas, i, x, line, 1f, here)
+            // Its number above it. The lens is laid over whatever it covers of them.
+            if ((i + 1) % every != 0 && !here) return@forEachIndexed
+            if (!here && abs(x - reading) < readingHalf + paint.measureText((i + 1).toString()) / 2 + 4 * d) {
+                return@forEachIndexed
+            }
             paint.typeface = if (here) BOLD else PLAIN
-            paint.textSize = sp(NUMBER_SP)
-            val wide = paint.measureText(number) / 2 + 3 * d
-            if (lensed && x + wide > lens.left && x - wide < lens.right) return@forEachIndexed
             // The numbers are lighter than their marks, to be read against the dark wood.
-            if (!here) paint.color = CREAM
-            canvas.drawText(number, x, height - 6 * d, paint)
+            paint.color = if (here) BRIGHT else CREAM
+            canvas.drawText((i + 1).toString(), x, baseline, paint)
         }
-        if (lensed) drawLens(canvas, focus, line, sliding)
+        if (every > 1 && !at.isNaN()) drawLens(canvas, at)
     }
 
-    private fun drawLens(canvas: Canvas, focus: Int, line: Float, large: Boolean) {
-        val last = lensFirst + ((lens.width() - 2 * LENS_PAD * d) / lensPlace).roundToInt() - 1
-        fun middle(i: Int) = lens.left + LENS_PAD * d + (i - lensFirst + 0.5f) * lensPlace
-        // Each number is joined to its mark on the line.
-        paint.style = Paint.Style.STROKE
-        for (i in lensFirst..last) {
-            val chosen = i == focus || i == held
-            paint.strokeWidth = (if (chosen) 1.25f else 0.75f) * d
-            paint.color = if (chosen) BRIGHT else FAINT_BRASS
-            canvas.drawLine(middle(i), lens.bottom, x(marks[i]), line - 5 * d, paint)
-        }
-        // The glass: a little lighter than the wood around it, in a brass ring.
+    /** The lens over the place [at], 0..1 along the line; see the class. */
+    private fun drawLens(canvas: Canvas, at: Float) {
+        val needle = x(at)
+        val wide = (LENS_DP * d).coerceAtMost(width.toFloat())
+        val left = (needle - wide / 2).coerceIn(0f, (width - wide).coerceAtLeast(0f))
+        paint.textSize = sp(LENS_NUMBER_SP)
+        paint.typeface = BOLD
+        lens.set(left, baseline + paint.ascent() - 1.5f * d, left + wide, baseline + 11 * d)
+        // As many times larger as lets the chapters be told apart where they lie as close as on average.
+        val apart = (x(marks.last()) - x(marks.first())) / (marks.size - 1).coerceAtLeast(1)
+        val zoom = (MIN_APART_DP * d / apart.coerceAtLeast(0.1f)).coerceIn(1.5f, MAX_ZOOM)
+        fun inLens(x: Float) = lens.centerX() + (x - needle) * zoom
         val round = lens.height() / 2
+        glass.rewind()
+        glass.addRoundRect(lens, round, round, Path.Direction.CW)
+
         paint.style = Paint.Style.FILL
         paint.color = GLASS
-        canvas.drawRoundRect(lens, round, round, paint)
+        paint.setShadowLayer(5 * d, 0f, 1.5f * d, 0x99000000.toInt())
+        canvas.drawPath(glass, paint)
+        paint.clearShadowLayer()
+        canvas.withClip(glass) {
+            // The line enlarged, as far as the book goes, with its marks across it.
+            val inLine = lens.bottom - 5 * d
+            paint.color = FAINT_BRASS
+            drawRect(
+                inLens(x(0f)).coerceAtLeast(lens.left), inLine - 0.5f * d,
+                inLens(x(1f)).coerceAtMost(lens.right), inLine + 0.5f * d, paint,
+            )
+            val chapter = chapterAt(at)
+            marks.forEachIndexed { i, mark ->
+                val x = inLens(x(mark))
+                if (x in lens.left - 4 * d..lens.right + 4 * d) mark(this, i, x, inLine, 0.6f, i == chapter)
+            }
+            // Only the chapter the place is in is numbered, over its mark, or at the edge of the
+            // glass where its mark lies beyond it.
+            val number = (chapter + 1).toString()
+            val half = paint.measureText(number) / 2 + LENS_PAD_DP * d
+            paint.color = BRIGHT
+            drawText(number, inLens(x(marks[chapter])).coerceIn(lens.left + half, lens.right - half), baseline, paint)
+            // The place itself, which moves on smoothly between the chapters.
+            paint.color = NEEDLE
+            drawRect(lens.centerX() - 0.75f * d, baseline + 2 * d, lens.centerX() + 0.75f * d, lens.bottom - 2 * d, paint)
+        }
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1.25f * d
         paint.color = BRASS
-        canvas.drawRoundRect(lens, round, round, paint)
+        canvas.drawPath(glass, paint)
         paint.style = Paint.Style.FILL
-        for (i in lensFirst..last) {
-            val chosen = i == focus || i == held
-            paint.typeface = if (chosen) BOLD else PLAIN
-            paint.textSize = sp(if (large) (if (chosen) 18f else 14f) else (if (chosen) 15f else 12f))
-            paint.color = if (chosen) BRIGHT else CREAM
-            canvas.drawText((i + 1).toString(), middle(i), lens.centerY() - (paint.ascent() + paint.descent()) / 2, paint)
-        }
     }
 
     /**
      * While a finger rests on the numbers or slides along them, [onPreview] is told the chapter
-     * under it, so that its name can be shown; lifting the finger opens that chapter. A finger
-     * put down on the lens chooses among the chapters it shows, which is the way to one of many
-     * that lie close together; anywhere else it takes the lens along.
+     * it is in, so that its name can be shown, and the lens follows it; lifting the finger opens
+     * that chapter.
      */
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (marks.isEmpty()) return false
-        val inLens = event.actionMasked == MotionEvent.ACTION_DOWN && !lens.isEmpty && event.x in lens.left..lens.right
-        if (inLens || held >= 0 && event.actionMasked != MotionEvent.ACTION_DOWN) {
-            val shown = ((lens.width() - 2 * LENS_PAD * d) / lensPlace).roundToInt()
-            held = lensFirst + ((event.x - lens.left - LENS_PAD * d) / lensPlace).toInt().coerceIn(0, shown - 1)
-        } else if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_MOVE) {
-            finger = event.x
-        }
-        val chosen = if (held >= 0) held else nearest(event.x)
+        val chosen = chapterAt(along(event.x))
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> onPreview?.invoke(chosen)
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                finger = event.x
+                onPreview?.invoke(chosen)
+            }
             MotionEvent.ACTION_UP -> {
-                letGo()
+                finger = Float.NaN
                 performClick()
                 onPick?.invoke(chosen)
             }
             MotionEvent.ACTION_CANCEL -> {
-                letGo()
+                finger = Float.NaN
                 onPreview?.invoke(-1)
             }
         }
         invalidate()
         return true
-    }
-
-    private fun letGo() {
-        finger = Float.NaN
-        held = -1
     }
 
     override fun performClick(): Boolean = super.performClick()
@@ -329,17 +347,22 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         val PLAIN: Typeface = Typeface.create(Typeface.SERIF, Typeface.NORMAL)
         val BOLD: Typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
 
-        /** The steps a ruler counts in. */
-        val STEPS = intArrayOf(1, 2, 5, 10, 20, 50, 100)
         const val NUMBER_SP = 13f
+        const val LENS_NUMBER_SP = 14f
 
-        /** The room between the rim of the lens and the numbers in it, in dp. */
-        const val LENS_PAD = 5f
+        /** How wide the lens is, how far its number keeps from its rim, and how far apart it shows the chapters at least, in dp. */
+        const val LENS_DP = 110f
+        const val LENS_PAD_DP = 6f
+        const val MIN_APART_DP = 16f
+
+        /** The most the lens enlarges the line. */
+        const val MAX_ZOOM = 12f
         const val BRIGHT = 0xFFF6E27A.toInt()
         const val BRASS = 0xFFB8922A.toInt()
         const val FAINT_BRASS = 0x80B8922A.toInt()
         const val CREAM = 0xFFD8C7A0.toInt()
         const val GLASS = 0xFF45301E.toInt()
+        const val NEEDLE = 0xFFFFF4C2.toInt()
     }
 }
 
@@ -458,4 +481,18 @@ class GestureFrame @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
 fun View.padRail(top: Int) {
     val lift = (6 * resources.displayMetrics.density).toInt().coerceAtMost(top)
     setPadding(0, top - lift, 0, lift)
+}
+
+/**
+ * A button of the top rail, whose paddings put its picture off its middle (see top_bar.xml). The
+ * ring that shows it being pressed is centred on the picture all the same.
+ */
+class RailButton(ctx: Context, attrs: AttributeSet?) : AppCompatImageButton(ctx, attrs) {
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        val x = (paddingLeft + width - paddingRight) / 2
+        val y = (paddingTop + height - paddingBottom) / 2
+        val r = height / 2
+        background?.setHotspotBounds(x - r, y - r, x + r, y + r)
+    }
 }

@@ -1,16 +1,15 @@
 package io.github.edoardonegri.ready
 
 import android.graphics.Typeface
+import android.view.ContextThemeWrapper
 import android.view.View
 import android.view.ViewGroup
-import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import androidx.core.content.ContextCompat
-import com.google.android.material.button.MaterialButton
-import com.google.android.material.button.MaterialButtonToggleGroup
 import com.google.android.material.switchmaterial.SwitchMaterial
+import java.io.File
 
 /**
  * The reader settings, built into [options] in sections, each a wooden panel under a heading:
@@ -22,8 +21,17 @@ class OptionsPanel(
     private val s: ReaderSettings,
     /** Apply every slider while it is dragged, for a page that is cheap to lay out again. */
     private val allLive: Boolean = false,
+    /**
+     * Lets the reader pick a font file and imports it, then tells what it is given the font
+     * imported, or null if none was; without it, no font can be imported.
+     */
+    private val importFont: (((File?) -> Unit) -> Unit)? = null,
 ) {
     private val ctx = options.context
+
+    private fun t(id: Int) = ctx.getString(id)
+
+    private fun percent(value: Int) = ctx.getString(R.string.percent_read, value)
 
     /** The panel of the section being filled. */
     private var section: LinearLayout = options
@@ -33,68 +41,67 @@ class OptionsPanel(
      * The callbacks run after the matching setting was saved, so an open book can follow it.
      */
     fun build(epub: Boolean, onBrightness: () -> Unit = {}, onLayout: () -> Unit = {}) {
-        section("Light")
-        slider("Brightness", 0, 100, 1, s.brightness.coerceAtLeast(0), true, { if (it == 0) "system" else "$it%" }) {
+        section(t(R.string.opt_light))
+        slider(t(R.string.opt_brightness), 0, 100, 1, s.brightness.coerceAtLeast(0), true, { if (it == 0) t(R.string.opt_brightness_system) else percent(it) }) {
             s.brightness = if (it == 0) -1 else it
             onBrightness()
         }
-        slider("Warmth", 0, 100, 1, s.warmth, true, { "$it%" }) {
+        slider(t(R.string.opt_warmth), 0, 100, 1, s.warmth, true, ::percent) {
             s.warmth = it
             onLayout()
         }
-        toggle("Dark mode", s.darkMode) {
+        toggle(t(R.string.opt_dark_mode), s.darkMode) {
             s.darkMode = it
             onLayout()
         }
-        toggle("Keep the screen on", s.keepScreenOn) {
+        toggle(t(R.string.opt_keep_screen_on), s.keepScreenOn) {
             s.keepScreenOn = it
             onBrightness()
         }
 
-        section("Page")
-        choice("Reading direction", listOf("Pages", "Scroll"), if (s.vertical) 1 else 0) {
+        section(t(R.string.opt_page))
+        buttons(t(R.string.opt_direction), listOf(t(R.string.opt_direction_pages), t(R.string.opt_direction_scroll)), if (s.vertical) 1 else 0) {
             s.vertical = it == 1
             onLayout()
         }
-        choice("Screen rotation", listOf("Auto", "Portrait", "Landscape"), s.orientation) {
+        buttons(t(R.string.opt_rotation), listOf(t(R.string.opt_rotation_auto), t(R.string.opt_rotation_portrait), t(R.string.opt_rotation_landscape)), s.orientation) {
             s.orientation = it
             onLayout()
         }
-        toggle("Show the page number", s.showPage) {
+        toggle(t(R.string.opt_show_page), s.showPage) {
             s.showPage = it
             onLayout()
         }
 
         if (epub) {
-            section("Text")
-            slider("Size", 50, 300, 5, s.fontSize, false, { "$it%" }) {
+            section(t(R.string.opt_text))
+            slider(t(R.string.opt_size), 50, 300, 5, s.fontSize, false, ::percent) {
                 s.fontSize = it
                 onLayout()
             }
-            slider("Line spacing", 10, 30, 1, s.lineSpacing, false, { "%.1f".format(it / 10f) }) {
+            slider(t(R.string.opt_line_spacing), 10, 30, 1, s.lineSpacing, false, { "%.1f".format(it / 10f) }) {
                 s.lineSpacing = it
                 onLayout()
             }
-            slider("Side margins", 0, 80, 2, s.marginH, false, { "$it" }) {
+            slider(t(R.string.opt_side_margins), 0, 80, 2, s.marginH, false, { "$it" }) {
                 s.marginH = it
                 onLayout()
             }
-            slider("Top and bottom margins", 0, 80, 2, s.marginV, false, { "$it" }) {
+            slider(t(R.string.opt_top_bottom_margins), 0, 80, 2, s.marginV, false, { "$it" }) {
                 s.marginV = it
                 onLayout()
             }
-            val fonts = ReaderSettings.FONTS
-            choice("Font", fonts.map { it.first }, s.font, fonts.map { Typeface.create(it.second, Typeface.NORMAL) }) {
-                s.font = it
-                onLayout()
-            }
+            label(t(R.string.opt_font))
+            fonts = BrassDropdown(ctx) { pickFont(it, onLayout) }
+            section.addView(fonts, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)).apply { topMargin = dp(4) })
+            showFonts()
         }
 
-        section("Turning pages")
-        toggle("Turn the pages like paper", s.slidePages) { s.slidePages = it }
-        toggle("Tap the sides to turn pages", s.tapToTurn) { s.tapToTurn = it }
-        toggle("Swipe the other way", s.reverseSwipe) { s.reverseSwipe = it }
-        toggle("Volume up for the next page", s.volumeUpNext) { s.volumeUpNext = it }
+        section(t(R.string.opt_turning))
+        toggle(t(R.string.opt_like_paper), s.slidePages) { s.slidePages = it }
+        toggle(t(R.string.opt_tap_sides), s.tapToTurn) { s.tapToTurn = it }
+        toggle(t(R.string.opt_reverse_swipe), s.reverseSwipe) { s.reverseSwipe = it }
+        toggle(t(R.string.opt_volume_up), s.volumeUpNext) { s.volumeUpNext = it }
     }
 
     private fun dp(v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
@@ -183,29 +190,74 @@ class OptionsPanel(
         )
     }
 
-    private fun choice(
-        name: String, items: List<String>, selected: Int,
-        faces: List<Typeface>? = null, onChange: (Int) -> Unit,
-    ) {
+    /**
+     * Brass buttons side by side, one for each of [items], of which the one chosen is held down,
+     * as the pair that turns the order of the shelves round is. Pressing another tells [onChange].
+     */
+    private fun buttons(name: String, items: List<String>, selected: Int, onChange: (Int) -> Unit) {
         label(name)
-        val group = MaterialButtonToggleGroup(ctx)
-        group.isSingleSelection = true
-        group.isSelectionRequired = true
-        val ids = items.mapIndexed { i, text ->
-            val b = MaterialButton(ctx, null, com.google.android.material.R.attr.materialButtonOutlinedStyle)
-            b.id = View.generateViewId()
-            b.text = text
-            b.isAllCaps = false
-            b.typeface = faces?.get(i) ?: Typeface.SERIF
-            group.addView(b)
-            b.id
+        val row = LinearLayout(ctx)
+        row.setPadding(0, dp(4), 0, dp(2))
+        val all = items.mapIndexed { i, text ->
+            TextView(ContextThemeWrapper(ctx, R.style.BrassButton), null, 0, R.style.BrassButton).apply {
+                this.text = text
+                background = PlaqueDrawable(ctx.resources.displayMetrics.density)
+                // Three to a row leave less room between the screws of each.
+                if (items.size > 2) textSize = 13f
+                row.addView(
+                    this,
+                    LinearLayout.LayoutParams(0, dp(40), 1f).apply { if (i > 0) marginStart = dp(10) },
+                )
+            }
         }
-        group.check(ids[selected.coerceIn(0, ids.lastIndex)])
-        group.addOnButtonCheckedListener { _, id, checked -> if (checked) onChange(ids.indexOf(id)) }
-        val scroller = HorizontalScrollView(ctx)
-        scroller.isHorizontalScrollBarEnabled = false
-        scroller.addView(group)
-        section.addView(scroller)
+        fun hold(chosen: Int) = all.forEachIndexed { i, b -> b.holdBrass(i == chosen) }
+        hold(selected.coerceIn(0, all.lastIndex))
+        all.forEachIndexed { i, b ->
+            b.setOnClickListener {
+                hold(i)
+                onChange(i)
+            }
+        }
+        section.addView(row)
+    }
+
+    /** The menu of the fonts: those the phone has, those imported into the app, and a way to import another. */
+    private var fonts: BrassDropdown? = null
+
+    /** Shows the fonts in [fonts], with the one the text is written in picked. */
+    private fun showFonts() {
+        val builtIn = ReaderSettings.FONTS
+        val imported = ReaderSettings.importedFonts(ctx)
+        val labels = builtIn.map { t(it.first) } + imported.map { it.nameWithoutExtension } +
+            listOfNotNull(if (importFont != null) t(R.string.font_import) else null)
+        val faces = builtIn.map { Typeface.create(it.second.ifEmpty { "serif" }, Typeface.NORMAL) } +
+            imported.map { ReaderSettings.fontFace(it) } + listOf(null)
+        val custom = s.customFont?.let { f -> imported.indexOfFirst { it.name == f.name } } ?: -1
+        fonts?.show(labels, if (custom >= 0) builtIn.size + custom else s.font.coerceIn(0, builtIn.lastIndex), faces)
+    }
+
+    /** The font [index] of [fonts] was picked: one to write the text in, or the way to import another. */
+    private fun pickFont(index: Int, onLayout: () -> Unit) {
+        val builtIn = ReaderSettings.FONTS
+        val imported = ReaderSettings.importedFonts(ctx)
+        when {
+            index < builtIn.size -> {
+                s.font = index
+                s.fontFile = ""
+            }
+            index < builtIn.size + imported.size -> s.fontFile = imported[index - builtIn.size].name
+            else -> {
+                // Until a font is imported, the one the text is written in stays picked.
+                showFonts()
+                importFont?.invoke { font ->
+                    if (font != null) s.fontFile = font.name
+                    showFonts()
+                    onLayout()
+                }
+                return
+            }
+        }
+        onLayout()
     }
 
     private fun toggle(name: String, checked: Boolean, onChange: (Boolean) -> Unit) {

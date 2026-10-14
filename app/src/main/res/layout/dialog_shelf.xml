@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- See ShelfDialog: a wooden panel with a brass title plate over whichever of these it is given:
-     a few words, details in two columns, a text field, a column of choices, one wide brass button. The plates'
+     a few words, details in two columns, a picture with fields beside it, a text field, a column of
+     choices, one wide brass button. The plates'
      backgrounds are PlaqueDrawables set in code. The window behind the panel is made
      transparent in code, so nothing is overdrawn. The panel takes the first focus, so that a title
      that can be edited does not bring the keyboard up by itself. -->
@@ -54,17 +55,6 @@
                 android:id="@+id/dialogTitle"
                 style="@style/TitlePlate" />
 
-            <!-- Takes the place of the title where the name can be changed. ShelfDialog lets it
-                 run on to a second line, which a field of one line of input would not do. -->
-            <EditText
-                android:id="@+id/dialogName"
-                style="@style/TitlePlate"
-                android:hint="@string/name"
-                android:imeOptions="actionDone|flagNoExtractUi"
-                android:importantForAutofill="no"
-                android:inputType="textCapSentences|textNoSuggestions"
-                android:textColorHint="@color/gold_dark"
-                android:visibility="gone" />
         </FrameLayout>
 
         <LinearLayout
@@ -107,6 +97,32 @@
         android:layout_marginTop="6dp"
         android:orientation="vertical"
         android:visibility="gone" />
+
+    <!-- The picture of a book or a shelf, with the fields that change it at its right: its
+         name, and the like. ShelfDialog adds the fields. -->
+    <LinearLayout
+        android:id="@+id/dialogForm"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:baselineAligned="false"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <io.github.edoardonegri.ready.RatioImageView
+            android:id="@+id/dialogPicture"
+            android:layout_width="96dp"
+            android:layout_height="wrap_content"
+            android:contentDescription="@string/cover" />
+
+        <LinearLayout
+            android:id="@+id/dialogFields"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:layout_weight="1"
+            android:orientation="vertical" />
+    </LinearLayout>
 
     <EditText
         android:id="@+id/dialogInput"

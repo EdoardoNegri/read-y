@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Point
 import android.graphics.Rect
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -14,6 +15,7 @@ import android.provider.Settings
 import android.view.DragEvent
 import android.view.Gravity
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.inputmethod.InputMethodManager
@@ -24,6 +26,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -55,9 +58,10 @@ import kotlin.math.roundToInt
  * or deletes them, and its cross lets go of all that is chosen, as Back does. The arrow leads
  * out of the shelf with what is chosen still chosen, for more to be chosen out there, and what a
  * search finds can be chosen too: all of it is then carried, moved, marked or deleted together,
- * whichever shelf it stands on. Meanwhile it is the plaques that choose: a tap on one chooses its
- * book or shelf, or lets go of it, while a tap on a shelf opens it as ever, to choose from what
- * stands on it, and a tap on a book chooses all the books from the one chosen last up to it.
+ * whichever shelf it stands on. Meanwhile a tap on a book or a shelf chooses it, or lets go of it,
+ * and two taps on a shelf open it, to choose from what stands on it; a long press carries all
+ * that is chosen. A tap on a plaque then opens what changes its book or shelf: the name, the
+ * author and the cover of a book, the name and the wood of a shelf. Otherwise it shows the details.
  * Beside the arrow of the top rail is the open book that goes on with the book read last.
  */
 class MainActivity : AppCompatActivity() {
@@ -68,6 +72,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var emptyText: TextView
     private lateinit var grant: View
     private lateinit var ghost: ImageView
+    private lateinit var bar: View
     private lateinit var barTitle: TextView
     private lateinit var up: View
     private lateinit var bin: View
@@ -79,6 +84,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var query: EditText
     private var columns = 3
     private val adapter = ShelfAdapter(::open, ::onPlaque, ::startDrag, ::spec)
+    private lateinit var decoration: ShelfDecoration
 
     /** The books found for what is in the search field; shown instead of the shelf while there is any. */
     private var found: List<File>? = null
@@ -114,7 +120,7 @@ class MainActivity : AppCompatActivity() {
         star = findViewById(R.id.starred)
         star.setOnClickListener { showStarred(!starred) }
         query = findViewById(R.id.query)
-        val bar = findViewById<View>(R.id.bar)
+        bar = findViewById(R.id.bar)
         barTitle.background = PlaqueDrawable(resources.displayMetrics.density, ornate = true)
         pickRow = findViewById(R.id.pickRow)
         findViewById<View>(R.id.resume).apply {
@@ -146,7 +152,8 @@ class MainActivity : AppCompatActivity() {
 
         columns = (resources.configuration.screenWidthDp / 118).coerceAtLeast(3)
         shelf.layoutManager = GridLayoutManager(this, columns)
-        shelf.addItemDecoration(ShelfDecoration(this, columns))
+        decoration = ShelfDecoration(this, columns)
+        shelf.addItemDecoration(decoration)
         // Leave room for the bookcase's side posts.
         ShelfSpec(0, columns, resources.displayMetrics.density).let {
             shelf.setPadding(it.side, shelf.paddingTop, it.side, shelf.paddingBottom)
@@ -156,6 +163,7 @@ class MainActivity : AppCompatActivity() {
         bar.setOnDragListener { _, e -> onRailDrag(e) }
 
         current = savedInstanceState?.getString(KEY_DIR)?.let(::File) ?: Library.root()
+        coverFor = savedInstanceState?.getString(KEY_COVER)?.let(::File)
         grant.setOnClickListener { requestAccess() }
         // What is chosen stays chosen on the way out of a shelf; only Back lets go of it.
         up.setOnClickListener { if (picked != null && !searching && outside() != null) goUp() else back.handleOnBackPressed() }
@@ -231,6 +239,7 @@ class MainActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(KEY_DIR, current.path)
+        coverFor?.let { outState.putString(KEY_COVER, it.path) }
     }
 
     private fun refresh() {
@@ -251,6 +260,7 @@ class MainActivity : AppCompatActivity() {
         Library.adoptBackup(this)
         if (!current.isDirectory || !current.path.startsWith(root.path)) current = root
         val atRoot = current == root
+        showWood()
         val results = found
         val books = if (results != null) Library.arrange(this, null, results) else Library.shelf(this, current)
         // What is carried has left its places. It is given one empty place on the shelf being
@@ -276,6 +286,15 @@ class MainActivity : AppCompatActivity() {
             results != null -> getString(R.string.no_results)
             else -> getString(R.string.empty_folder, current.path)
         }
+    }
+
+    /** Makes the case, its top rail and the search bar under it of the wood of the shelf shown. */
+    private fun showWood() {
+        val wood = Library.wood(this, current)
+        if (decoration.wood == wood) return
+        decoration.wood = wood
+        for (v in arrayOf(shelf, bar, searchRow)) v.background?.mutate()?.colorFilter = wood.filter
+        shelf.invalidate()
     }
 
     private fun goUp() {
@@ -305,9 +324,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun open(f: File, from: View? = null) {
-        // While things are chosen no book is opened by a slip of the finger: more are chosen with it.
-        if (picked != null && !f.isDirectory) return pickUpTo(f)
+        // While things are chosen a tap chooses more; a shelf is opened with two.
+        if (picked != null) return if (f.isDirectory) tapShelf(f, from) else pick(f)
         if (f.isDirectory) enter(f, from) else read(f, from)
+    }
+
+    /** The shelf tapped once while things are chosen, which is chosen unless it is tapped again at once. */
+    private var tapped: File? = null
+    private val tappedOnce = Runnable { tapped?.let { tapped = null; pick(it) } }
+
+    /** A shelf was tapped while things are chosen: once it is chosen, or let go of; twice it is opened. */
+    private fun tapShelf(dir: File, from: View?) {
+        shelf.removeCallbacks(tappedOnce)
+        val before = tapped
+        tapped = null
+        if (before == dir) return enter(dir, from)
+        before?.let(::pick)
+        tapped = dir
+        shelf.postDelayed(tappedOnce, ViewConfiguration.getDoubleTapTimeout().toLong())
     }
 
     /** Opens the book [f] in the reader, out of its place [from] on the shelf if that is given. */
@@ -385,12 +419,14 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * What has been chosen so far, by picking it up with a long press; null when nothing is.
-     * While there is any, a tap on a plaque chooses more or lets go of what was chosen, and the
-     * next long press carries all of it as one. Back lets go of everything.
+     * While there is any, a tap chooses more or lets go of what was chosen, and the next long
+     * press carries all of it as one. Back lets go of everything.
      */
     private var picked: MutableSet<File>? = null
 
     private fun stopPicking() {
+        shelf.removeCallbacks(tappedOnce)
+        tapped = null
         picked = null
         refresh()
     }
@@ -439,22 +475,6 @@ class MainActivity : AppCompatActivity() {
         search(query.text.toString())
     }
 
-    /**
-     * A book was tapped while things are chosen. One that is chosen is let go of. Another is
-     * chosen along with all the books that stand between it and what was chosen last on this
-     * shelf, so that a row of them takes two taps; the shelves in between are left out.
-     */
-    private fun pickUpTo(f: File) {
-        val set = picked ?: return
-        val files = adapter.files
-        val from = files.indexOf(set.lastOrNull { it in files })
-        val to = files.indexOf(f)
-        if (f in set || from < 0 || to < 0) return pick(f)
-        val between = if (from < to) files.subList(from + 1, to + 1) else files.subList(to, from).asReversed()
-        set.addAll(between.filter { it.isFile })
-        refresh()
-    }
-
     private fun moveAll(chosen: List<File>, to: File) {
         if (chosen.count { it.parentFile != to && !Library.move(this, it, to) } > 0) toast(R.string.cannot_move)
     }
@@ -477,7 +497,7 @@ class MainActivity : AppCompatActivity() {
     private fun askSort() {
         val sorts = Sort.values()
         ShelfDialog(this).title(getString(R.string.sort_by)).back(::showMenu)
-            .pick(sorts.map { getString(it.label) }, Library.sort(this).ordinal) {
+            .dropdown(sorts.map { getString(it.label) }, Library.sort(this).ordinal) {
                 // The shelf behind the dialog is put in the new order straight away.
                 Library.setSort(this, sorts[it])
                 refresh()
@@ -555,6 +575,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Whether the things were dropped somewhere, rather than put down again where they were. */
     private var acted = false
+
 
     /** The shelf the dragged item is held over and would be put into, with its view on screen. */
     private var into: File? = null
@@ -908,18 +929,22 @@ class MainActivity : AppCompatActivity() {
 
     // ---- details, shown by tapping a plaque ----
 
-    /** The plaque of [f] was tapped: it shows the details, or chooses [f] while things are being chosen. */
-    private fun onPlaque(f: File) = if (picked != null) pick(f) else showInfo(f)
+    /**
+     * The plaque of [f] was tapped: it shows the details, or, while things are being chosen, lets
+     * the name of [f] be changed, and the cover of a book or the wood of a shelf.
+     */
+    private fun onPlaque(f: File) = if (picked != null) edit(f) else showInfo(f)
 
     private fun showInfo(f: File) {
         if (f.isDirectory) {
             val kids = Library.shelf(this, f)
             val folders = kids.count { it.isDirectory }
+            // The counts down the left, and where the shelf is on the right, however long that is.
             val rows = ArrayList<Pair<String, String>>()
-            rows += "Folders" to "$folders"
-            rows += "Books" to "${kids.size - folders}"
-            rows += "Location" to place(f)
-            ShelfDialog(this).details(rows).arrowCloses().name(f.name) { rename(f, it) }.show()
+            rows += getString(R.string.info_books) to "${kids.size - folders}"
+            rows += getString(R.string.info_folders) to "$folders"
+            rows += getString(R.string.info_location) to place(f)
+            ShelfDialog(this).details(rows, byColumn = true).uncrossed().title(f.name).show()
             return
         }
         Library.io.execute {
@@ -928,8 +953,142 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun edit(f: File) {
+        if (f.isDirectory) return editShelf(f)
+        val app = applicationContext
+        Library.io.execute {
+            val meta = Library.meta(app, f)
+            runOnUiThread { if (!isFinishing && !isDestroyed) editBook(f, meta) }
+        }
+    }
+
+    /** The shelf [dir] as it stands on the shelf, beside its name and the wood it is made of, which can be changed there. */
+    private fun editShelf(dir: File) {
+        val woods = Wood.values()
+        val dialog = ShelfDialog(this).uncrossed().title(dir.name)
+        val name = dialog.field(R.string.field_name, dir.name)
+        dialog.choice(R.string.field_aspect) {
+            // Its miniature, in the dialog and behind it, is made of the new wood straight away.
+            Library.setWood(this, dir, woods[it])
+            showShelfPicture(dialog, dir)
+            refresh()
+        }.show(woods.map { getString(it.label) }, Library.wood(this, dir).ordinal)
+        showShelfPicture(dialog, dir)
+        dialog.onClose { renamed(dir, dir.name, name) }
+        dialog.show()
+    }
+
+    /** Shows the shelf [dir] in [dialog] the way its miniature shows it on the shelf. */
+    private fun showShelfPicture(dialog: ShelfDialog, dir: File) {
+        val spec = spec()
+        if (spec.width <= 0) return
+        dialog.picture.apply {
+            cased = true
+            wood = Library.wood(this@MainActivity, dir)
+            scaleType = ImageView.ScaleType.FIT_XY
+            ratio = (spec.coverH + spec.miniRise).toFloat() / spec.miniW
+        }
+        val app = applicationContext
+        Library.io.execute {
+            val picture = Library.folderPreview(app, dir, spec)
+            runOnUiThread { dialog.picture.setImageBitmap(picture) }
+        }
+    }
+
+    /**
+     * The book [f], described by [m], by its cover, beside its name, its author and what its
+     * cover is: its first page, or a picture it was given, or a new one to be chosen.
+     */
+    private fun editBook(f: File, m: BookMeta) {
+        val dialog = ShelfDialog(this).uncrossed().title(m.title)
+        val name = dialog.field(R.string.field_name, m.title)
+        val author = dialog.field(R.string.field_author, m.author)
+        lateinit var aspect: BrassDropdown
+        aspect = dialog.choice(R.string.field_aspect) {
+            when (it) {
+                0 -> setCover(f, null)
+                // The last is always a new picture; one the book has already stays as it is.
+                aspect.count - 1 -> {
+                    coverFor = f
+                    pickPicture.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }
+            }
+        }
+        dialog.picture.apply {
+            binding = true
+            ratio = ShelfSpec.BOOK
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setBackgroundColor(0xFF24160D.toInt())
+        }
+        editing = f to { cover, custom ->
+            dialog.picture.setImageBitmap(cover)
+            val labels = listOfNotNull(R.string.cover_first, if (custom) R.string.cover_own else null, R.string.cover_new)
+            aspect.show(labels.map(::getString), if (custom) 1 else 0)
+        }
+        showCover(f)
+        dialog.onClose {
+            editing = null
+            // The author first, under the name the book has until it is renamed.
+            val by = author.text.toString().trim()
+            if (by != m.author) Library.setAuthor(this, f, by)
+            renamed(f, m.title, name)
+            refresh()
+        }
+        dialog.show()
+    }
+
+    /** Renames [f] to what [field] holds, if that is not empty and not still [old]. */
+    private fun renamed(f: File, old: String, field: EditText) {
+        val typed = field.text.toString().trim()
+        if (typed.isNotEmpty() && typed != old) rename(f, typed)
+    }
+
+    /** The book a picture is being chosen for, to be its cover. */
+    private var coverFor: File? = null
+
+    /** The book whose editor is open, and what shows its cover there and whether it was given one. */
+    private var editing: Pair<File, (Bitmap?, Boolean) -> Unit>? = null
+
+    private val pickPicture = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        val book = coverFor ?: return@registerForActivityResult
+        coverFor = null
+        // None chosen: the editor shows the cover the book has, as it did before.
+        if (uri != null) setCover(book, uri) else showCover(book)
+    }
+
+    /** Shows the cover of [f] in its editor, if that is open. */
+    private fun showCover(f: File) {
+        val app = applicationContext
+        Library.io.execute {
+            val cover = Library.cover(app, f)
+            val custom = Library.hasCustomCover(app, f)
+            runOnUiThread { editing?.takeIf { it.first == f }?.second?.invoke(cover, custom) }
+        }
+    }
+
+    /** Gives the book [f] the picture [uri] as its cover, or its own back if that is null. */
+    private fun setCover(f: File, uri: Uri?) {
+        val app = applicationContext
+        Library.io.execute {
+            val done = Library.setCover(app, f, uri)
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                if (!done) toast(R.string.cannot_read_picture)
+                showCover(f)
+                refresh()
+            }
+        }
+    }
+
     private fun rename(f: File, name: String) {
-        if (Library.rename(this, f, name) == null) toast(R.string.name_taken)
+        val renamed = Library.rename(this, f, name)
+        if (renamed == null) toast(R.string.name_taken)
+        // What is chosen stays chosen under its new name, as does what stands on a shelf renamed.
+        else picked?.let { set ->
+            val now = set.map { if (it == f || it.path.startsWith(f.path + File.separator)) File(renamed.path + it.path.removePrefix(f.path)) else it }
+            set.clear()
+            set.addAll(now)
+        }
         refresh()
     }
 
@@ -967,30 +1126,31 @@ class MainActivity : AppCompatActivity() {
 
     private fun showBookInfo(f: File, m: BookMeta) {
         val st = Library.state(this, f)
-        val started = st.lastRead > 0
+        // A book marked as read has been, whether or not it was opened here.
+        val started = st.lastRead > 0 || st.percent > 0f
         // EPUBs have no fixed pages; the count is estimated from the amount of text.
         val page = when {
-            Library.isFlowing(f) -> (st.percent * m.pages).roundToInt()
-            started -> (st.chapter + 1).coerceAtMost(m.pages)
-            else -> 0
+            !started -> 0
+            Library.isFlowing(f) -> 1 + (st.percent * (m.pages - 1)).roundToInt()
+            else -> (st.chapter + 1).coerceAtMost(m.pages)
         }
         // First what the book is, then how far it is read, then the file it is and where that is kept.
         val rows = ArrayList<Pair<String, String>>()
-        rows += "Author" to m.author.ifBlank { "Unknown" }
-        rows += "Published" to published(m.published)
-        rows += "Pages" to "$page of ${m.pages} [${(st.percent * 100).roundToInt()}%]"
-        rows += "Last read" to if (started) DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(st.lastRead)) else "Never"
-        rows += "Format" to f.extension.uppercase()
-        f.parentFile?.let { rows += "Folder" to place(it) }
+        rows += getString(R.string.info_author) to m.author.ifBlank { getString(R.string.unknown) }
+        rows += getString(R.string.info_published) to published(m.published)
+        rows += getString(R.string.info_pages) to getString(R.string.info_pages_value, page, m.pages, (st.percent * 100).roundToInt())
+        rows += getString(R.string.info_last_read) to
+            if (st.lastRead > 0) DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(st.lastRead)) else getString(R.string.never)
+        rows += getString(R.string.info_format) to f.extension.uppercase()
+        f.parentFile?.let { rows += getString(R.string.info_folder) to place(it) }
 
-        // The plate holds the name, which can be changed there.
-        ShelfDialog(this).details(rows).uncrossed().name(m.title) { rename(f, it) }.show()
+        ShelfDialog(this).details(rows).uncrossed().title(m.title).show()
     }
 
     /** The date [BookMeta.published] gives, with no more of it than is known. */
     private fun published(date: String): String {
         val parts = date.split('-').mapNotNull(String::toIntOrNull)
-        if (parts.size < 2) return parts.firstOrNull()?.toString() ?: "Unknown"
+        if (parts.size < 2) return parts.firstOrNull()?.toString() ?: getString(R.string.unknown)
         val day = Calendar.getInstance().apply {
             clear()
             set(parts[0], parts[1] - 1, parts.getOrElse(2) { 1 })
@@ -1002,6 +1162,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val KEY_DIR = "dir"
+        private const val KEY_COVER = "cover"
         private const val TYPING_MS = 200L
         private const val ZOOM_MS = 560L
         private const val MOVE_MS = 180L

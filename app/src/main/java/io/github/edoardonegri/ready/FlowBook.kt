@@ -122,7 +122,7 @@ class TxtBook(file: File) : FlowBook {
             names.add(null)
         }
         weights = LongArray(parts.size) { parts[it].size.toLong() }
-        if (spine.size > 1) spine.forEachIndexed { i, path -> toc.add(TocEntry(names[i] ?: "Part ${i + 1}", path, null, 0)) }
+        if (spine.size > 1) spine.forEachIndexed { i, path -> toc.add(TocEntry(names[i].orEmpty(), path, null, 0)) }
     }
 
     override fun mimeOf(path: String) = "text/html"

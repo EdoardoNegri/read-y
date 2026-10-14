@@ -111,7 +111,7 @@ class MobiBook(file: File) : FlowBook {
             }
         }
         if (parts.isEmpty()) throw IOException("The book has no text")
-        if (spine.size > 1) spine.forEachIndexed { i, path -> toc.add(TocEntry(names[i] ?: "Part ${i + 1}", path, null, 0)) }
+        if (spine.size > 1) spine.forEachIndexed { i, path -> toc.add(TocEntry(names[i].orEmpty(), path, null, 0)) }
     }
 
     @Synchronized

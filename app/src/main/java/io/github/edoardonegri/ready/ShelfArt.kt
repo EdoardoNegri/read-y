@@ -2,6 +2,8 @@ package io.github.edoardonegri.ready
 
 import android.graphics.Canvas
 import android.graphics.ColorFilter
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
@@ -37,10 +39,23 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         }
 
     /**
-     * The plain plate as a button that is held down: it lies where its shadow was, and is lit
-     * from below its rim, dark at the top.
+     * The plain plate as a button that is held down: it lies where its shadow was, and is
+     * hollow where the plate standing out bulges, lit from below and shaded at the top.
      */
     var sunk = false
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidateSelf()
+            }
+        }
+
+    /**
+     * The plain plate of a drop-down menu, which has an arrow engraved in place of each screw,
+     * a little further in: pointing down, 1, while its choices are closed, and up, -1, while they
+     * are open; 0 for the screws.
+     */
+    var arrows = 0
         set(value) {
             if (field != value) {
                 field = value
@@ -100,23 +115,17 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         )
         r.inset(d, d)
         c.drawRoundRect(r, 2 * d, 2 * d, paint)
-        if (sunk) {
-            // The rim it has gone down behind casts its shadow on it from above.
-            paint.shader = LinearGradient(0f, r.top, 0f, r.top + 6 * d, 0x70301400, 0, Shader.TileMode.CLAMP)
-            c.drawRoundRect(r, 2 * d, 2 * d, paint)
-        } else {
-            face.rewind()
-            face.addRoundRect(r, 2 * d, 2 * d, Path.Direction.CW)
-            gloss(c, face, r.left, r.top, r.right, r.bottom)
-        }
+        face.rewind()
+        face.addRoundRect(r, 2 * d, 2 * d, Path.Direction.CW)
+        if (sunk) hollow(c, face, r.left, r.top, r.right, r.bottom) else gloss(c, face, r.left, r.top, r.right, r.bottom)
         paint.shader = null
 
         // Bevel: a lit upper edge and a shaded lower edge just inside the rim, or the other way round.
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = d
-        paint.color = if (sunk) 0x90402C00.toInt() else metal.lit
+        paint.color = if (sunk) metal.shade else metal.lit
         c.drawLine(left + 3 * d, top + 1.5f * d, right - 3 * d, top + 1.5f * d, paint)
-        paint.color = if (sunk) 0x70FFFBDC else metal.shade
+        paint.color = if (sunk) metal.lit else metal.shade
         c.drawLine(left + 3 * d, bottom - 1.5f * d, right - 3 * d, bottom - 1.5f * d, paint)
 
         // Engraved border: a dark groove with a lighter lip just below and right of it.
@@ -130,8 +139,30 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         c.drawRoundRect(r, 1.5f * d, 1.5f * d, paint)
 
         val cy = (top + bottom) / 2
+        if (arrows != 0) {
+            arrow(c, left + ARROW_X_DP * d, cy)
+            arrow(c, right - ARROW_X_DP * d, cy)
+            return
+        }
         screw(c, left + SCREW_X_DP * d, cy, 0.6f)
         screw(c, right - SCREW_X_DP * d, cy, 2.3f)
+    }
+
+    /** A small triangle engraved in the plate at ([x], [y]), pointing the way [arrows] says. */
+    private fun arrow(c: Canvas, x: Float, y: Float) {
+        val half = 4.5f * d
+        val tip = 2.9f * d * arrows
+        star.rewind()
+        star.moveTo(x - half, y - tip)
+        star.lineTo(x + half, y - tip)
+        star.lineTo(x, y + tip)
+        star.close()
+        // Cut in like the border: a lighter lip below and right of a dark groove.
+        paint.style = Paint.Style.FILL
+        paint.color = metal.lip
+        c.withTranslation(0.7f * d, 0.7f * d) { c.drawPath(star, paint) }
+        paint.color = 0xF0382600.toInt()
+        c.drawPath(star, paint)
     }
 
     private fun drawShaped(c: Canvas) {
@@ -197,6 +228,27 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
             0f, t, 0f, b,
             intArrayOf(0x44FFFFFF, 0x52FFFFFF, 0x24FFFFFF, 0x00FFFFFF, 0x00000000, 0x1C000000),
             floatArrayOf(0f, 0.16f, 0.4f, 0.62f, 0.7f, 1f), Shader.TileMode.CLAMP,
+        )
+        c.drawPath(outline, paint)
+        paint.shader = LinearGradient(
+            l, 0f, r, 0f, intArrayOf(0x1A000000, 0x00000000, 0x00000000, 0x1A000000),
+            floatArrayOf(0f, 0.14f, 0.86f, 1f), Shader.TileMode.CLAMP,
+        )
+        c.drawPath(outline, paint)
+        paint.shader = null
+    }
+
+    /**
+     * The [gloss] the other way round, for a plate that is held down: it is hollow instead of
+     * bulging, so the light catches it low down and its top lies in shadow, which is deepest
+     * just under the rim; its two ends are a little darker, as on the plate standing out.
+     */
+    private fun hollow(c: Canvas, outline: Path, l: Float, t: Float, r: Float, b: Float) {
+        paint.style = Paint.Style.FILL
+        paint.shader = LinearGradient(
+            0f, t, 0f, b,
+            intArrayOf(0x40000000, 0x24000000, 0x00000000, 0x00FFFFFF, 0x30FFFFFF, 0x44FFFFFF),
+            floatArrayOf(0f, 0.18f, 0.4f, 0.55f, 0.84f, 1f), Shader.TileMode.CLAMP,
         )
         c.drawPath(outline, paint)
         paint.shader = LinearGradient(
@@ -290,6 +342,9 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         const val SCREW_X_DP = 7f
         const val TEXT_INSET_DP = 13
 
+        /** Distance of the arrows of a drop-down menu from the ends, a little further in than the screws. */
+        const val ARROW_X_DP = 14f
+
         /** The ornate plate: radius of its scooped corners, and where its screws sit. */
         const val NOTCH_DP = 8f
         const val ORNATE_SCREW_X_DP = 10f
@@ -298,8 +353,8 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         const val FAVORITE_NOTCH_DP = 5f
         const val STAR_X_DP = 8f
 
-        /** The plain plate held down, which lies in the shadow of its own rim. */
-        private val SUNK = intArrayOf(0xFF4A3306.toInt(), 0xFF6E5210.toInt(), 0xFF83641A.toInt(), 0xFF927222.toInt())
+        /** The plain plate held down: the brass of the plate standing out, lit from below instead of above. */
+        private val SUNK = intArrayOf(0xFF9C7418.toInt(), 0xFFCDA233.toInt(), 0xFFE6C24C.toInt(), 0xFFFFF3B4.toInt())
 
         private val BRASS = Metal(
             rim = 0xFF5E450C.toInt(),
@@ -320,6 +375,28 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
      * [shade] edges of the bevel, and the [lip] and [groove] of the engraved border.
      */
     private class Metal(val rim: Int, val plate: IntArray, val lit: Int, val shade: Int, val lip: Int, val groove: Int)
+}
+
+/**
+ * The woods a shelf can be made of. The case is drawn in walnut and given another wood by a
+ * [filter] over its colours: they are first made duller, to [saturation] of what they were, and
+ * then red, green and blue are each made stronger or weaker. Black stays black, so the shadows
+ * on the wall stay as they are.
+ */
+enum class Wood(val label: Int, saturation: Float, red: Float, green: Float, blue: Float) {
+    WALNUT(R.string.wood_walnut, 1f, 1f, 1f, 1f),
+    OAK(R.string.wood_oak, 0.8f, 1.5f, 1.45f, 1.2f),
+    MAPLE(R.string.wood_maple, 0.6f, 1.95f, 1.95f, 1.9f),
+    CHERRY(R.string.wood_cherry, 1f, 1.35f, 0.92f, 0.8f),
+    MAHOGANY(R.string.wood_mahogany, 1f, 1.1f, 0.62f, 0.6f),
+    EBONY(R.string.wood_ebony, 0.25f, 0.55f, 0.52f, 0.5f);
+
+    /** What turns walnut into this wood; null for walnut itself. */
+    val filter: ColorFilter? = if (saturation == 1f && red == 1f && green == 1f && blue == 1f) null else
+        ColorMatrixColorFilter(ColorMatrix().apply {
+            setSaturation(saturation)
+            postConcat(ColorMatrix().apply { setScale(red, green, blue, 1f) })
+        })
 }
 
 object ShelfArt {

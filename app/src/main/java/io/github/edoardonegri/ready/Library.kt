@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.ImageDecoder
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Rect
@@ -32,6 +33,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.ceil
@@ -127,6 +129,9 @@ object Library {
     private const val DESCENDING = "descending"
     private const val ORDER = "order:"
     private const val TITLE = "title:"
+    private const val AUTHOR = "author:"
+    private const val COVER = "cover:"
+    private const val WOOD = "wood:"
     private const val FINISHED = "finished"
 
     /** How far into a book it counts as read to the end: the last page, with room for rounding. */
@@ -363,7 +368,8 @@ object Library {
 
     /**
      * Writes reading positions, favorites, the books on the widget, finished books, the order of
-     * the shelves, the names given to books and the reader settings to [backupFile]. Books are
+     * the shelves, the names, authors and covers given to books, the wood of the shelves and the reader
+     * settings to [backupFile]; the covers themselves are kept in the library folder. Books are
      * named by where they are in the library, so the backup also fits the same library on
      * another phone. Blocking.
      */
@@ -393,10 +399,16 @@ object Library {
         )
         val orders = JSONObject()
         val titles = JSONObject()
+        val authors = JSONObject()
+        val covers = JSONObject()
+        val woods = JSONObject()
         for ((key, value) in libraryPrefs(ctx).all) {
             if (value !is String) continue
             if (key.startsWith(ORDER)) orders.put(key.removePrefix(ORDER).removePrefix(base), value)
             if (key.startsWith(TITLE)) titles.put(key.removePrefix(TITLE).removePrefix(base), value)
+            if (key.startsWith(AUTHOR)) authors.put(key.removePrefix(AUTHOR).removePrefix(base), value)
+            if (key.startsWith(COVER)) covers.put(key.removePrefix(COVER).removePrefix(base), value)
+            if (key.startsWith(WOOD)) woods.put(key.removePrefix(WOOD).removePrefix(base), value)
         }
         val settings = JSONObject()
         for ((key, value) in ctx.getSharedPreferences("reader", Context.MODE_PRIVATE).all) {
@@ -404,7 +416,8 @@ object Library {
         }
         val o = JSONObject().put("version", 1).put("positions", positions)
             .put("favorites", set(FAVORITES))
-            .put("orders", orders).put("titles", titles).put("sort", sort(ctx).ordinal).put("settings", settings)
+            .put("orders", orders).put("titles", titles).put("authors", authors).put("covers", covers).put("woods", woods)
+            .put("sort", sort(ctx).ordinal).put("settings", settings)
         if (libraryPrefs(ctx).contains(DESCENDING)) o.put("descending", descending(ctx))
         // Left out until the reader has chosen the books for the widget, which shows the favorites till then.
         if (statePrefs(ctx).contains(WIDGET)) {
@@ -436,6 +449,9 @@ object Library {
         libraryPrefs(ctx).edit {
             o.optJSONObject("orders")?.let { for (key in it.keys()) putString(ORDER + base + key, it.getString(key)) }
             o.optJSONObject("titles")?.let { for (key in it.keys()) putString(TITLE + base + key, it.getString(key)) }
+            o.optJSONObject("authors")?.let { for (key in it.keys()) putString(AUTHOR + base + key, it.getString(key)) }
+            o.optJSONObject("covers")?.let { for (key in it.keys()) putString(COVER + base + key, it.getString(key)) }
+            o.optJSONObject("woods")?.let { for (key in it.keys()) putString(WOOD + base + key, it.getString(key)) }
             putInt(SORT, o.optInt("sort"))
             if (o.has("descending")) putBoolean(DESCENDING, o.optBoolean("descending")) else remove(DESCENDING)
         }
@@ -547,8 +563,9 @@ object Library {
 
     /**
      * Everything remembered under the path [old] or a path inside it (reading positions, details,
-     * favorites, the books on the widget, finished books, orders and names) is
-     * remembered under [new] instead, or forgotten if that is null.
+     * favorites, the books on the widget, finished books, orders, names, authors, covers and woods) is
+     * remembered under [new] instead, or forgotten if that is null: a cover given to a book
+     * that is gone for good goes with it.
      */
     private fun remember(ctx: Context, old: String, new: String?) {
         fun within(path: String) = path == old || path.startsWith(old + File.separator)
@@ -573,11 +590,12 @@ object Library {
         }
         val library = libraryPrefs(ctx)
         library.edit {
-            for ((key, value) in library.all) for (kind in arrayOf(ORDER, TITLE)) {
+            for ((key, value) in library.all) for (kind in arrayOf(ORDER, TITLE, AUTHOR, COVER, WOOD)) {
                 val path = key.removePrefix(kind)
                 if (key.startsWith(kind) && value is String && within(path)) {
                     remove(key)
                     if (new != null) putString(kind + moved(path), value)
+                    else if (kind == COVER) File(coversDir(), value).delete()
                 }
             }
         }
@@ -699,20 +717,106 @@ object Library {
         return named(ctx, f, meta)
     }
 
-    /** [m] under the name the reader gave the book with [rename], if any. */
-    private fun named(ctx: Context, f: File, m: BookMeta): BookMeta =
-        libraryPrefs(ctx).getString(TITLE + f.path, null)?.let { m.copy(title = it) } ?: m
+    /** [m] under the name and the author the reader gave the book with [rename] and [setAuthor], if any. */
+    private fun named(ctx: Context, f: File, m: BookMeta): BookMeta {
+        val prefs = libraryPrefs(ctx)
+        return m.copy(
+            title = prefs.getString(TITLE + f.path, null) ?: m.title,
+            author = prefs.getString(AUTHOR + f.path, null) ?: m.author,
+        )
+    }
+
+    /** Says that the book [f] is by [author], whatever is written in the file. */
+    fun setAuthor(ctx: Context, f: File, author: String) {
+        libraryPrefs(ctx).edit { putString(AUTHOR + f.path, author.trim()) }
+        stamp++
+    }
 
     private fun coverKey(f: File) = "${f.path}:${f.lastModified()}"
 
     fun cachedCover(f: File): Bitmap? = bitmaps.get(coverKey(f))
 
-    /** Decodes the cover written by [meta]. Blocking. */
+    /** Decodes the cover the book is shown with: the one it was given, or else the one written by [meta]. Blocking. */
     fun cover(ctx: Context, f: File): Bitmap? {
         cachedCover(f)?.let { return it }
-        val bmp = BitmapFactory.decodeFile(coverFile(ctx, f).path) ?: return null
+        val bmp = BitmapFactory.decodeFile(coverImage(ctx, f).path) ?: return null
         bitmaps.put(coverKey(f), bmp)
         return bmp
+    }
+
+    /**
+     * The covers the reader gave books in place of their first pages. They are kept hidden in the
+     * library folder, so that they go along with it, and its backup, to another phone.
+     */
+    private fun coversDir() = File(root(), ".covers")
+
+    /** The cover the reader gave the book [f]; null while it has its own. */
+    private fun customCover(ctx: Context, f: File): File? =
+        libraryPrefs(ctx).getString(COVER + f.path, null)?.let { File(coversDir(), it) }?.takeIf { it.isFile }
+
+    fun hasCustomCover(ctx: Context, f: File) = customCover(ctx, f) != null
+
+    /** The picture the book [f] is shown with. Unless it was given one, it is written by [meta]. */
+    fun coverImage(ctx: Context, f: File): File = customCover(ctx, f) ?: coverFile(ctx, f)
+
+    /**
+     * Gives the book [f] the picture [uri] as its cover, or gives it back its own, the first
+     * page, if that is null. False if the picture cannot be read. Blocking.
+     */
+    fun setCover(ctx: Context, f: File, uri: Uri?): Boolean {
+        val old = customCover(ctx, f)
+        if (uri == null) {
+            libraryPrefs(ctx).edit { remove(COVER + f.path) }
+        } else {
+            val bmp = readPicture(ctx, uri, COVER_W * 2) ?: return false
+            val name = "${UUID.randomUUID()}.jpg"
+            try {
+                coversDir().mkdirs()
+                FileOutputStream(File(coversDir(), name)).use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+            } catch (e: Exception) {
+                Log.w(TAG, "Cannot save the cover for ${f.path}", e)
+                return false
+            }
+            libraryPrefs(ctx).edit { putString(COVER + f.path, name) }
+        }
+        old?.delete()
+        bitmaps.remove(coverKey(f))
+        stamp++
+        FavoritesWidget.refresh(ctx)
+        return true
+    }
+
+    /** The picture [uri], upright and not much wider than [width]; null if it cannot be read. Blocking. */
+    private fun readPicture(ctx: Context, uri: Uri, width: Int): Bitmap? = try {
+        if (Build.VERSION.SDK_INT >= 28) {
+            // A photo taken with the phone on its side is turned upright by the decoder.
+            ImageDecoder.decodeBitmap(ImageDecoder.createSource(ctx.contentResolver, uri)) { decoder, info, _ ->
+                val w = info.size.width
+                if (w > width) decoder.setTargetSize(width, (info.size.height.toLong() * width / w).toInt().coerceAtLeast(1))
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            }
+        } else {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            var sample = 1
+            while (bounds.outWidth / (sample * 2) >= width) sample *= 2
+            ctx.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+            }
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "Cannot read the picture $uri", e)
+        null
+    }
+
+    /** The wood the shelf [dir] is made of. */
+    fun wood(ctx: Context, dir: File): Wood =
+        libraryPrefs(ctx).getString(WOOD + dir.path, null)?.let { name -> Wood.values().firstOrNull { it.name == name } }
+            ?: Wood.WALNUT
+
+    fun setWood(ctx: Context, dir: File, wood: Wood) {
+        libraryPrefs(ctx).edit { if (wood == Wood.WALNUT) remove(WOOD + dir.path) else putString(WOOD + dir.path, wood.name) }
+        stamp++
     }
 
     /**
@@ -753,6 +857,9 @@ object Library {
         // Draw in real case pixels.
         c.scale(COVER_W / w, COVER_W / w)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        // The case is made of its own wood; what stands in it keeps its colours.
+        val wood = wood(ctx, dir).filter
+        paint.colorFilter = wood
 
         paint.alpha = 255
         paint.shader = LinearGradient(
@@ -764,6 +871,7 @@ object Library {
         for (row in 1..spec.miniRows) ShelfDecoration.drawPlank(c, w, (row * rowH).toFloat(), spec.density, paint, row - 1)
         ShelfDecoration.drawShade(c, w, spec.density, paint)
         paint.shader = null
+        paint.colorFilter = null
 
         val title = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFF3B2A05.toInt()
@@ -820,8 +928,10 @@ object Library {
             if (layer >= 0) c.restoreToCount(layer)
         }
 
+        paint.colorFilter = wood
         ShelfDecoration.drawCase(c, w, h, spec, paint)
         paint.shader = null
+        paint.colorFilter = null
         if (depth == 0) bitmaps.put(key, bmp)
         return bmp
     }

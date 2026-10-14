@@ -22,6 +22,13 @@ class ShelfDecoration(ctx: Context, private val columns: Int) : RecyclerView.Ite
     private val d = ctx.resources.displayMetrics.density
     private val paint = Paint()
 
+    /** The wood the case is made of: the shelf being shown. */
+    var wood = Wood.WALNUT
+        set(value) {
+            field = value
+            paint.colorFilter = value.filter
+        }
+
     init {
         prepare(ctx)
     }

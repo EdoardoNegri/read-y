@@ -43,6 +43,9 @@ class PageEngine(
     private val ratios = FloatArray(count) { source.firstRatio }
     private var generation = 0
     private var page = start.chapter.coerceIn(0, count - 1)
+
+    /** A book of one page has been taken to its end, by the seek bar or by being marked as read. */
+    private var atEnd = start.percent >= Library.FINISHED_AT
     private var filter: ColorFilter? = null
 
     @Volatile
@@ -106,7 +109,11 @@ class PageEngine(
         }
     }
 
-    private fun report() = host.onPosition(page, 0f, (page + 1f) / count, "Page ${page + 1}/$count", null)
+    /** The first page is none of the book read and the last all of it; a book of one page is read once at its end. */
+    private fun report() {
+        val read = if (count > 1) page.toFloat() / (count - 1) else if (atEnd) 1f else 0f
+        host.onPosition(page, 0f, read, frame.context.getString(R.string.page_n_of_cap, page + 1, count), null)
+    }
 
     /** Draws page [i] for the current view size in the background and delivers it when done. */
     private fun request(i: Int) {
@@ -189,6 +196,7 @@ class PageEngine(
     override fun applySettings() = configure()
 
     override fun seekTo(fraction: Float) {
+        atEnd = fraction >= 1f
         page = (fraction.coerceIn(0f, 1f) * (count - 1)).roundToInt()
         if (s.vertical) {
             lm.scrollToPositionWithOffset(page, 0)
