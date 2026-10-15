@@ -1,7 +1,8 @@
 package io.github.edoardonegri.ready
 
+import android.graphics.Rect
+import android.os.Build
 import android.os.Bundle
-import android.util.TypedValue
 import android.view.View
 import android.widget.ImageButton
 import android.widget.TextView
@@ -10,30 +11,33 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.core.widget.TextViewCompat
 import java.io.File
-import kotlin.math.roundToInt
 
 /**
- * The reader settings, reachable from the bookshelf without opening a book, with a sample page
- * that follows them. The cross closes them; the arrow leads back to the menu they were opened
- * from, which the one who opened them is told through the result (RESULT_OK).
+ * The reader settings, reachable from the bookshelf without opening a book, with a page of a
+ * sample book that follows them, as the reader would show it (PagePreview). The cross closes
+ * them; the arrow leads back to the menu they were opened from, which the one who opened them is
+ * told through the result (RESULT_OK).
  */
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var s: ReaderSettings
-    private lateinit var sample: TextView
+    private lateinit var preview: PagePreview
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         s = ReaderSettings(this)
         setContentView(R.layout.activity_settings)
-        sample = findViewById(R.id.sample)
+        preview = findViewById(R.id.preview)
         val bar = findViewById<View>(R.id.bar)
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.root)) { v, insets ->
             val i = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             v.setPadding(i.left, 0, i.right, i.bottom)
             bar.padRail(i.top)
+            // The sample page has the camera where the reader's screen has it.
+            val c = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+            val outline = if (Build.VERSION.SDK_INT >= 31) insets.toWindowInsets()?.displayCutout?.cutoutPath else null
+            preview.cutout = Cutout(Rect(c.left, c.top, c.right, c.bottom), insets.displayCutout?.boundingRects.orEmpty(), outline)
             insets
         }
         findViewById<TextView>(R.id.barTitle).apply {
@@ -54,17 +58,30 @@ class SettingsActivity : AppCompatActivity() {
                 finish()
             }
         }
-        OptionsPanel(findViewById(R.id.options), s, allLive = true) { done ->
+        OptionsPanel(findViewById(R.id.options), s) { done ->
             imported = done
             pickFont.launch(FONT_TYPES)
         }.build(epub = true, ::applyBrightness, ::applyPage)
+        preview.open(this, s)
         applyBrightness()
-        applyPage()
+        // The page in the settings turns at the rate the reader's do.
+        s.refresh(this)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        preview.resume()
     }
 
     override fun onPause() {
+        preview.pause()
         Library.backUp(this)
         super.onPause()
+    }
+
+    override fun onDestroy() {
+        preview.close()
+        super.onDestroy()
     }
 
     /** Told the font imported from the file being picked, or null if none was. */
@@ -86,21 +103,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun applyBrightness() = s.light(window, mayStayOn = false)
 
-    /** Lays the sample out the way FlowEngine styles a chapter: 16px text scaled by the zoom, CSS line height. */
-    private fun applyPage() {
-        val d = resources.displayMetrics.density
-        val size = 16f * s.fontSize / 100
-        findViewById<LampView>(R.id.lamp).color = s.lamp
-        sample.setBackgroundColor(s.palette.bg)
-        sample.setTextColor(s.palette.fg)
-        // A book's own fonts are unknown here; a serif face stands in for "Original".
-        sample.typeface = s.typeface()
-        sample.setTextSize(TypedValue.COMPLEX_UNIT_DIP, size)
-        TextViewCompat.setLineHeight(sample, (size * d * s.lineSpacing / 10f).roundToInt().coerceAtLeast(1))
-        val h = (s.marginH * d).toInt()
-        val v = (s.marginV * d).toInt()
-        sample.setPadding(h, v, h, v)
-    }
+    private fun applyPage() = preview.apply()
 
     private companion object {
         /** What a font file may say it is; some places call it nothing more than a file. */

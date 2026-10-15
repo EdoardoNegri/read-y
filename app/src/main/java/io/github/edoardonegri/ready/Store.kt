@@ -23,6 +23,20 @@ class ReadyApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Store.app = this
+        Library.warmUp(this)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // A book kept open in case it is read again, or read ahead for the reader, is let go of when
+        // memory runs short, but not merely because the app was left.
+        @Suppress("DEPRECATION")
+        if (level != TRIM_MEMORY_UI_HIDDEN) {
+            KeptBook.drop()
+            BookPrep.drop()
+            FlowEngine.release()
+        }
+        Library.trim(level)
     }
 }
 
@@ -201,6 +215,8 @@ object Store {
         val names = kids.mapTo(HashSet()) { it.path }
         for (key in entries.keys) if (key.startsWith(prefix) && key.indexOf(File.separatorChar, prefix.length) < 0 && key !in names) entries[key] = NONE
         listings[dir.path] = kids
+        // What can be listed is a folder that is there, which need not be asked about again.
+        entries.compute(dir.path) { _, known -> if (known == null || known === NONE) Entry(true, 0, 0) else known }
         return kids
     }
 
@@ -221,10 +237,14 @@ object Store {
         listings.computeIfPresent(parent) { _, old -> if (there) old.filter { it != f } + f else old.filter { it != f } }
     }
 
-    /** [dir] and everything in it, folders before what they hold, like [File.walkTopDown]; [enter] says which folders to look into. */
-    fun walk(dir: File, enter: (File) -> Boolean = { true }): Sequence<File> = sequence {
+    /**
+     * [dir] and everything in it, folders before what they hold, like [File.walkTopDown]; [enter]
+     * says which folders to look into. Unless [fresh], a folder listed before is taken as it was
+     * found then (see [listings]), which spares the documents provider being asked again.
+     */
+    fun walk(dir: File, fresh: Boolean = true, enter: (File) -> Boolean = { true }): Sequence<File> = sequence {
         yield(dir)
-        if (isFolder(dir) && enter(dir)) for (f in list(dir)) yieldAll(walk(f, enter))
+        if (isFolder(dir) && enter(dir)) for (f in (if (fresh) null else known(dir)) ?: list(dir)) yieldAll(walk(f, fresh, enter))
     }
 
     /** Forgets what is known of [f] and all it holds, after it changed. */

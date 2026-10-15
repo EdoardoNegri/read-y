@@ -2,10 +2,15 @@ package io.github.edoardonegri.ready
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
+import android.content.MutableContextWrapper
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.view.View
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -15,6 +20,7 @@ import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.IOException
+import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
@@ -24,15 +30,17 @@ import kotlin.math.roundToInt
 @SuppressLint("SetJavaScriptEnabled")
 class FlowEngine(
     private val act: Activity,
-    file: File,
+    private val file: File,
     private val s: ReaderSettings,
     start: BookState,
     private val host: ReaderHost,
+    /** The book to show, if it is not read from [file]: the sample in the settings (PagePreview). */
+    private val given: FlowBook? = null,
 ) : ReaderEngine {
 
-    private val book = FlowBook.open(file)
+    private val book = given ?: FlowBook.take(file)
     private val total: Long
-    private val web = WebView(act)
+    private val web = takeWebView(act)
     override val view: View get() = web
 
     private var chapter = 0
@@ -41,6 +49,12 @@ class FlowEngine(
     private var injected = false
     private var ready = false
     private var closed = false
+
+    /**
+     * The settings, or the size of the page, changed while the chapter was being laid out by the
+     * ones before: it is laid out again before it is shown, see Bridge.onLayout.
+     */
+    private var stale = false
 
     init {
         if (book.spine.isEmpty()) {
@@ -57,6 +71,7 @@ class FlowEngine(
         web.settings.allowFileAccess = false
         web.settings.allowContentAccess = false
         web.settings.textZoom = s.fontSize
+        preRaster()
         web.overScrollMode = View.OVER_SCROLL_NEVER
         web.isHorizontalScrollBarEnabled = false
         web.addJavascriptInterface(Bridge(), "Android")
@@ -83,12 +98,21 @@ class FlowEngine(
                 )
             }
             val mime = book.mimeOf(path)
+            if (mime in MOVING) return still(stream).let { (data, type) -> WebResourceResponse(type ?: mime, null, data) }
             val text = mime.startsWith("text/") || mime.endsWith("xml")
             return WebResourceResponse(mime, if (text) "utf-8" else null, stream)
         }
 
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             openLink(request.url.toString())
+            return true
+        }
+
+        override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+            // The process the pages were drawn in has ended: the phone let go of it for its memory,
+            // or something in the book made it fail. The web view cannot be used any more, and the
+            // app would end along with it unless that is seen to here; the reader opens the book anew.
+            if (!closed) host.reopen()
             return true
         }
 
@@ -109,6 +133,11 @@ class FlowEngine(
         fun onLayout(page: Int, pages: Int, fraction: Double, progress: Double) {
             act.runOnUiThread {
                 if (closed) return@runOnUiThread
+                if (stale) {
+                    stale = false
+                    relayout()
+                    return@runOnUiThread
+                }
                 reveal()
                 val n = book.spine.size
                 val inChapter = if (s.vertical) "" else act.getString(R.string.page_n_of, page + 1, pages)
@@ -141,15 +170,30 @@ class FlowEngine(
     }
 
     private fun reveal() {
+        if (ready) return
         ready = true
         web.alpha = 1f
+        // The page left, which stood in front while this one was laid out (see load), can go.
+        host.release()
     }
 
+    /**
+     * Shows the chapter [chapter]. The web view shows nothing until it is laid out, so a page
+     * that was being read stays in front meanwhile (ReaderHost.hold), rather than the screen
+     * going blank for a moment.
+     */
     private fun load() {
+        if (!ready) return show()
+        ready = false
+        host.hold { if (!closed) show() }
+    }
+
+    private fun show() {
         ready = false
         injected = false
+        stale = false
         web.alpha = 0f
-        web.setBackgroundColor(s.palette.bg)
+        web.setBackgroundColor(s.litPalette.bg)
         web.isVerticalScrollBarEnabled = s.vertical
         web.loadUrl("https://$HOST/" + Uri.encode(book.spine[chapter], "/"))
     }
@@ -157,7 +201,8 @@ class FlowEngine(
     private fun css(color: Int) = String.format("#%06X", color and 0xFFFFFF)
 
     private fun config(): String {
-        val p = s.palette
+        // In the warm light; pictures keep their own colours.
+        val p = s.litPalette
         // The page size is passed in rather than read from window.innerWidth, which the WebView
         // widens to the content width once the columns overflow.
         val dm = act.resources.displayMetrics
@@ -177,8 +222,29 @@ class FlowEngine(
             .put("mh", s.marginH)
             .put("mv", s.marginV)
             .put("vertical", s.vertical)
+            .put("hy", HYPHENATION.getOrElse(s.hyphenation) { "" })
+            // Words are broken by the rules of the language the book is in; one that does not say
+            // is taken to be in that of the phone.
+            .put("lang", book.language.ifEmpty { Locale.getDefault().toLanguageTag() })
             .toString()
     }
+
+    /**
+     * Scrolling, the text around the screen is drawn before it comes into view, so that a quick
+     * scroll does not find it blank; pages that turn are drawn one at a time.
+     */
+    private fun preRaster() {
+        web.settings.offscreenPreRaster = s.vertical
+    }
+
+    override val innerMargin get() = if (s.vertical) 0 else (s.marginV * act.resources.displayMetrics.density).roundToInt()
+
+    override val chapterEnd: Float
+        get() {
+            var upTo = 0L
+            for (i in 0..chapter) upTo += book.weights[i]
+            return (upTo.toFloat() / total).coerceIn(0f, 1f)
+        }
 
     private fun bookPercent(progress: Float): Float {
         var before = 0L
@@ -301,19 +367,34 @@ class FlowEngine(
         load()
     }
 
-    /** Stops the page's scripts and drawing while the reader is not on screen. */
-    override fun pause() = web.onPause()
+    /**
+     * Stops the page's drawing while the reader is not on screen, and the timers of scripts,
+     * which onPause leaves running (they stop for every web view of the app, and start again
+     * with the next reader to come on screen).
+     */
+    override fun pause() {
+        web.onPause()
+        web.pauseTimers()
+    }
 
-    override fun resume() = web.onResume()
+    override fun resume() {
+        web.resumeTimers()
+        web.onResume()
+    }
 
     override fun next() = step(1)
     override fun prev() = step(-1)
 
     override fun applySettings() {
         web.settings.textZoom = s.fontSize
-        web.setBackgroundColor(s.palette.bg)
+        preRaster()
+        web.setBackgroundColor(s.litPalette.bg)
         web.isVerticalScrollBarEnabled = s.vertical
-        if (!ready) return
+        if (!ready) {
+            // A chapter still loading is laid out by the settings it finds then.
+            stale = injected
+            return
+        }
         relayout()
         // Text zoom reflows asynchronously; measure once more when it has settled.
         web.postDelayed({ if (!closed && ready) relayout() }, 350)
@@ -380,16 +461,100 @@ class FlowEngine(
         closed = true
         web.stopLoading()
         web.destroy()
-        book.close()
+        // The book is kept open a while, in case it is opened again soon; one given is not read again.
+        if (given != null) book.close() else KeptBook.keep(file, book)
     }
 
     companion object {
         private const val HOST = "epub.local"
 
+        /**
+         * A web view made ahead, while the shelf has nothing else to do, with an empty page
+         * loaded: the first one the app makes takes the better part of a second to start, and
+         * its first page as long again, on the thread that draws the screen. It is made on the
+         * application, which it is moved over from to the reader that takes it.
+         */
+        @SuppressLint("StaticFieldLeak")
+        private var spare: WebView? = null
+
+        /** Makes [spare] ready for the next book to be opened, unless it is. */
+        fun prepare(ctx: Context) {
+            if (spare != null) return
+            spare = WebView(MutableContextWrapper(ctx.applicationContext)).apply {
+                settings.javaScriptEnabled = true
+                webViewClient = object : WebViewClient() {
+                    override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                        // Its page has gone, as the phone let go of the process it was drawn in;
+                        // it cannot be used any more, and another is made when the shelf is next shown.
+                        if (spare === view) spare = null
+                        view.destroy()
+                        return true
+                    }
+                }
+                loadDataWithBaseURL("https://$HOST/", "<html></html>", "text/html", "utf-8", null)
+            }
+        }
+
+        /** Lets go of the [spare] web view, as the phone asks for its memory back; another is made when the shelf is next shown. */
+        fun release() {
+            spare?.destroy()
+            spare = null
+        }
+
+        /** The [spare] web view for the reader [act], or a new one if there is none. */
+        private fun takeWebView(act: Activity): WebView {
+            val ready = spare ?: return WebView(act)
+            spare = null
+            (ready.context as MutableContextWrapper).baseContext = act
+            return ready
+        }
+
+        /** The kinds of picture that can move, which are shown still (see [still]). */
+        private val MOVING = setOf("image/gif", "image/webp", "image/png", "image/apng")
+
+        /**
+         * The picture in [ins], kept still: one that moves, an animated GIF, WebP or PNG, is
+         * turned into its first frame, as a PNG, the type returned along with it; any other is
+         * passed on as it is, with no type. A picture that moves would keep the screen drawing,
+         * and the battery draining, for as long as its page is open.
+         */
+        private fun still(ins: java.io.InputStream): Pair<java.io.InputStream, String?> {
+            val bytes = ins.use { it.readBytes() }
+            if (!moves(bytes)) return ByteArrayInputStream(bytes) to null
+            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return ByteArrayInputStream(bytes) to null
+            val out = java.io.ByteArrayOutputStream()
+            bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+            bmp.recycle()
+            return ByteArrayInputStream(out.toByteArray()) to "image/png"
+        }
+
+        /** Whether the picture in [b] has frames to move through. */
+        private fun moves(b: ByteArray): Boolean {
+            fun at(i: Int, s: String) = i >= 0 && i + s.length <= b.size && s.indices.all { b[i + it] == s[it].code.toByte() }
+            fun find(s: String, until: Int = b.size): Int = (0..minOf(b.size, until) - s.length).firstOrNull { at(it, s) } ?: -1
+            return when {
+                // A GIF that loops says so; one of frames that play once has a control block for each.
+                at(0, "GIF8") -> find("NETSCAPE2.0") >= 0 ||
+                    (0 until b.size - 2).count { b[it] == 0x21.toByte() && b[it + 1] == 0xF9.toByte() && b[it + 2] == 4.toByte() } > 1
+                // An extended WebP says in its flags whether it is animated.
+                at(0, "RIFF") && at(8, "WEBP") -> at(12, "VP8X") && b.size > 20 && b[20].toInt() and 0x02 != 0
+                // An animated PNG tells so in a chunk before its picture data.
+                at(1, "PNG") -> find("acTL", find("IDAT").let { if (it < 0) b.size else it }) >= 0
+                else -> false
+            }
+        }
+
         /** The sizes a pinch can give the text, in percent, as the slider in the settings does (OptionsPanel). */
         const val MIN_TEXT = 50
         const val MAX_TEXT = 300
         const val TEXT_STEP = 5
+
+        /**
+         * What a word must have to be broken at the end of a line, by step of
+         * ReaderSettings.hyphenation: so many letters at least, and so many before and after the
+         * break (CSS hyphenate-limit-chars); none at the first step, where words are not broken.
+         */
+        private val HYPHENATION = listOf("", "10 4 4", "8 3 3", "6 3 2", "5 2 2")
 
         /** Where on [HOST] the font imported from the phone is served, and the name it goes by there (as in SCRIPT). */
         private const val FONTS_PATH = ".fonts/"
@@ -419,6 +584,15 @@ class FlowEngine(
         + 'border-color:' + c.fg + '!important;}a,a *{color:' + c.link + '!important;}';
     }
     s += 'body,body *{line-height:' + c.lh + '!important;}';
+    // Words are broken at the ends of the lines as readily as the reader asked: hy says how many
+    // letters a word must have, and keep before and after the break; none, and they are broken
+    // only where the book itself marks it.
+    s += c.hy
+      ? 'body,body *{-webkit-hyphens:auto!important;hyphens:auto!important;hyphenate-limit-chars:' + c.hy + '!important;}'
+      : 'body,body *{-webkit-hyphens:manual!important;hyphens:manual!important;}';
+    // Nothing on the page moves by itself, which would keep the screen drawing (pictures that
+    // move are made still as they are loaded).
+    s += '*,*::before,*::after{animation:none!important;transition:none!important;}';
     if (c.fontUrl) {
       s += "@font-face{font-family:'ReadyFont';src:url('" + c.fontUrl + "');}";
     }
@@ -495,10 +669,15 @@ class FlowEngine(
     var c = R.cfg;
     R.W = c.w;
     R.H = c.h;
+    var root = document.documentElement;
+    if (c.lang && !root.getAttribute('lang') && !root.getAttribute('xml:lang')) root.setAttribute('lang', c.lang);
     st.textContent = css(c, R.W, R.H);
     edge.style.left = '0';
     shift(0);
     window.scrollTo(0, 0);
+    // Drawings that move are stopped too.
+    var svgs = document.getElementsByTagName('svg');
+    for (var i = 0; i < svgs.length; i++) if (svgs[i].pauseAnimations) svgs[i].pauseAnimations();
     var ran = false;
     var done = function () {
       if (ran) return;

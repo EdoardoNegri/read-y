@@ -26,6 +26,9 @@ interface FlowBook : Closeable {
     /** When the book was published, as the file says it; empty if it does not. */
     val published: String
 
+    /** The language the book is written in, as the file says it (such as "en-GB"); empty if it does not. */
+    val language: String get() = ""
+
     /** The paths of the documents, in reading order. */
     val spine: List<String>
 
@@ -55,6 +58,9 @@ interface FlowBook : Closeable {
             "txt" -> TxtBook(file)
             else -> MobiBook(file)
         }
+
+        /** The book [file], as it was kept open or read ahead (BookPrep), else read now. Blocking. */
+        fun take(file: File): FlowBook = BookPrep.take(file, FlowBook::class.java) ?: open(file)
 
         /** Decodes the picture in [bytes] no wider than [maxWidth], reading no more of it than that takes. */
         fun decodeImage(bytes: ByteArray, maxWidth: Int): Bitmap? {

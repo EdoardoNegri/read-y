@@ -1,5 +1,7 @@
 package io.github.edoardonegri.ready
 
+import android.app.ActivityManager
+import android.app.ApplicationStartInfo
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
@@ -37,6 +39,34 @@ class FavoritesWidget : AppWidgetProvider() {
 
     override fun onDeleted(ctx: Context, ids: IntArray) = WidgetShelf.forget(ctx, ids)
 
+    override fun onReceive(ctx: Context, intent: Intent) {
+        // A tap on the widget of an app that was force stopped does not reach it: Android cancels
+        // what the books would open, and only wakes the app to make the widget anew. Which book
+        // was tapped is not told, so the widget asks for it again for a moment, now that it works.
+        if (intent.action == AppWidgetManager.ACTION_APPWIDGET_UPDATE && wokenAfterForceStop(ctx)) {
+            val app = ctx.applicationContext
+            val ids = AppWidgetManager.getInstance(app).getAppWidgetIds(ComponentName(app, FavoritesWidget::class.java))
+            val pending = goAsync()
+            Library.io.execute {
+                try {
+                    show(app, ids, notice = true)
+                } finally {
+                    HandlerCompat.postDelayed(Library.main, {
+                        Library.io.execute {
+                            try {
+                                show(app, ids)
+                            } finally {
+                                pending.finish()
+                            }
+                        }
+                    }, pending, NOTICE_MS)
+                }
+            }
+            return
+        }
+        super.onReceive(ctx, intent)
+    }
+
     /** Runs [work], which reads covers from disk, off the main thread while keeping this receiver alive. */
     private fun later(work: () -> Unit) {
         val pending = goAsync()
@@ -50,6 +80,30 @@ class FavoritesWidget : AppWidgetProvider() {
     }
 
     companion object {
+        /** Whether [wokenAfterForceStop] has looked at how this run of the app started. */
+        private var startSeen = false
+
+        /**
+         * Whether this run of the app was started to make the widget anew after the app had been
+         * force stopped, which only a touch of the widget does: once, for the first that asks.
+         * Android tells from version 15 on; before, nothing is said.
+         */
+        private fun wokenAfterForceStop(ctx: Context): Boolean {
+            if (startSeen || Build.VERSION.SDK_INT < 35) return false
+            startSeen = true
+            val start = try {
+                ctx.getSystemService(ActivityManager::class.java).getHistoricalProcessStartReasons(1).firstOrNull()
+            } catch (e: Exception) {
+                null
+            } ?: return false
+            return start.wasForceStopped() && start.startType == ApplicationStartInfo.START_TYPE_COLD &&
+                start.reason == ApplicationStartInfo.START_REASON_BROADCAST &&
+                start.intent?.action == AppWidgetManager.ACTION_APPWIDGET_UPDATE
+        }
+
+        /** How long the widget asks for the book again, after a tap only woke the app; see onReceive. */
+        private const val NOTICE_MS = 5_000L
+
         /** About as many covers as the launcher can be sent in one go. */
         private const val MAX_BYTES = 6 shl 20
 
@@ -77,7 +131,7 @@ class FavoritesWidget : AppWidgetProvider() {
          * [FavoritesService] instead, the only way before, leaves it showing covers and sizes
          * from earlier fetches on recent versions. Blocking.
          */
-        private fun show(ctx: Context, ids: IntArray) {
+        private fun show(ctx: Context, ids: IntArray, notice: Boolean = false) {
             val manager = AppWidgetManager.getInstance(ctx)
             for (id in ids) {
                 val views = RemoteViews(ctx.packageName, R.layout.widget_favorites)
@@ -104,6 +158,7 @@ class FavoritesWidget : AppWidgetProvider() {
                     views.setRemoteAdapter(R.id.shelves, service)
                 }
                 views.setEmptyView(R.id.shelves, R.id.empty)
+                views.setViewVisibility(R.id.notice, if (notice) View.VISIBLE else View.GONE)
 
                 // Every place on the shelves opens WidgetOpenActivity, the one thing they can be
                 // told to open: it opens a tapped book where it stands, and leads on to the
@@ -234,7 +289,7 @@ private class WidgetShelf(ctx: Context, manager: AppWidgetManager, id: Int) {
         private const val FOUR = "four"
         private const val PAIR = "pair"
 
-        private fun prefs(ctx: Context) = ctx.getSharedPreferences("widget", Context.MODE_PRIVATE)
+        private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences("widget", Context.MODE_PRIVATE)
 
         fun forget(ctx: Context, ids: IntArray) {
             prefs(ctx).edit { for (id in ids) remove(TWO + id).remove(FOUR + id).remove(PAIR + id) }

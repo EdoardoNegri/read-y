@@ -23,6 +23,7 @@
 
         <ProgressBar
             android:id="@+id/progress"
+            android:importantForAccessibility="no"
             style="?android:attr/progressBarStyleHorizontal"
             android:layout_width="match_parent"
             android:layout_height="7dp"

@@ -53,6 +53,27 @@
         android:textColor="@color/gold_light"
         android:textSize="13sp" />
 
+    <!-- A word for the reader for a moment, over the books: after the app was force stopped, a
+         tap only wakes it (FavoritesWidget.onReceive). It lets taps through to the books. -->
+    <TextView
+        android:id="@+id/notice"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:layout_marginEnd="16dp"
+        android:layout_marginStart="16dp"
+        android:background="@drawable/widget_notice"
+        android:fontFamily="serif"
+        android:gravity="center"
+        android:paddingBottom="6dp"
+        android:paddingEnd="10dp"
+        android:paddingStart="10dp"
+        android:paddingTop="6dp"
+        android:text="@string/widget_woken"
+        android:textColor="@color/gold_light"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
     <ImageView
         android:layout_width="18dp"
         android:layout_height="match_parent"

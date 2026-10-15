@@ -1,12 +1,14 @@
 package io.github.edoardonegri.ready
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.core.view.isVisible
 import androidx.recyclerview.widget.RecyclerView
 import java.io.File
 import kotlin.math.roundToInt
@@ -58,6 +60,8 @@ class ShelfAdapter(
         val progress: ProgressBar = v.findViewById(R.id.progress)
         val place: TextView = v.findViewById(R.id.place)
         val plaque: TextView = v.findViewById(R.id.plaque)
+        /** What stands in this place now; read by the threads that load its cover, see [onBindViewHolder]. */
+        @Volatile
         var file: File? = null
     }
 
@@ -67,7 +71,43 @@ class ShelfAdapter(
     @SuppressLint("NotifyDataSetChanged")
     fun submit(list: List<File>) {
         items = ArrayList(list)
+        // What was to come into view on the shelf before is not wanted any more.
+        aheadRange = IntRange.EMPTY
+        aheadAsked++
         notifyDataSetChanged()
+    }
+
+    /** The places [loadAhead] was last asked for, and how many times it was asked for others. */
+    private var aheadRange = IntRange.EMPTY
+
+    @Volatile
+    private var aheadAsked = 0
+
+    /**
+     * Loads the covers and miniatures of the places in [range], about to come into view as the
+     * shelf is scrolled towards them, once all in view are loaded, for them to show at once. What
+     * was asked for before and is not loaded yet is let go of.
+     */
+    fun loadAhead(ctx: Context, range: IntRange) {
+        val wanted = range.first.coerceAtLeast(0)..range.last.coerceAtMost(items.size - 1)
+        if (wanted == aheadRange) return
+        aheadRange = wanted
+        val asked = ++aheadAsked
+        val shelfSpec = spec()
+        if (shelfSpec.width <= 0) return
+        val app = ctx.applicationContext
+        for (i in wanted) {
+            val f = items[i]
+            val loaded = if (f.isFolder) Library.cachedFolderPreview(f, shelfSpec) else Library.cachedCover(f)
+            if (loaded == null) Library.ahead {
+                if (asked != aheadAsked) return@ahead
+                if (f.isFolder) Library.folderPreview(app, f, shelfSpec)
+                else {
+                    Library.meta(app, f)
+                    Library.cover(app, f)
+                }
+            }
+        }
     }
 
     /** Takes [gone] off the shelf, the others closing up. */
@@ -92,6 +132,22 @@ class ShelfAdapter(
     }
 
     override fun getItemCount() = items.size
+
+    /** What a screen reader says of the book in [h]: its [title] and [author], how much of it is [read], whether it is a favorite or [finished]. */
+    private fun describeBook(h: Holder, title: String, author: String, read: Int, favorite: Boolean, finished: Boolean) {
+        val res = h.itemView.resources
+        val parts = arrayListOf(title)
+        if (author.isNotBlank()) parts += res.getString(R.string.a11y_by, author)
+        if (finished) parts += res.getString(R.string.a11y_finished) else if (read > 0) parts += res.getString(R.string.a11y_read, read)
+        if (favorite) parts += res.getString(R.string.a11y_favorite)
+        describe(h, parts.joinToString(", "), title)
+    }
+
+    /** Has a screen reader say [what] for the place in [h], and of its plaque that it shows the details of [name]. */
+    private fun describe(h: Holder, what: String, name: String) {
+        h.itemView.contentDescription = what
+        h.plaque.contentDescription = h.itemView.resources.getString(R.string.a11y_details, name)
+    }
 
     private companion object {
         const val FAINT = 0.4f
@@ -138,7 +194,8 @@ class ShelfAdapter(
         // at its top, up to the shelf above, and is wider by as much as that makes it larger.
         val rise = if (f.isFolder && shelfSpec.width > 0) shelfSpec.miniRise else 0
         h.cover.scaleType = if (f.isFolder) ImageView.ScaleType.FIT_XY else ImageView.ScaleType.CENTER_CROP
-        h.cover.setBackgroundColor(if (f.isFolder) 0 else 0xFF24160D.toInt())
+        // A book shows dark leather until its cover comes, which hides it, and is not painted over it for nothing.
+        h.cover.setBackgroundColor(if (f.isFolder || Library.cachedCover(f) != null) 0 else 0xFF24160D.toInt())
         val wider = if (rise > 0) (shelfSpec.miniW - shelfSpec.coverW) / 2 else 0
         (h.frame.layoutParams as ViewGroup.MarginLayoutParams).apply {
             leftMargin = -wider
@@ -152,13 +209,15 @@ class ShelfAdapter(
         val plate = h.plaque.background as PlaqueDrawable
         if (f.isFolder) {
             h.plaque.text = f.name
+            describe(h, h.itemView.context.getString(R.string.a11y_shelf, f.name), f.name)
             plate.favorite = false
             plate.finished = false
             h.progress.visibility = View.GONE
             if (shelfSpec.width <= 0) return
             val preview = Library.cachedFolderPreview(f, shelfSpec)
             h.cover.setImageBitmap(preview)
-            if (preview == null) Library.io.execute {
+            if (preview == null) Library.shelfWork.execute {
+                if (h.file != f) return@execute
                 val bmp = Library.folderPreview(ctx, f, shelfSpec)
                 Library.main.post { if (h.file == f) h.cover.setImageBitmap(bmp) }
             }
@@ -173,16 +232,23 @@ class ShelfAdapter(
         val begun = st.chapter > 0 || st.fraction > 0f
         h.progress.visibility = if (begun && st.percent > 0f && !plate.finished) View.VISIBLE else View.GONE
         h.progress.progress = (st.percent * 100).roundToInt()
-        h.plaque.text = Library.cachedMeta(ctx, f)?.title ?: f.nameWithoutExtension
+        val known = Library.cachedMeta(ctx, f)
+        h.plaque.text = known?.title ?: f.nameWithoutExtension
+        val read = if (h.progress.isVisible) (st.percent * 100).roundToInt() else 0
+        describeBook(h, known?.title ?: f.nameWithoutExtension, known?.author.orEmpty(), read, plate.favorite, plate.finished)
         val cached = Library.cachedCover(f)
         h.cover.setImageBitmap(cached)
-        if (cached == null) Library.io.execute {
+        if (cached == null) Library.shelfWork.execute {
+            // Scrolled past before its turn came: it is loaded when it is shown again.
+            if (h.file != f) return@execute
             val meta = Library.meta(ctx, f)
             val bmp = Library.cover(ctx, f)
             Library.main.post {
                 if (h.file == f) {
                     h.cover.setImageBitmap(bmp)
+                    if (bmp != null) h.cover.setBackgroundColor(0)
                     h.plaque.text = meta.title
+                    describeBook(h, meta.title, meta.author, read, plate.favorite, plate.finished)
                 }
             }
         }

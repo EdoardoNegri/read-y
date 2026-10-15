@@ -1,15 +1,19 @@
 package io.github.edoardonegri.ready
 
+import android.app.Activity
 import android.content.Context
+import android.content.SharedPreferences
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
+import android.view.Display
 import android.view.Window
 import android.view.WindowManager
 import androidx.core.content.edit
 import java.io.File
+import kotlin.math.abs
 import kotlin.math.ln
 import kotlin.math.roundToInt
 import kotlin.properties.ReadWriteProperty
@@ -20,12 +24,13 @@ class Palette(val bg: Int, val fg: Int, val link: Int)
 /** Reader preferences, shared by all books. */
 class ReaderSettings(ctx: Context) {
     private val app = ctx.applicationContext
-    private val p = ctx.getSharedPreferences("reader", Context.MODE_PRIVATE)
+    private val p = app.getSharedPreferences("reader", Context.MODE_PRIVATE).also(::upgrade)
 
-    private fun int(def: Int) = object : ReadWriteProperty<Any?, Int> {
-        override fun getValue(thisRef: Any?, property: KProperty<*>) = p.getInt(property.name, def)
+    /** A setting kept under [key], or the name of the property if there is none. */
+    private fun int(def: Int, key: String? = null) = object : ReadWriteProperty<Any?, Int> {
+        override fun getValue(thisRef: Any?, property: KProperty<*>) = p.getInt(key ?: property.name, def)
         override fun setValue(thisRef: Any?, property: KProperty<*>, value: Int) =
-            p.edit { putInt(property.name, value) }
+            p.edit { putInt(key ?: property.name, value) }
     }
 
     private fun string(def: String) = object : ReadWriteProperty<Any?, String> {
@@ -43,14 +48,43 @@ class ReaderSettings(ctx: Context) {
     /** 1..100, or -1 to follow the system brightness. */
     var brightness by int(-1)
 
-    /** 0..100: how warm the light on the page is, from white daylight to the amber of a small lamp. See [lamp]. */
-    var warmth by int(0)
+    /**
+     * 0..100: how warm the light on the page is, from white daylight to the warm white of a lamp.
+     * See [lamp]. Kept under a name of its own since its steps were made finer (see [upgrade]).
+     */
+    var warmth by int(0, WARMTH)
 
     /** Light lettering on dark pages. */
     var darkMode by bool(false)
 
-    /** Shows the page being read in small print at the foot of the page. */
+    /**
+     * Shows in small print around the text where the page being read is, the time and the like,
+     * each where [infoAt] says. The name is that of the page number it once stood for.
+     */
     var showPage by bool(false)
+
+    /** Where on the page [item] is shown while [showPage] is on: one of the places of [InfoPlace]. */
+    fun infoAt(item: InfoItem) = p.getInt(INFO + item.key, item.default)
+
+    fun setInfoAt(item: InfoItem, place: Int) = p.edit { putInt(INFO + item.key, place) }
+
+    /** Where everything is shown around the text, as one word: a picture of a page is shown again only for one laid out the same. */
+    val infoLayout: String get() = if (!showPage) "" else InfoItem.entries.joinToString("") { infoAt(it).toString() }
+
+    /**
+     * How readily words are broken at the ends of the lines, with a hyphen: 0 not at all (but
+     * where the book itself marks it), up to [HYPHENATION_MAX], where words of a few letters are.
+     */
+    var hyphenation by int(0)
+
+    /** Leaves out the white margins around the print of a PDF, which is then shown larger. */
+    var trimMargins by bool(true)
+
+    /**
+     * How many times a second the screen is drawn while reading, where it can be drawn at more
+     * than one rate (see [refreshRates]); 0 leaves that to the phone.
+     */
+    var refreshRate by int(60)
 
     /** true = continuous vertical scrolling, false = horizontal pages. */
     var vertical by bool(false)
@@ -106,9 +140,9 @@ class ReaderSettings(ctx: Context) {
     /**
      * The colour of the light on the page at the [warmth] chosen, as on a reader with a warm
      * front light: everything on the page is seen in it, paper, print and pictures alike
-     * ([LampView] lays it over them). It follows the colours of a glowing body from daylight
-     * down to the amber of a candle, in steps that look equal, so the red stays while first the
-     * blue and then some of the green goes.
+     * (see [litPalette]). It follows the colours of a glowing body from daylight
+     * down to the warm white of a lamp, in steps that look equal, so the red stays while the blue
+     * and some of the green go.
      */
     val lamp: Int
         get() {
@@ -120,6 +154,12 @@ class ReaderSettings(ctx: Context) {
             val blue = if (t <= 19f) 0f else ((138.5177f * ln(t - 10f) - 305.0448f) / 252.5f).coerceIn(0f, 1f)
             return Color.rgb(255, (green * 255).roundToInt(), (blue * 255).roundToInt())
         }
+
+    /**
+     * The colours of the page as they look in the light of the [lamp]: the reader shows them so,
+     * rather than laying the light over the page, which would be one more layer to draw.
+     */
+    val litPalette: Palette get() = palette.let { Palette(lit(it.bg), lit(it.fg), lit(it.link)) }
 
     /** [color] as it looks in the light of the [lamp]. */
     fun lit(color: Int): Int = lamp.let {
@@ -143,7 +183,59 @@ class ReaderSettings(ctx: Context) {
         else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
+    /**
+     * Has the window of [act] drawn as many times a second as [refreshRate] asks for, as near as
+     * the screen can; or as often as the phone sees fit, for 0.
+     */
+    fun refresh(act: Activity) {
+        val lp = act.window.attributes
+        val mode = if (refreshRate == 0) null else displayOf(act)?.let { d ->
+            sameSize(d).minByOrNull { abs(it.refreshRate - refreshRate) }
+        }
+        lp.preferredDisplayModeId = mode?.modeId ?: 0
+        lp.preferredRefreshRate = mode?.refreshRate ?: 0f
+        act.window.attributes = lp
+    }
+
     companion object {
+        /** What [warmth] is kept under, and was before its steps were made finer, when it went as far as the light of a candle. */
+        const val WARMTH = "lampWarmth"
+        const val OLD_WARMTH = "warmth"
+
+        /** How much of the old scale of [warmth] the new one goes as far as. */
+        private const val OLD_SHARE = 0.6f
+
+        /** A [warmth] on the old scale, on the new one. */
+        fun warmthOf(old: Int) = (old / OLD_SHARE).roundToInt().coerceIn(0, 100)
+
+        /** Brings settings kept by an older version of the app up to date. */
+        private fun upgrade(p: SharedPreferences) {
+            if (!p.contains(OLD_WARMTH)) return
+            p.edit {
+                if (!p.contains(WARMTH)) putInt(WARMTH, warmthOf(p.getInt(OLD_WARMTH, 0)))
+                remove(OLD_WARMTH)
+            }
+        }
+
+        private const val INFO = "info_"
+
+        /** The highest step of [hyphenation]. */
+        const val HYPHENATION_MAX = 4
+
+        /** The screen [act] is shown on, if it can be told. */
+        private fun displayOf(act: Activity): Display? =
+            if (Build.VERSION.SDK_INT >= 30) act.display else @Suppress("DEPRECATION") act.windowManager.defaultDisplay
+
+        /** The ways [d] can be drawn with as many dots as it is drawn with now, which differ in how often a second. */
+        private fun sameSize(d: Display): List<Display.Mode> {
+            val now = d.mode
+            return d.supportedModes.filter { it.physicalWidth == now.physicalWidth && it.physicalHeight == now.physicalHeight }
+        }
+
+        /** How many times a second the screen of [act] can be drawn, from the least; one rate or none if it cannot be chosen. */
+        fun refreshRates(act: Activity): List<Int> =
+            displayOf(act)?.let { d -> sameSize(d).map { it.refreshRate.roundToInt() }.distinct().sorted() }.orEmpty()
+
         /** Where the fonts imported from the phone are kept. */
         fun fontsDir(ctx: Context) = File(ctx.filesDir, "fonts")
 
@@ -185,9 +277,13 @@ class ReaderSettings(ctx: Context) {
             null
         }
 
-        /** A million over the colour temperature of the light at no warmth, 6600 K, and at all of it, 2400 K. */
+        /**
+         * A million over the colour temperature of the light at no warmth, 6600 K, and at all of
+         * it, 3200 K: the warm white of a lamp, as far as most want the page to go, so that the
+         * steps between are fine.
+         */
         private const val COOL = 151.5f
-        private const val WARM = 416.7f
+        private const val WARM = 310.6f
 
         private val LIGHT = Palette(0xFFFFFFFF.toInt(), 0xFF1A1A1A.toInt(), 0xFF1A5FB4.toInt())
 

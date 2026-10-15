@@ -16,6 +16,27 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Ready">
 
+        <!-- The books are read from the phone, never from the web: the web view has nothing to
+             check against unsafe sites, and nothing to report about how it is used. -->
+        <meta-data
+            android:name="android.webkit.WebView.EnableSafeBrowsing"
+            android:value="false" />
+        <meta-data
+            android:name="android.webkit.WebView.MetricsOptOut"
+            android:value="true" />
+        <!-- The newest emoji are not fetched from Google Play services as the app starts, which
+             spares that work every time: the few that a book's title may have show in the
+             phone's own font. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+                tools:node="remove" />
+        </provider>
+
         <!-- The shelves are upright; only the reader turns with the phone. -->
         <activity
             android:name=".MainActivity"
@@ -34,6 +55,14 @@
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode"
             android:exported="false"
             android:theme="@style/Theme.Ready.Reader" />
+
+        <!-- The same reader, started the moment a book is tapped on the shelf: unseen over it,
+             and see-through for the book to open under it, until it has (BookOpening.Handoff). -->
+        <activity
+            android:name=".OpeningReaderActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode"
+            android:exported="false"
+            android:theme="@style/Theme.Ready.Reader.Opening" />
 
         <!-- Books handed over by other apps: "Open with" and "Share". Some apps do not say what
              kind of file they hand over, so those are accepted too and looked at by Library.import. -->

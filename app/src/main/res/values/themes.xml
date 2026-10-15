@@ -74,4 +74,12 @@
         <item name="android:windowDisablePreview">true</item>
         <item name="android:windowBackground">@color/black</item>
     </style>
+
+    <!-- The reader while its book opens on the shelf under it (OpeningReaderActivity), which it
+         lets show through; it is made solid once the book is open. -->
+    <style name="Theme.Ready.Reader.Opening">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
 </resources>

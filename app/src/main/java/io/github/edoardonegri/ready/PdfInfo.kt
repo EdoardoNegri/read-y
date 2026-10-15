@@ -75,8 +75,7 @@ object PdfInfo {
                 val c = dict[i++]
                 when {
                     c == '\\' && i < dict.length -> {
-                        val e = dict[i++]
-                        when (e) {
+                        when (val e = dict[i++]) {
                             'n' -> bytes.add('\n'.code.toByte())
                             'r' -> bytes.add('\r'.code.toByte())
                             't' -> bytes.add('\t'.code.toByte())

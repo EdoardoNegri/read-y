@@ -24,4 +24,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "Read-y"
 include(":app")
+include(":baselineprofile")
  

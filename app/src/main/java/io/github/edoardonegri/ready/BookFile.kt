@@ -150,7 +150,8 @@ class ZipArchive(private val file: BookFile) : Closeable {
         return when (e.method) {
             0 -> raw
             // The inflater wants a byte more than the data to see that it ended.
-            8 -> object : InflaterInputStream(SequenceInputStream(raw, ByteArray(1).inputStream()), Inflater(true)) {
+            // Read in large pieces: each read of the file is a call to the system.
+            8 -> object : InflaterInputStream(SequenceInputStream(raw, ByteArray(1).inputStream()), Inflater(true), INFLATE_BUFFER) {
                 override fun close() {
                     super.close()
                     inf.end()
@@ -162,3 +163,6 @@ class ZipArchive(private val file: BookFile) : Closeable {
 
     override fun close() = file.close()
 }
+
+/** How much of a packed entry [ZipArchive] reads from its file at once. */
+private const val INFLATE_BUFFER = 32 shl 10

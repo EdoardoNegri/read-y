@@ -43,7 +43,7 @@ class ShelfDecoration(ctx: Context, private val columns: Int) : RecyclerView.Ite
     override fun onDraw(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
         var rows = 0
         var lastNumber = -1
-        var row = ShelfSpec(parent.width, columns, d).rowH.coerceAtLeast(1)
+        var row = spec(parent.width).rowH.coerceAtLeast(1)
         var last = parent.paddingTop
         for (i in 0 until parent.childCount) {
             val v = parent.getChildAt(i)
@@ -84,8 +84,13 @@ class ShelfDecoration(ctx: Context, private val columns: Int) : RecyclerView.Ite
     }
 
     override fun onDrawOver(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
-        drawCase(c, parent.width.toFloat(), parent.height.toFloat(), ShelfSpec(parent.width, columns, d), paint)
+        drawCase(c, parent.width.toFloat(), parent.height.toFloat(), spec(parent.width), paint)
     }
+
+    /** The geometry of the shelves for a case [width] wide, kept rather than made anew for every frame drawn. */
+    private var spec = ShelfSpec(0, columns, d)
+
+    private fun spec(width: Int) = spec.takeIf { it.width == width } ?: ShelfSpec(width, columns, d).also { spec = it }
 
     /** The gradients of a plank whose face starts at 0, for a screen of the density [d]. */
     private class Planks(val d: Float) {

@@ -3,12 +3,12 @@ package io.github.edoardonegri.ready
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.PorterDuff
+import android.graphics.Picture
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.os.Build
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.MotionEvent
@@ -33,6 +33,26 @@ fun View.picture(reuse: Bitmap? = null, config: Bitmap.Config = Bitmap.Config.AR
         val bmp = reuse?.takeIf { it.width == width && it.height == height } ?: createBitmap(width, height, config)
         draw(Canvas(bmp))
         bmp
+    } catch (e: OutOfMemoryError) {
+        null
+    }
+}
+
+/**
+ * A picture of this view as it is drawn now, which, unlike [picture], may show pictures that the
+ * drawing hardware keeps (the covers on the shelf, Library.cover); it is kept there itself then,
+ * to be shown but not drawn on. Null if the view has no size yet, or a picture cannot be had.
+ */
+fun View.snapshot(): Bitmap? {
+    if (Build.VERSION.SDK_INT < 28) return picture()
+    if (width == 0 || height == 0) return null
+    return try {
+        val recorded = Picture()
+        draw(recorded.beginRecording(width, height))
+        recorded.endRecording()
+        Bitmap.createBitmap(recorded)
+    } catch (e: Exception) {
+        null
     } catch (e: OutOfMemoryError) {
         null
     }
@@ -107,22 +127,6 @@ class RatioImageView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet
             shade.colorFilter = null
         }
     }
-}
-
-/**
- * The warm light of the reader: whatever lies under this view is seen in the light of [color],
- * as paper is in the light of a lamp. White light changes nothing and is not drawn at all.
- */
-class LampView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = null) : View(ctx, attrs) {
-
-    var color = Color.WHITE
-        set(value) {
-            field = value
-            visibility = if (value == Color.WHITE) GONE else VISIBLE
-            invalidate()
-        }
-
-    override fun onDraw(canvas: Canvas) = canvas.drawColor(color, PorterDuff.Mode.MULTIPLY)
 }
 
 /**
@@ -341,8 +345,6 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         return true
     }
 
-    override fun performClick(): Boolean = super.performClick()
-
     private companion object {
         val PLAIN: Typeface = Typeface.create(Typeface.SERIF, Typeface.NORMAL)
         val BOLD: Typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
@@ -470,7 +472,7 @@ class GestureFrame @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
                 }
             }
         }
-        return if (consumeAll) true else super.dispatchTouchEvent(ev) || true
+        return consumeAll || super.dispatchTouchEvent(ev) || true
     }
 }
 

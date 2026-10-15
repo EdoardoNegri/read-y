@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The build the baseline profile is made with keeps all its code (keepRules/profile.keep), but
+     its resource shrinking still drops resources the code uses, so every one is kept. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@anim/*,@color/*,@dimen/*,@drawable/*,@font/*,@id/*,@integer/*,@layout/*,@mipmap/*,@plurals/*,@raw/*,@string/*,@style/*,@xml/*" />

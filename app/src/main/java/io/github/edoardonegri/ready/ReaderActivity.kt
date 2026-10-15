@@ -2,8 +2,10 @@ package io.github.edoardonegri.ready
 
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -20,12 +22,13 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.doOnPreDraw
 import androidx.core.view.isVisible
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
+open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
 
     private lateinit var s: ReaderSettings
     private lateinit var file: File
@@ -36,14 +39,18 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
     private lateinit var content: GestureFrame
     private lateinit var menu: View
     private lateinit var pageTurn: PageTurnView
-    private lateinit var lamp: LampView
+    private lateinit var info: PageInfoView
+    private lateinit var turner: PageTurner
+    private lateinit var pace: ReadingPace
+
+    /** What the phone's camera takes from the screen, which the text keeps clear of. */
+    private var cutout = Cutout()
     private lateinit var inChapter: View
     private lateinit var inBook: View
     private lateinit var percentRead: TextView
     private lateinit var chapterPage: TextView
     private lateinit var bookPage: TextView
     private lateinit var chapterName: TextView
-    private lateinit var pageNumber: TextView
     private lateinit var seek: SeekBar
     private lateinit var chapters: ChapterMarks
     private var seeking = false
@@ -62,24 +69,33 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         setContentView(R.layout.activity_reader)
         // The page covers the whole window, so the window need not paint anything under it.
         window.setBackgroundDrawable(null)
-        // A page of text stands still; a screen that can refresh faster than 60 times a second
-        // gains nothing from doing so here and only uses more power.
-        if (Build.VERSION.SDK_INT >= 30) window.attributes = window.attributes.apply { preferredRefreshRate = 60f }
+        // A page of text stands still: a screen that can refresh faster than 60 times a second
+        // only uses more power doing so, unless the reader asks for it.
+        s.refresh(this)
         root = findViewById(R.id.root)
         content = findViewById(R.id.content)
         menu = findViewById(R.id.menu)
         pageTurn = findViewById(R.id.pageTurn)
-        lamp = findViewById(R.id.lamp)
+        info = findViewById(R.id.pageInfo)
+        turner = PageTurner(window, s, content, pageTurn, info) { engine }
         inChapter = findViewById(R.id.inChapter)
         inBook = findViewById(R.id.inBook)
         // Come from the shelf, the book was opened there, and is closed there when it is left.
         fromShelf = intent.getBooleanExtra(EXTRA_FROM_SHELF, false)
+        // Started behind the book opening on the shelf, the reader is not seen until the book is open.
+        val handoff = if (behindOpening) BookOpening.handoff else null
+        if (handoff != null) {
+            hidden = true
+            window.attributes = window.attributes.apply { alpha = 0f }
+            // Touches meanwhile are for the book opening under it, not for pages nobody sees.
+            window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+        }
         fromWidget = intent.getBooleanExtra(EXTRA_FROM_WIDGET, false)
         if (fromShelf && Build.VERSION.SDK_INT >= 34) overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
         if (fromWidget) {
-            // The reader joins the bookshelf's task from the widget's own, so the system switches
-            // tasks and may play its transition for that whatever the intent flags say; the
-            // opened book is already there to take over from without one.
+            // The reader takes the bookshelf's task over from the widget's own, so the system
+            // switches tasks and may play its transition for that whatever the intent flags say;
+            // the opened book is already there to take over from without one.
             window.setWindowAnimations(0)
             if (Build.VERSION.SDK_INT >= 34) {
                 overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, 0, 0)
@@ -92,7 +108,6 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         chapterPage = findViewById(R.id.chapterPage)
         bookPage = findViewById(R.id.bookPage)
         chapterName = findViewById(R.id.chapterName)
-        pageNumber = findViewById(R.id.pageNumber)
         seek = findViewById(R.id.seek)
         chapters = findViewById(R.id.chapters)
 
@@ -103,10 +118,13 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         // Draw behind the (hidden) system bars but keep text clear of a notch or camera hole.
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val c = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
-            content.setPadding(c.left, c.top, c.right, c.bottom)
+            cutout = Cutout(Rect(c.left, c.top, c.right, c.bottom), insets.displayCutout?.boundingRects.orEmpty())
             menu.setPadding(c.left, c.top, c.right, c.bottom)
+            arrangeInfo()
             insets
         }
+        // Turned, the page has another shape, and what is around the text other places.
+        root.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob -> if (r - l != or - ol || b - t != ob - ot) arrangeInfo() }
         immersive()
 
         file = File(intent.getStringExtra(EXTRA_PATH) ?: "")
@@ -117,6 +135,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         }
         state = Library.state(this, file)
         finished = state.percent >= Library.FINISHED_AT
+        pace = ReadingPace(this, ReadingPace.kindOf(file))
         val opened = try {
             if (Library.isFlowing(file)) FlowEngine(this, file, s, state, this)
             else PageEngine(this, file, s, state, this)
@@ -181,6 +200,9 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
 
         applyBrightness()
         applyLayout()
+        // Once the page is laid out and drawn, unseen, the book opens on the shelf; the text is
+        // set out behind it meanwhile, and the reader shows itself when the book is open.
+        if (handoff != null) root.doOnPreDraw { root.post { handoff.ready(::reveal) } }
         if (!s.hintShown) {
             s.hintShown = true
             Toast.makeText(this, R.string.reader_hint, Toast.LENGTH_LONG).show()
@@ -191,15 +213,18 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         // The place in the book is written down when the reader leaves, however briefly.
         savePosition()
         Library.backUp(this)
-        stopTurn()
+        turner.stop()
         pageTurn.release()
         engine?.pause()
+        if (::pace.isInitialized) pace.pause()
+        content.removeCallbacks(tick)
         super.onPause()
     }
 
     override fun onResume() {
         super.onResume()
         engine?.resume()
+        clock()
         if (settingsOpened) {
             settingsOpened = false
             applyBrightness()
@@ -266,10 +291,48 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         super.onDestroy()
     }
 
+    /**
+     * Whether this reader is started behind the book opening on the shelf, see
+     * [BookOpening.Handoff]; it is then see-through, and unseen, until it is [reveal]ed.
+     */
+    protected open val behindOpening get() = false
+
+    /** Whether the reader is still waiting, unseen, for its book to open on the shelf. */
+    private var hidden = false
+
+    /** Shows the reader, once its book has opened on the shelf, and makes it a solid window again. */
+    private fun reveal() {
+        if (!hidden || isFinishing) return
+        hidden = false
+        window.attributes = window.attributes.apply { alpha = 1f }
+        window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+        // The shelf under it need no longer be drawn.
+        if (Build.VERSION.SDK_INT >= 30) setTranslucent(false)
+    }
+
+    override fun reopen() {
+        val gone = engine ?: return
+        // Its view is taken away and nothing more asked of it while the reader is made anew.
+        engine = null
+        content.removeView(gone.view)
+        gone.close()
+        val now = SystemClock.elapsedRealtime()
+        if (now - reopened < REOPEN_MS) {
+            // Again so soon, the book is what fails: it is left rather than opened again and again.
+            Toast.makeText(this, getString(R.string.book_unreadable, file.name), Toast.LENGTH_LONG).show()
+            leave()
+        } else {
+            reopened = now
+            recreate()
+        }
+    }
+
     /** Back to the shelf. */
     private fun leave() {
+        // Left before its book had opened on the shelf, the reader does not wait for that any more.
+        if (hidden) BookOpening.handoff = null
         // The shelf closes the book from the page it was at. It stands upright, so a page read sideways does not fit it.
-        // The picture is of the page alone, without the menu and in white light.
+        // The picture is of the page alone, without the menu, in the warm light it was read in.
         if (fromShelf && content.width < content.height) content.picture()?.let { BookOpening.left = BookOpening.Left(file, it) }
         // A book opened on the home screen is closed on the bookshelf all the same: on the shelf it
         // stands on, in place of whatever else was open there.
@@ -304,54 +367,58 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
             2 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
-        root.setBackgroundColor(s.palette.bg)
-        lamp.color = s.lamp
-        stopTurn()
-        pageTurn.paper = s.palette.bg
-        pageNumber.visibility = if (s.showPage) View.VISIBLE else View.GONE
+        // The page is shown in the warm light, see ReaderSettings.litPalette.
+        root.setBackgroundColor(s.litPalette.bg)
+        turner.stop()
+        // The back of the sheet lies in the warm light like the page, which it is drawn over.
+        pageTurn.paper = s.lit(s.palette.bg)
         // In the colour of the text, but fainter.
-        pageNumber.setTextColor(s.palette.fg and 0xFFFFFF or 0x99000000.toInt())
+        info.color = s.litPalette.fg and 0xFFFFFF or 0x99000000.toInt()
+        s.refresh(this)
         // In paged mode page turns are ours; in scroll mode the content scrolls itself.
         content.consumeAll = !s.vertical
         engine?.applySettings()
+        arrangeInfo()
+        showInfo()
+        clock()
+    }
+
+    /** Works out where what is shown around the text goes, and leaves the text the room for it. */
+    private fun arrangeInfo() {
+        if (root.width == 0 || root.height == 0) return
+        val e = engine
+        val (top, bottom) = info.arrange(root.width, root.height, cutout, s.infoUsed(), infoSide(s, e is FlowEngine, resources), e?.innerMargin ?: 0)
+        val c = cutout.insets
+        content.setPadding(c.left, c.top + top, c.right, c.bottom + bottom)
+    }
+
+    /** Where the page shown is, as what is shown around the text tells it; see [showPosition]. */
+    private var at = PagePlace()
+
+    /** Shows around the text what the reader asked for, of the page at [at]. */
+    private fun showInfo() {
+        if (::pace.isInitialized) info.show(infoTexts(this, s, at, pace, bookPages))
+    }
+
+    /** Shows the time anew on the minute, while it is shown. */
+    private val tick = object : Runnable {
+        override fun run() {
+            showInfo()
+            content.postDelayed(this, untilMinute())
+        }
+    }
+
+    /** Starts showing the time anew on the minute, if it is shown around the text, or stops it if not. */
+    private fun clock() {
+        content.removeCallbacks(tick)
+        if (s.showPage && s.infoAt(InfoItem.TIME) != InfoPlace.HIDDEN) content.postDelayed(tick, untilMinute())
     }
 
     // ---- turning pages ----
 
-    /**
-     * Which way a page is being turned, 1 or -1, from asking the engine for it until the engine
-     * shows it; 0 otherwise.
-     */
-    private var turning = 0
+    override fun hold(then: () -> Unit) = turner.hold(then)
 
-    /** The engine has the new page: the sheet is turned over to it. */
-    private val startTurn = Runnable {
-        pageTurn.turn(turning > 0, content)
-        turning = 0
-    }
-
-    /** The engine had no other page to go to, or took too long over it. */
-    private val dropTurn = Runnable { stopTurn() }
-
-    private fun stopTurn() {
-        content.removeCallbacks(startTurn)
-        content.removeCallbacks(dropTurn)
-        turning = 0
-        pageTurn.drop()
-    }
-
-    /** Goes to the next page, or with a [direction] of -1 to the one before, turning it like paper if that is asked for. */
-    private fun turn(direction: Int) {
-        val e = engine ?: return
-        stopTurn()
-        if (s.slidePages && !s.vertical) {
-            // The page being left stays in view until the engine has the other one, see onPosition.
-            pageTurn.cover(content)
-            turning = direction
-            content.postDelayed(dropTurn, TURN_WAIT_MS)
-        }
-        if (direction > 0) e.next() else e.prev()
-    }
+    override fun release() = turner.release()
 
     // ---- input ----
 
@@ -360,17 +427,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
             menu.visibility = View.GONE
             return
         }
-        val e = engine ?: return
-        val w = content.width
-        e.tap(x - content.paddingLeft, y - content.paddingTop) { handled ->
-            if (!handled) when {
-                // The sides of a page that is enlarged are not the sides of the screen.
-                !s.tapToTurn || e.zoomed -> openMenu()
-                x > w * 0.7f -> turn(1)
-                x < w * 0.3f -> turn(-1)
-                else -> openMenu()
-            }
-        }
+        turner.tap(x, y, ::openMenu)
     }
 
     override fun canZoom() = engine?.zoomable == true && !menu.isVisible
@@ -390,7 +447,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
 
     override fun onSwipe(direction: Int) {
         if (menu.isVisible) return
-        turn(if ((direction < 0) != s.reverseSwipe) 1 else -1)
+        turner.swipe(direction)
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -403,7 +460,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         }
         // Swallow the key-up too, otherwise the system still changes the volume.
         if (event.action == KeyEvent.ACTION_DOWN) {
-            turn(if (forward) 1 else -1)
+            turner.turn(if (forward) 1 else -1)
         }
         return true
     }
@@ -412,12 +469,9 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         chapter: Int, fraction: Float, percent: Float, label: String, page: String?,
         pageOfChapter: Pair<Int, Int>?, pageOfBook: Pair<Int, Int>?,
     ) {
-        if (turning != 0) {
-            // The page is there; a moment later it is drawn too, and the sheet can turn over to it.
-            content.removeCallbacks(dropTurn)
-            content.removeCallbacks(startTurn)
-            content.postDelayed(startTurn, TURN_SETTLE_MS)
-        }
+        turner.onPosition(chapter, fraction)
+        // How long each page is read for tells how fast the reader reads, and how long the rest will take.
+        if (bookPages > 0 && !seeking) pace.at(percent * bookPages, SystemClock.elapsedRealtime())
         state.chapter = chapter
         state.fraction = fraction
         state.percent = percent
@@ -471,12 +525,18 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         // The chapter is counted as on the line below, by the book's contents, where it has any:
         // the files a book is made of, which the engine counts, also hold its cover and the like.
         val mark = marked.indexOfLast { it <= (engine?.currentContent ?: -1) }
-        val where = if (page == null || marked.size < 2) label else listOfNotNull(
-            if (mark >= 0) getString(R.string.chapter_of, mark + 1, marked.size) else null,
-            page.ifEmpty { null },
-        ).joinToString(" · ")
-        // Written only when it changes: a new text lays the screen out anew.
-        if (pageNumber.text.toString() != where) pageNumber.text = where
+        // The pages of the book as the engine counts them, with the text as large as it is. A
+        // PDF is at the page it shows; an EPUB that scrolls as far into the pages a printed
+        // one would have as into its text.
+        val book = pageOfBook ?: bookPages.takeIf { it > 0 }?.let {
+            (if (page == null) chapter + 1 else 1 + (percent * (it - 1)).roundToInt()).coerceIn(1, it) to it
+        }
+        reading = engine?.let { if (mark >= 0) chapterName(it, mark) else "" }.orEmpty()
+        at = PagePlace(
+            book, pageOfChapter, reading.ifEmpty { null },
+            engine?.chapterEnd?.let { (it - percent).coerceAtLeast(0f) }, 1 - percent,
+        )
+        showInfo()
         // The menu is closed most of the time. What it would show is written into it only when it
         // opens, so that a page that scrolls does not lay out a menu nobody sees.
         if (!menu.isVisible) {
@@ -487,16 +547,9 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         // What is not known, or does not apply, leaves its place empty, so that the rest stays put.
         inChapter.visibility = if (pageOfChapter == null) View.INVISIBLE else View.VISIBLE
         if (pageOfChapter != null) chapterPage.text = getString(R.string.page_of, pageOfChapter.first, pageOfChapter.second)
-        // The pages of the book as the engine counts them, with the text as large as it is. A
-        // PDF is at the page it shows; an EPUB that scrolls as far into the pages a printed
-        // one would have as into its text.
-        val book = pageOfBook ?: bookPages.takeIf { it > 0 }?.let {
-            (if (page == null) chapter + 1 else 1 + (percent * (it - 1)).roundToInt()).coerceIn(1, it) to it
-        }
         inBook.visibility = if (book == null) View.INVISIBLE else View.VISIBLE
         if (book != null) bookPage.text = getString(R.string.page_of, book.first, book.second)
         percentRead.text = getString(R.string.percent_read, (percent * 100).roundToInt())
-        reading = engine?.let { if (mark >= 0) chapterName(it, mark) else "" }.orEmpty()
         name(reading, other = false)
         if (!seeking) seek.progress = (percent * 1000).roundToInt()
         chapters.current = mark
@@ -533,13 +586,23 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         /** Set when the book was opened on the home-screen widget, with no bookshelf to go back to. */
         const val EXTRA_FROM_WIDGET = "fromWidget"
 
-        /** How long the engine has to come up with the page asked for, and to draw it once it has. */
-        private const val TURN_WAIT_MS = 1500L
-        private const val TURN_SETTLE_MS = 60L
         private const val SAVE_EVERY_MS = 30_000L
 
         /** How near the place the knob was let go the book must tell it is, and how long it has to get there. */
         private const val SEEK_NEAR = 0.03f
         private const val SEEK_WAIT_MS = 1500L
+
+        /** When a reader last opened its book anew, see [reopen]; one failing again within [REOPEN_MS] is not opened again. */
+        private var reopened = Long.MIN_VALUE / 2
+        private const val REOPEN_MS = 10_000L
     }
+}
+
+/**
+ * The reader as it is started the moment a book is tapped on the shelf, see [BookOpening.Handoff]:
+ * with a see-through window (Theme.Ready.Reader.Opening), for the book to open on the shelf under
+ * it, which the reader can only make solid again from Android 11 on.
+ */
+class OpeningReaderActivity : ReaderActivity() {
+    override val behindOpening get() = true
 }

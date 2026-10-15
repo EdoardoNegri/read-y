@@ -3,6 +3,7 @@ package io.github.edoardonegri.ready
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.ColorMatrixColorFilter
 import android.os.Handler
@@ -24,13 +25,13 @@ import kotlin.math.roundToInt
  */
 class PageEngine(
     act: Activity,
-    file: File,
+    private val file: File,
     private val s: ReaderSettings,
     start: BookState,
     private val host: ReaderHost,
 ) : ReaderEngine {
 
-    private val source = PageSource.open(file)
+    private val source = BookPrep.take(file, PageSource::class.java) ?: PageSource.open(file)
     private val count = source.count
 
     // A source is not thread-safe: after construction it is only touched on this thread.
@@ -122,10 +123,11 @@ class PageEngine(
         val h = if (s.vertical) 0 else frame.height
         if (w == 0 || frame.height == 0 || !pending.add(i)) return
         val gen = generation
+        val trim = s.trimMargins
         exec.execute {
             // The page stays blank if it cannot be drawn.
             val bmp = try {
-                if (closed) null else source.render(i, w, h)
+                if (closed) null else source.render(i, w, h, trim)
             } catch (e: Throwable) {
                 null
             }
@@ -163,9 +165,10 @@ class PageEngine(
         pending.clear()
         cache.evictAll()
         resetZoom()
-        frame.setBackgroundColor(s.palette.bg)
-        // Dark mode shows print with its colours turned round; pictures stay as they are.
-        filter = if (s.darkMode && source.print) INVERT else null
+        frame.setBackgroundColor(s.litPalette.bg)
+        // Dark mode shows print with its colours turned round; pictures stay as they are. Either
+        // lies in the warm light.
+        filter = light(s.darkMode && source.print, s.lamp)
         if (s.vertical) {
             single.visibility = View.GONE
             single.setImageBitmap(null)
@@ -291,9 +294,10 @@ class PageEngine(
         val h = (frame.height * zoom).toInt()
         val shown = page
         val gen = generation
+        val trim = s.trimMargins
         exec.execute {
             val bmp = try {
-                if (closed) null else source.render(shown, w, h)
+                if (closed) null else source.render(shown, w, h, trim)
             } catch (e: Throwable) {
                 null
             }
@@ -324,7 +328,8 @@ class PageEngine(
 
     override fun close() {
         closed = true
-        exec.execute { source.close() }
+        // The book is kept open a while, in case it is opened again soon, once nothing is drawn from it any more.
+        exec.execute { KeptBook.keep(file, source) }
         exec.shutdown()
     }
 
@@ -334,13 +339,26 @@ class PageEngine(
 
         /** A page pinched to less than this is let go back to the size of the screen. */
         const val SNAP_ZOOM = 1.1f
-        val INVERT = ColorMatrixColorFilter(
-            floatArrayOf(
-                -1f, 0f, 0f, 0f, 255f,
-                0f, -1f, 0f, 0f, 255f,
-                0f, 0f, -1f, 0f, 255f,
-                0f, 0f, 0f, 1f, 0f,
-            ),
-        )
+
+        /**
+         * What the page is drawn through: its colours turned round if [inverted], and in the
+         * light [lamp], which tints what is white to its own colour; null if neither changes them.
+         */
+        fun light(inverted: Boolean, lamp: Int): ColorFilter? {
+            if (!inverted && lamp == Color.WHITE) return null
+            val r = Color.red(lamp) / 255f
+            val g = Color.green(lamp) / 255f
+            val b = Color.blue(lamp) / 255f
+            val sign = if (inverted) -1f else 1f
+            val add = if (inverted) 255f else 0f
+            return ColorMatrixColorFilter(
+                floatArrayOf(
+                    sign * r, 0f, 0f, 0f, add * r,
+                    0f, sign * g, 0f, 0f, add * g,
+                    0f, 0f, sign * b, 0f, add * b,
+                    0f, 0f, 0f, 1f, 0f,
+                ),
+            )
+        }
     }
 }

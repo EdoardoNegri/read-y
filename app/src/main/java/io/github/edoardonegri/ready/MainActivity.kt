@@ -7,10 +7,13 @@ import android.graphics.Paint
 import android.graphics.Point
 import android.graphics.Rect
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Looper
 import android.os.SystemClock
 import android.view.DragEvent
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
@@ -102,8 +105,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Library.upgrade(this)
         setContentView(R.layout.activity_main)
+        // The bookcase covers the whole window, which need not paint its own background under it.
+        window.setBackgroundDrawable(null)
+
         shelf = findViewById(R.id.shelf)
         ghost = findViewById(R.id.ghost)
         empty = findViewById(R.id.empty)
@@ -158,6 +163,19 @@ class MainActivity : AppCompatActivity() {
         // measure it anew; and rows scrolled just out of sight are kept as they are, not drawn again.
         shelf.setHasFixedSize(true)
         shelf.setItemViewCacheSize(columns * 2)
+        // As the shelf is scrolled, the covers of the screenful still to come that way are
+        // loaded, for a fling to find them there.
+        shelf.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) {
+                if (dy == 0) return
+                val grid = rv.layoutManager as GridLayoutManager
+                val first = grid.findFirstVisibleItemPosition()
+                val last = grid.findLastVisibleItemPosition()
+                if (first < 0) return
+                val screen = last - first + 1
+                adapter.loadAhead(this@MainActivity, if (dy > 0) last + 1..last + screen else first - screen..<first)
+            }
+        })
         shelf.setOnDragListener { _, e -> onShelfDrag(e) }
         bar.setOnDragListener { _, e -> onRailDrag(e) }
 
@@ -185,6 +203,11 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState == null) asked = asked(intent)
     }
 
+    // While a book opens and its reader gets ready unseen over the shelf, the shelf is not tapped:
+    // a tap meant for the page would open another book.
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean =
+        BookOpening.handoff?.waiting == true || super.dispatchTouchEvent(ev)
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         asked(intent)?.let { asked = it }
@@ -192,12 +215,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        warmUpReader()
         val book = asked
         asked = null
         if (book == null || !showShelfOf(book)) refresh()
         val left = BookOpening.left
         BookOpening.left = null
         if (left != null && SystemClock.uptimeMillis() - left.at < BookOpening.LEFT_MS) closeBook(left) else opening.clear()
+        detached.clear()
     }
 
     /**
@@ -227,6 +252,7 @@ class MainActivity : AppCompatActivity() {
     override fun onStop() {
         // The reader has taken over from the page the book was opened to.
         opening.clear()
+        detached.clear()
         super.onStop()
     }
 
@@ -370,11 +396,27 @@ class MainActivity : AppCompatActivity() {
 
     /** Opens the book [f] in the reader, out of its place [from] on the shelf if that is given. */
     private fun read(f: File, from: View?) {
+        // The book is read in the background meanwhile, rather than by the reader as it starts.
+        BookPrep.prepare(f)
         val reader = Intent(this, ReaderActivity::class.java).putExtra(ReaderActivity.EXTRA_PATH, f.path)
         val cover = from?.findViewById<View>(R.id.cover) ?: return startActivity(reader)
         // The book opens on the shelf, and the reader takes over once its page fills the screen.
         val settings = ReaderSettings(this)
-        opening.open(cover, settings.lit(settings.palette.bg)) {
+        val paper = settings.lit(settings.palette.bg)
+        if (Build.VERSION.SDK_INT >= 30) {
+            // The reader starts at once, unseen over the shelf, and sets out the page while the
+            // book opens; see BookOpening.Handoff.
+            val handoff = BookOpening.Handoff()
+            BookOpening.handoff = handoff
+            startActivity(
+                Intent(this, OpeningReaderActivity::class.java).putExtras(reader)
+                    .putExtra(ReaderActivity.EXTRA_FROM_SHELF, true).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION),
+            )
+            // It opens in a window of its own, which the reader starting meanwhile does not hold up.
+            detached.open(cover, paper, handoff::opened)
+            return
+        }
+        opening.open(cover, paper) {
             startActivity(reader.putExtra(ReaderActivity.EXTRA_FROM_SHELF, true).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION))
         }
     }
@@ -395,13 +437,27 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Gets ready, while nothing else happens on the shelf, the web view that lays out the next
+     * book of flowing text to be opened (FlowEngine.prepare), which is slow to make.
+     */
+    private fun warmUpReader() {
+        Looper.myQueue().addIdleHandler {
+            if (!isFinishing && !isDestroyed) FlowEngine.prepare(this)
+            false
+        }
+    }
+
     /** Opens a book on the shelf before the reader shows it, and closes it again afterwards. */
     private val opening by lazy { BookOpening(this) }
+
+    /** Opens a book while the reader starts behind it, see [read]. */
+    private val detached by lazy { BookOpening.Detached(this) }
 
     /** The reader came back with [left], the page its book was at: the book closes from it, where it stands. */
     private fun closeBook(left: BookOpening.Left) {
         val settings = ReaderSettings(this)
-        opening.close(left.page, settings.lit(settings.palette.bg), settings.lamp) {
+        opening.close(left.page, settings.lit(settings.palette.bg)) {
             shelf.findViewHolderForAdapterPosition(adapter.indexOf(left.file))?.itemView?.findViewById(R.id.cover)
         }
     }
@@ -578,6 +634,7 @@ class MainActivity : AppCompatActivity() {
     // ---- search ----
 
     private fun openSearch() {
+        searchListed = false
         searchRow.visibility = View.VISIBLE
         query.requestFocus()
         getSystemService(InputMethodManager::class.java).showSoftInput(query, 0)
@@ -615,16 +672,31 @@ class MainActivity : AppCompatActivity() {
         }
         val dir = current
         val favorites = starred
+        val listed = searchListed
         Library.io.execute {
-            val hits = Library.search(applicationContext, dir, text, favorites)
+            // Answered at once from the folders as they were last listed; the first search after the
+            // search bar opens looks through them anew too, for what other apps have changed.
+            val known = Library.search(applicationContext, dir, text, favorites, fresh = false)
+            runOnUiThread { if (run == searches && !isDestroyed) show(known) }
+            if (listed) return@execute
+            val hits = Library.search(applicationContext, dir, text, favorites, fresh = true)
             runOnUiThread {
                 if (run == searches && !isDestroyed) {
-                    found = hits
-                    refresh()
+                    searchListed = true
+                    if (hits != found) show(hits)
                 }
             }
         }
     }
+
+    /** Shows [hits] as what the search found. */
+    private fun show(hits: List<File>) {
+        found = hits
+        refresh()
+    }
+
+    /** Whether the library has been listed anew since the search bar opened, see [search]. */
+    private var searchListed = false
 
     // ---- moving books and shelves by dragging ----
 
@@ -703,7 +775,7 @@ class MainActivity : AppCompatActivity() {
         // are carried over shows in full, and they themselves let it show through. Put down
         // again, they are bright once more and the rest faint.
         (from as? ViewGroup)?.let { for (i in 0 until it.childCount) it.getChildAt(i).alpha = 1f }
-        val shadow = from.picture()?.let { InHand(it) } ?: View.DragShadowBuilder(from)
+        val shadow = from.snapshot()?.let { InHand(it) } ?: View.DragShadowBuilder(from)
         adapter.moving = true
         // The miniatures of the shelves no longer show what is taken from them.
         Library.carried = set.toSet()
@@ -728,7 +800,17 @@ class MainActivity : AppCompatActivity() {
             touch.set(picture.width / 2, picture.height / 2)
         }
 
-        override fun onDrawShadow(canvas: Canvas) = canvas.drawBitmap(picture, 0f, 0f, paint)
+        override fun onDrawShadow(canvas: Canvas) {
+            // A picture the drawing hardware keeps can only be drawn by it; a phone that draws
+            // the shadow without it is given a copy.
+            val hardware = Build.VERSION.SDK_INT >= 26 && picture.config == Bitmap.Config.HARDWARE
+            val drawn = if (hardware && !canvas.isHardwareAccelerated) {
+                picture.copy(Bitmap.Config.ARGB_8888, false) ?: return
+            } else {
+                picture
+            }
+            canvas.drawBitmap(drawn, 0f, 0f, paint)
+        }
     }
 
     /** Goes to another shelf, as [go] does, while things are carried, so that they can be put down there. */
@@ -828,8 +910,8 @@ class MainActivity : AppCompatActivity() {
     /** Shows [view], the arrow or a button of the board, as what the carried things would be dropped on; null for none. */
     private fun aim(view: View?) {
         if (view == aimed) return
-        aimed?.animate()?.scaleX(1f)?.scaleY(1f)?.setDuration(120)
-        view?.animate()?.scaleX(1.5f)?.scaleY(1.5f)?.setDuration(120)
+        aimed?.animate()?.scaleX(1f)?.scaleY(1f)?.duration = 120
+        view?.animate()?.scaleX(1.5f)?.scaleY(1.5f)?.duration = 120
         aimed = view
         up.removeCallbacks(leaver)
         if (view == up) up.postDelayed(leaver, OPEN_MS)
@@ -870,8 +952,8 @@ class MainActivity : AppCompatActivity() {
      */
     private fun hold(target: File?, view: View?) {
         if (view == intoView) return
-        intoView?.animate()?.scaleX(1f)?.scaleY(1f)?.setDuration(120)
-        view?.animate()?.scaleX(1.12f)?.scaleY(1.12f)?.setDuration(120)
+        intoView?.animate()?.scaleX(1f)?.scaleY(1f)?.duration = 120
+        view?.animate()?.scaleX(1.12f)?.scaleY(1.12f)?.duration = 120
         into = target
         intoView = view
         shelf.removeCallbacks(opener)
@@ -904,7 +986,7 @@ class MainActivity : AppCompatActivity() {
     private fun spec() = ShelfSpec(shelf.width, columns, resources.displayMetrics.density)
 
     // In full colour: with fewer, the soft shading of the back wall comes out in stripes.
-    private fun snapshotShelf(): Bitmap? = shelf.picture()
+    private fun snapshotShelf(): Bitmap? = shelf.snapshot()
 
     /** Where a folder's miniature sits on the shelf: the scale and pivot that map the full shelf onto it. */
     private class Miniature(val px: Float, val py: Float, val scale: Float)
@@ -1169,7 +1251,7 @@ class MainActivity : AppCompatActivity() {
         val warning = when {
             only == null -> resources.getQuantityString(R.plurals.delete_many, things.size, things.size)
             only.isFolder -> {
-                val inside = Store.walk(only).filter { it != only && !it.name.startsWith(".") }.toList()
+                val inside = Store.walk(only, fresh = false).filter { it != only && !it.name.startsWith(".") }.toList()
                 getString(R.string.delete_shelf, only.name, inside.count(Library::isBook), inside.count { it.isFolder })
             }
             else -> getString(R.string.delete_book, nameOf(only))

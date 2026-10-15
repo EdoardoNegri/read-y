@@ -1,0 +1,8 @@
+# The build the baseline profile is made with (baselineprofile/) keeps the code as it is written:
+# the profile names it so, and the release build maps it onto its own shrunk code.
+-dontobfuscate
+-dontoptimize
+-dontshrink
+
+# Unused annotations in the libraries name classes Android does not have; kept as they are, they are no trouble.
+-dontwarn javax.lang.model.element.Modifier

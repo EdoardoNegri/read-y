@@ -1,5 +1,6 @@
 package io.github.edoardonegri.ready
 
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -15,6 +16,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 import android.provider.OpenableColumns
 import android.text.Layout
 import android.text.StaticLayout
@@ -33,6 +35,10 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingDeque
+import java.util.concurrent.ThreadFactory
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import kotlin.math.ceil
 
 /** What a book says about itself. [published] is a day, a month or a year, as 2011-05-17, 2011-05 or 2011; empty if unknown. */
@@ -141,7 +147,38 @@ object Library {
     private const val SHELF_BACK = 0xFF2A1A10.toInt()
     private const val SHELF_BACK_LIGHT = 0xFF3A2416.toInt()
 
-    val io: ExecutorService = Executors.newFixedThreadPool(2)
+    val io: ExecutorService = Executors.newFixedThreadPool(2, behind("library"))
+
+    /**
+     * Reads the covers and draws the miniatures the shelves show, the last asked for first: those
+     * in view rather than those scrolled past, which the shelf may no longer want by then. What is
+     * asked for [ahead] waits behind all of that.
+     */
+    val shelfWork: ExecutorService = ThreadPoolExecutor(
+        2, 2, 0L, TimeUnit.MILLISECONDS,
+        object : LinkedBlockingDeque<Runnable>() {
+            override fun offer(e: Runnable) = if (e is Ahead) offerLast(e) else offerFirst(e)
+        },
+        behind("shelf"),
+    )
+
+    /**
+     * Does [work] for the shelves, such as loading a cover about to come into view, once nothing
+     * asked of [shelfWork] otherwise is waiting; work asked for ahead is done in the order asked.
+     */
+    fun ahead(work: () -> Unit) = shelfWork.execute(Ahead(work))
+
+    private class Ahead(private val work: () -> Unit) : Runnable {
+        override fun run() = work()
+    }
+
+    /** Threads named [name] that work behind the screen, giving way to the thread that draws it. */
+    private fun behind(name: String) = ThreadFactory { work ->
+        Thread({
+            Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+            work.run()
+        }, name)
+    }
     val main = Handler(Looper.getMainLooper())
 
     // The covers and miniatures of a whole shelf or two, however many there are on the phone's memory.
@@ -183,10 +220,35 @@ object Library {
 
     // ---- order ----
 
-    private fun libraryPrefs(ctx: Context) = ctx.getSharedPreferences("library", Context.MODE_PRIVATE)
+    // The preferences are opened on the application, which already knows where they are kept; a
+    // screen asking for them first looks at the storage for that.
+    private fun libraryPrefs(ctx: Context) = ctx.applicationContext.getSharedPreferences("library", Context.MODE_PRIVATE)
 
-    /** Changes whenever something moves on the shelves, so that the miniatures showing them are redrawn. */
+    /**
+     * Changes whenever something changes on all the shelves at once, such as the order they are
+     * sorted in, so that every miniature is drawn anew; see [touched] for one shelf.
+     */
     private var stamp = 0L
+
+    /**
+     * For each shelf, by its path, how often something on it, or on a shelf inside it, has
+     * changed, so that its miniature is drawn anew, and only it; see [stamp] for all of them.
+     */
+    private val stamps = ConcurrentHashMap<String, Long>()
+
+    /**
+     * Something about [f] changed, or it came or went: the miniatures of the shelves it stands on,
+     * near or far, are drawn anew, and its own if it is a shelf.
+     */
+    private fun touched(f: File) {
+        val top = root().path
+        var at: File? = f
+        while (at != null) {
+            stamps.merge(at.path, 1L, Long::plus)
+            if (at.path == top) break
+            at = at.parentFile
+        }
+    }
 
     fun sort(ctx: Context): Sort =
         Sort.values().getOrElse(libraryPrefs(ctx).getInt(SORT, 0)) { Sort.MANUAL }
@@ -224,7 +286,7 @@ object Library {
 
     fun setOrder(ctx: Context, dir: File, names: List<String>) {
         libraryPrefs(ctx).edit { putString(ORDER + dir.path, JSONArray(names).toString()) }
-        stamp++
+        touched(dir)
     }
 
     /**
@@ -284,7 +346,7 @@ object Library {
     fun createShelf(ctx: Context, dir: File, name: String): Boolean {
         val clean = cleanName(name) ?: return false
         val made = Store.mkdir(File(dir, clean))
-        if (made) stamp++
+        if (made) touched(File(dir, clean))
         return made
     }
 
@@ -312,7 +374,7 @@ object Library {
             if (f.name in names) setOrder(ctx, parent, names.map { if (it == f.name) target.name else it })
         }
         if (!target.isFolder) libraryPrefs(ctx).edit { putString(TITLE + target.path, clean) }
-        stamp++
+        touched(target)
         return target
     }
 
@@ -428,7 +490,7 @@ object Library {
             if (key.startsWith(WOOD)) woods.put(key.removePrefix(WOOD).removePrefix(base), value)
         }
         val settings = JSONObject()
-        for ((key, value) in ctx.getSharedPreferences("reader", Context.MODE_PRIVATE).all) {
+        for ((key, value) in ctx.applicationContext.getSharedPreferences("reader", Context.MODE_PRIVATE).all) {
             if (value is Int || value is Boolean) settings.put(key, value)
         }
         val o = JSONObject().put("version", 1).put("positions", positions)
@@ -474,11 +536,12 @@ object Library {
             putInt(SORT, o.optInt("sort"))
             if (o.has("descending")) putBoolean(DESCENDING, o.optBoolean("descending")) else remove(DESCENDING)
         }
-        ctx.getSharedPreferences("reader", Context.MODE_PRIVATE).edit {
+        ctx.applicationContext.getSharedPreferences("reader", Context.MODE_PRIVATE).edit {
             o.optJSONObject("settings")?.let {
                 for (key in it.keys()) when (val value = it.get(key)) {
                     is Boolean -> putBoolean(key, value)
-                    is Int -> putInt(key, value)
+                    // Saved by an older version, the warmth is on the scale of then.
+                    is Int -> if (key == ReaderSettings.OLD_WARMTH) putInt(ReaderSettings.WARMTH, ReaderSettings.warmthOf(value)) else putInt(key, value)
                 }
             }
         }
@@ -559,7 +622,7 @@ object Library {
         } finally {
             temp.delete()
         }
-        stamp++
+        touched(target)
         // A book found in the library already may be the very file handed over, under another
         // name for it; that is only let go where it is known to lie elsewhere.
         return Imported(target, fresh || from != null)
@@ -591,7 +654,9 @@ object Library {
         for ((path, modified) in books) {
             coverFile(ctx, path, modified).renameTo(coverFile(ctx, target.path + path.removePrefix(old), modified))
         }
-        stamp++
+        // The shelves it left, and those it came to.
+        touched(f)
+        touched(target)
         FavoritesWidget.refresh(ctx)
         return true
     }
@@ -657,22 +722,27 @@ object Library {
      * The books on the shelf [dir] and on every shelf inside it whose title, author or file name
      * contains [query]; with [starred], the favorites among all the books of the library
      * instead, and all of them if nothing is asked for. Blocking: reads the details of books not
-     * seen before.
+     * seen before. Unless [fresh], the folders are taken as they were last listed, see [books].
      */
-    fun search(ctx: Context, dir: File, query: String, starred: Boolean): List<File> {
+    fun search(ctx: Context, dir: File, query: String, starred: Boolean, fresh: Boolean = true): List<File> {
         val q = query.trim().lowercase()
         if (q.isEmpty() && !starred) return emptyList()
         val books =
             if (starred) favorites(ctx).asSequence()
-            else books(dir)
+            else books(dir, fresh)
         return books.filter { f ->
             val m = meta(ctx, f)
             q.isEmpty() || q in m.title.lowercase() || q in m.author.lowercase() || q in f.name.lowercase()
         }.toList()
     }
 
-    /** Every book on the shelf [dir] and the shelves inside it: by default, every book in the library. */
-    fun books(dir: File = root()): Sequence<File> = Store.walk(dir) { !it.name.startsWith(".") }.filter(::isBook)
+    /**
+     * Every book on the shelf [dir] and the shelves inside it: by default, every book in the
+     * library. Unless [fresh], the folders listed before are taken as they were found then, which
+     * is quick; see Store.walk.
+     */
+    fun books(dir: File = root(), fresh: Boolean = true): Sequence<File> =
+        Store.walk(dir, fresh) { !it.name.startsWith(".") }.filter(::isBook)
 
     /** Sub-folders first, then books, both alphabetical. */
     fun list(dir: File): List<File> = shown(Store.list(dir))
@@ -684,8 +754,8 @@ object Library {
 
     // ---- metadata & covers ----
 
-    private fun metaPrefs(ctx: Context) = ctx.getSharedPreferences("meta", Context.MODE_PRIVATE)
-    private fun statePrefs(ctx: Context) = ctx.getSharedPreferences("state", Context.MODE_PRIVATE)
+    private fun metaPrefs(ctx: Context) = ctx.applicationContext.getSharedPreferences("meta", Context.MODE_PRIVATE)
+    private fun statePrefs(ctx: Context) = ctx.applicationContext.getSharedPreferences("state", Context.MODE_PRIVATE)
 
     private fun sig(f: File) = "${Store.lastModified(f)}_${Store.length(f)}"
 
@@ -731,13 +801,26 @@ object Library {
         }
     }
 
+    /**
+     * Locks under which [meta] reads books, each for some of them: a book asked for by two
+     * threads at once, e.g. as it is loaded ahead of coming into view and then comes into view,
+     * is read once, and its cover written once rather than over itself.
+     */
+    private val reading = Array(16) { Any() }
+
     /** Reads title, author, date, page count and cover from the file. Blocking; results are cached. */
     fun meta(ctx: Context, f: File): BookMeta {
         // Gone, e.g. deleted while its cover was being asked for: nothing is made or remembered of it.
         if (!f.isDoc) return BookMeta(f.nameWithoutExtension, "", 0)
         val cover = coverFile(ctx, f)
         cachedMeta(ctx, f)?.let { if (cover.exists()) return it }
+        return synchronized(reading[f.path.hashCode() and reading.size - 1]) {
+            cachedMeta(ctx, f)?.takeIf { cover.exists() } ?: readMeta(ctx, f, cover)
+        }
+    }
 
+    /** Reads what [meta] asks for from [f], writing its cover to [cover]. */
+    private fun readMeta(ctx: Context, f: File, cover: File): BookMeta {
         var title = f.nameWithoutExtension
         var author = ""
         var published = ""
@@ -770,7 +853,16 @@ object Library {
         val meta = BookMeta(title, author, pages, published)
         try {
             cover.parentFile?.mkdirs()
-            FileOutputStream(cover).use { (bmp ?: placeholder(title, author)).compress(Bitmap.CompressFormat.JPEG, 85, it) }
+            // Written in full before it is put in its place: a cover half written as the app was
+            // ended would otherwise stand for the book until its file changed.
+            val part = File(cover.path + ".part")
+            FileOutputStream(part).use { (bmp ?: placeholder(title, author)).compress(Bitmap.CompressFormat.JPEG, 85, it) }
+            if (!part.renameTo(cover)) part.delete()
+            // A book read before has changed since: the cover made of it then is not shown again.
+            if (metaPrefs(ctx).contains(f.path)) {
+                val same = cover.name.substringBefore('_') + "_"
+                cover.parentFile?.listFiles { _, name -> name.startsWith(same) && name != cover.name }?.forEach { it.delete() }
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Cannot save cover for ${f.path}", e)
         }
@@ -793,20 +885,37 @@ object Library {
     /** Says that the book [f] is by [author], whatever is written in the file. */
     fun setAuthor(ctx: Context, f: File, author: String) {
         libraryPrefs(ctx).edit { putString(AUTHOR + f.path, author.trim()) }
-        stamp++
+        touched(f)
     }
 
     private fun coverKey(f: File) = "${f.path}:${Store.lastModified(f)}"
 
     fun cachedCover(f: File): Bitmap? = bitmaps.get(coverKey(f))
 
-    /** Decodes the cover the book is shown with: the one it was given, or else the one written by [meta]. Blocking. */
+    /**
+     * Decodes the cover the book is shown with: the one it was given, or else the one written by
+     * [meta]. From Android 9 on it is kept by the drawing hardware alone, so it takes no room in
+     * the app's own memory and needs no copying there as it first comes into view; a picture
+     * drawn in memory, as the miniatures of the shelves are, draws [coverToDraw] instead. Blocking.
+     */
     fun cover(ctx: Context, f: File): Bitmap? {
         cachedCover(f)?.let { return it }
-        val bmp = decodeCover(ctx, f) ?: return null
+        val opts = if (Build.VERSION.SDK_INT >= 28) BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.HARDWARE } else null
+        val bmp = decodeCover(ctx, f, opts) ?: return null
+        // Handed to the drawing hardware now, rather than as it first comes into view.
+        if (Build.VERSION.SDK_INT < 28) bmp.prepareToDraw()
         bitmaps.put(coverKey(f), bmp)
         return bmp
     }
+
+    /**
+     * The cover of the book [f] to draw into a picture made in memory, such as a miniature of a
+     * shelf, which a cover kept by the drawing hardware ([cover]) cannot be: at half its size,
+     * which is more than the miniatures need. Blocking.
+     */
+    private fun coverToDraw(ctx: Context, f: File): Bitmap? =
+        cachedCover(f)?.takeIf { Build.VERSION.SDK_INT < 26 || it.config != Bitmap.Config.HARDWARE }
+            ?: decodeCover(ctx, f, BitmapFactory.Options().apply { inSampleSize = 2 })
 
     /**
      * The covers the reader gave books in place of their first pages. They are kept hidden in the
@@ -850,7 +959,7 @@ object Library {
         }
         old?.let(Store::delete)
         bitmaps.remove(coverKey(f))
-        stamp++
+        touched(f)
         FavoritesWidget.refresh(ctx)
         return true
     }
@@ -885,7 +994,7 @@ object Library {
 
     fun setWood(ctx: Context, dir: File, wood: Wood) {
         libraryPrefs(ctx).edit { if (wood == Wood.WALNUT) remove(WOOD + dir.path) else putString(WOOD + dir.path, wood.name) }
-        stamp++
+        touched(dir)
     }
 
     /**
@@ -900,7 +1009,7 @@ object Library {
     // A miniature drawn while things are carried lacks them, and is a picture of its own. So is
     // one that shows what is chosen.
     private fun folderKey(dir: File, spec: ShelfSpec) =
-        "dir:${dir.path}:${Store.lastModified(dir)}:$stamp:${spec.width}:${spec.columns}" +
+        "dir:${dir.path}:${Store.lastModified(dir)}:$stamp:${stamps[dir.path] ?: 0}:${spec.width}:${spec.columns}" +
             carried.let { if (it.isEmpty()) "" else ":${it.hashCode()}" } +
             within(dir, chosen).let { if (it.isEmpty()) "" else ":c${it.hashCode()}" }
 
@@ -970,7 +1079,7 @@ object Library {
                 name = meta(ctx, f).title
                 paint.color = 0xFF24160D.toInt()
                 c.drawRect(cover, paint)
-                cover(ctx, f)?.let { drawCropped(c, it, cover, paint) }
+                coverToDraw(ctx, f)?.let { drawCropped(c, it, cover, paint) }
                 ShelfArt.drawBinding(c, cover, spec.density, paint)
             }
 
@@ -1001,7 +1110,10 @@ object Library {
         ShelfDecoration.drawCase(c, w, h, spec, paint)
         paint.shader = null
         paint.colorFilter = null
-        if (depth == 0) bitmaps.put(key, bmp)
+        if (depth == 0) {
+            bmp.prepareToDraw()
+            bitmaps.put(key, bmp)
+        }
         return bmp
     }
 
@@ -1134,7 +1246,7 @@ object Library {
         val set = HashSet(favoritePaths(ctx))
         if (on) set.add(f.path) else set.remove(f.path)
         statePrefs(ctx).edit { putStringSet(FAVORITES, set) }
-        stamp++
+        touched(f)
         FavoritesWidget.refresh(ctx)
     }
 
@@ -1149,7 +1261,7 @@ object Library {
         val was = state(ctx, f)
         // A place beyond the end is taken to be the last page by the engines.
         saveState(ctx, f, if (on) BookState(Int.MAX_VALUE, 1f, 1f, was.lastRead) else BookState(lastRead = was.lastRead))
-        stamp++
+        touched(f)
     }
 
     /**
@@ -1164,6 +1276,40 @@ object Library {
 
     /** Takes the books that were marked as finished by an older version of the app into the new way of telling. */
     fun upgrade(ctx: Context) = adoptFinished(ctx)
+
+    /**
+     * Starts reading, while the app starts, what the first shelf needs first: the preferences,
+     * the reading positions of the books, the library folder, which the documents provider is
+     * slow to list the first time, and the grain of the wood. The bookshelf then finds them read,
+     * rather than reading them itself on the thread that draws it.
+     */
+    fun warmUp(ctx: Context) {
+        io.execute {
+            // Opening the preferences starts reading them from storage, on a thread of their own.
+            for (name in arrayOf("library", "state", "meta", "reader", "widget")) ctx.getSharedPreferences(name, Context.MODE_PRIVATE)
+            upgrade(ctx)
+            withStates(ctx) {}
+            if (hasAccess(ctx)) {
+                Store.list(root())
+                adoptBackup(ctx)
+            }
+            ShelfDecoration.prepare(ctx)
+        }
+    }
+
+    /**
+     * Lets go of what is kept in memory that can be read again when it is needed, as the phone
+     * asks for its memory back: the covers and miniatures, all of them if it is short of it.
+     */
+    fun trim(level: Int) {
+        @Suppress("DEPRECATION")
+        when {
+            level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE -> bitmaps.evictAll()
+            level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND -> bitmaps.trimToSize(bitmaps.maxSize() / 2)
+            level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW || level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ->
+                bitmaps.trimToSize(bitmaps.maxSize() / 2)
+        }
+    }
 
     fun favorites(ctx: Context): List<File> = standing(favoritePaths(ctx)).sortedBy { it.name.lowercase() }
 

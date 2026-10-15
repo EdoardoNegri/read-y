@@ -16,6 +16,8 @@ class EpubBook private constructor(private val zip: ZipArchive) : FlowBook {
     override var author = ""
     override var published = ""
         private set
+    override var language = ""
+        private set
 
     /** Zip entry paths of the content documents, in reading order. */
     override val spine = ArrayList<String>()
@@ -64,6 +66,7 @@ class EpubBook private constructor(private val zip: ZipArchive) : FlowBook {
                     when (x.name.substringAfter(':')) {
                         "title" -> if (title.isEmpty()) title = text(x)
                         "creator" -> text(x).let { if (it.isNotEmpty()) authors.add(it) }
+                        "language" -> if (language.isEmpty()) language = text(x)
                         "date" -> {
                             // Older books date several things; the first that is not said to be something else is taken.
                             val event = (0 until x.attributeCount)

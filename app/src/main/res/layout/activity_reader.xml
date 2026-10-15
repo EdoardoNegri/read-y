@@ -11,30 +11,21 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- Shows a page being turned, over the one the reader has changed to underneath. -->
+    <!-- What is shown around the text in small print, if the reader asked for it: where the page
+         is, the time and the like, in a line above the text and one below it. -->
+    <io.github.edoardonegri.ready.PageInfoView
+        android:id="@+id/pageInfo"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Shows a page being turned, over the one the reader has changed to underneath: a picture
+         of the page as it is seen, with what is around the text, which the sheet carries with it
+         as it turns. -->
     <io.github.edoardonegri.ready.PageTurnView
         android:id="@+id/pageTurn"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:visibility="gone" />
-
-    <!-- The page being read, in small print at the foot of the page, if the reader asked for it. -->
-    <TextView
-        android:id="@+id/pageNumber"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="5dp"
-        android:fontFamily="serif"
-        android:textSize="11sp"
-        android:visibility="gone" />
-
-    <!-- The warm light, which falls on the page but not on the menu. -->
-    <io.github.edoardonegri.ready.LampView
-        android:id="@+id/lamp"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:visibility="gone" />
+        android:visibility="invisible" />
 
     <!-- The space above the panel is not clickable, so taps there reach the book and close the menu. -->
     <LinearLayout

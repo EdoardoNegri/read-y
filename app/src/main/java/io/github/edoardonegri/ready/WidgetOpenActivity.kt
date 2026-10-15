@@ -58,6 +58,11 @@ class WidgetOpenActivity : AppCompatActivity() {
 
     /** Opens [book] from [at], the place on the screen its picture on the widget has. */
     private fun open(book: File, at: Rect) {
+        // The book opens only once the window has settled, which takes the better part of a
+        // second; the reader's web view is made and the book is read meanwhile, so that the
+        // reader has less to do, and its page shows sooner, once the book lies open.
+        BookPrep.prepare(book)
+        if (Library.isFlowing(book)) window.decorView.post { FlowEngine.prepare(this) }
         val root = FrameLayout(this)
         setContentView(root)
         // The book as the widget shows it: standing at the foot of its place, half again as tall as wide.
@@ -71,7 +76,6 @@ class WidgetOpenActivity : AppCompatActivity() {
             visibility = View.INVISIBLE
         }
         root.addView(cover, FrameLayout.LayoutParams(w, h))
-        val opening = BookOpening(this)
         val app = applicationContext
         Library.io.execute {
             Library.meta(app, book)
@@ -85,7 +89,7 @@ class WidgetOpenActivity : AppCompatActivity() {
                     cover.translationX = (at.centerX() - w / 2 - origin[0]).toFloat()
                     cover.translationY = (at.bottom - h - origin[1]).toFloat()
                     val settings = ReaderSettings(this)
-                    whenInPlace { opening.open(cover, settings.lit(settings.palette.bg)) { read(book) } }
+                    whenInPlace { openBook(book, cover, settings.lit(settings.palette.bg)) }
                 }
             }
         }
@@ -119,18 +123,40 @@ class WidgetOpenActivity : AppCompatActivity() {
         arrived()
     }
 
-    /** Hands [book] to the reader, which joins the bookshelf's task, on top of whatever is open there. */
-    private fun read(book: File) {
+    /** Opens the book whose cover [cover] shows, on paper of the colour [paper], and hands it to the reader. */
+    private fun openBook(book: File, cover: View, paper: Int) {
+        if (Build.VERSION.SDK_INT < 30) {
+            BookOpening(this).open(cover, paper) { read(book) }
+            return
+        }
+        // The reader starts at once, unseen over the book opening, and sets out its page
+        // meanwhile; it shows itself once the book is open (BookOpening.Handoff), as it does
+        // from the bookshelf. The book opens in a window of its own, which the reader starting
+        // does not hold up.
+        val handoff = BookOpening.Handoff()
+        BookOpening.handoff = handoff
+        read(book, handoff)
+        BookOpening.Detached(this).also { detached = it }.open(cover, paper, handoff::opened)
+    }
+
+    /** The book opening while the reader starts over it, see [openBook]. */
+    private var detached: BookOpening.Detached? = null
+
+    /**
+     * Hands [book] to the reader, in the bookshelf's task, which only holds the reader from then
+     * on: Android shows a picture of whatever was open there as the task comes to the front, until
+     * the reader has drawn its page, and with [handoff] the reader starts unseen over the book
+     * opening, see [openBook]. Leaving the book leads to the bookshelf all the same.
+     */
+    private fun read(book: File, handoff: BookOpening.Handoff? = null) {
         // Not if the opening was left before the book lay open.
         if (done || isFinishing || isDestroyed) return
         done = true
+        val reader = if (handoff != null) OpeningReaderActivity::class.java else ReaderActivity::class.java
         startActivity(
-            Intent(this, ReaderActivity::class.java).putExtra(ReaderActivity.EXTRA_PATH, book.path)
+            Intent(this, reader).putExtra(ReaderActivity.EXTRA_PATH, book.path)
                 .putExtra(ReaderActivity.EXTRA_FROM_SHELF, true).putExtra(ReaderActivity.EXTRA_FROM_WIDGET, true)
-                // Clearing to the top: a task whose first activity was the reader, as it is where the
-                // bookshelf was not open before, would otherwise only be brought to the front,
-                // showing whatever it holds, the bookshelf or the book read before.
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION),
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
         )
         // The page stays until the reader has taken its place, see onStop.
     }
@@ -138,6 +164,11 @@ class WidgetOpenActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         if (done) finish()
+    }
+
+    override fun onDestroy() {
+        detached?.clear()
+        super.onDestroy()
     }
 
     companion object {

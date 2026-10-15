@@ -7,34 +7,21 @@
 
     <include layout="@layout/top_bar" />
 
-    <!-- A sample page that follows the settings below it, framed like a picture on the wood. -->
-    <FrameLayout
+    <!-- A page of a sample book as the reader would show it, which follows the settings below it,
+         framed like a picture on the wood; its pages turn as the reader's do (PagePreview). -->
+    <io.github.edoardonegri.ready.PagePreview
+        android:id="@+id/preview"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_marginEnd="16dp"
         android:layout_marginStart="16dp"
         android:layout_marginTop="16dp"
-        android:layout_weight="35"
-        android:background="@color/gold_dark"
-        android:padding="2dp">
-
-        <TextView
-            android:id="@+id/sample"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:text="@string/sample_page" />
-
-        <io.github.edoardonegri.ready.LampView
-            android:id="@+id/lamp"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:visibility="gone" />
-    </FrameLayout>
+        android:layout_weight="40" />
 
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="65">
+        android:layout_weight="60">
 
         <LinearLayout
             android:id="@+id/options"
