@@ -345,10 +345,7 @@ private class Shelves(private val ctx: Context, private val shelf: WidgetShelf) 
         val d = bmp.width / shelf.coverW
         paint.color = 0xFF24160D.toInt()
         c.drawRect(area, paint)
-        BitmapFactory.decodeFile(
-            Library.coverImage(ctx, f).path,
-            BitmapFactory.Options().apply { inSampleSize = 2 },
-        )?.let { Library.drawCropped(c, it, area, paint) }
+        Library.decodeCover(ctx, f, BitmapFactory.Options().apply { inSampleSize = 2 })?.let { Library.drawCropped(c, it, area, paint) }
         ShelfArt.drawBinding(c, area, d, paint)
         return bmp
     }

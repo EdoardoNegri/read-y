@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What the widget looks like in the home screen's list of widgets: the bookcase of
+     widget_favorites.xml as it is dropped, two cells wide and two tall, with a book in each of its
+     places (widget_row.xml). The real widget takes its size from a picture FavoritesWidget makes
+     and fills its shelves in code, neither of which happens for the list. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    tools:ignore="RtlHardcoded,ContentDescription">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingEnd="11dp"
+        android:paddingStart="11dp">
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <ImageView
+                android:layout_width="match_parent"
+                android:layout_height="6dp"
+                android:background="@drawable/shelf_shade" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_marginTop="5dp"
+                android:baselineAligned="false"
+                android:orientation="horizontal">
+
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1">
+
+                <ImageView
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="center_horizontal|bottom"
+                    android:layout_marginEnd="3dp"
+                    android:layout_marginStart="3dp"
+                    android:adjustViewBounds="true"
+                    android:scaleType="fitEnd"
+                    android:src="@drawable/widget_preview_book_blue" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1">
+
+                <ImageView
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="center_horizontal|bottom"
+                    android:layout_marginEnd="3dp"
+                    android:layout_marginStart="3dp"
+                    android:adjustViewBounds="true"
+                    android:scaleType="fitEnd"
+                    android:src="@drawable/widget_preview_book_yellow" />
+            </FrameLayout>
+
+            </LinearLayout>
+
+            <ImageView
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:layout_gravity="bottom"
+                android:background="@drawable/shelf_lip" />
+        </FrameLayout>
+
+        <ImageView
+            android:layout_width="match_parent"
+            android:layout_height="7dp"
+            android:background="@drawable/shelf_plank" />
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <ImageView
+                android:layout_width="match_parent"
+                android:layout_height="6dp"
+                android:background="@drawable/shelf_shade" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_marginTop="5dp"
+                android:baselineAligned="false"
+                android:orientation="horizontal">
+
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1">
+
+                <ImageView
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="center_horizontal|bottom"
+                    android:layout_marginEnd="3dp"
+                    android:layout_marginStart="3dp"
+                    android:adjustViewBounds="true"
+                    android:scaleType="fitEnd"
+                    android:src="@drawable/widget_preview_book_red" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1">
+
+                <ImageView
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="center_horizontal|bottom"
+                    android:layout_marginEnd="3dp"
+                    android:layout_marginStart="3dp"
+                    android:adjustViewBounds="true"
+                    android:scaleType="fitEnd"
+                    android:src="@drawable/widget_preview_book_green" />
+            </FrameLayout>
+
+            </LinearLayout>
+
+            <ImageView
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:layout_gravity="bottom"
+                android:background="@drawable/shelf_lip" />
+        </FrameLayout>
+
+        <ImageView
+            android:layout_width="match_parent"
+            android:layout_height="7dp"
+            android:background="@drawable/shelf_plank" />
+
+    </LinearLayout>
+
+    <ImageView
+        android:layout_width="18dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="left"
+        android:background="@drawable/widget_post_left" />
+
+    <ImageView
+        android:layout_width="18dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="right"
+        android:background="@drawable/widget_post_right" />
+</FrameLayout>

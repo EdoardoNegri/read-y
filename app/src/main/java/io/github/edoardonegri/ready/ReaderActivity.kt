@@ -110,7 +110,7 @@ class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
         immersive()
 
         file = File(intent.getStringExtra(EXTRA_PATH) ?: "")
-        if (!file.isFile) {
+        if (!file.isDoc) {
             Toast.makeText(this, R.string.book_missing, Toast.LENGTH_LONG).show()
             leave()
             return

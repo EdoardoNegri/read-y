@@ -46,7 +46,7 @@ class WidgetOpenActivity : AppCompatActivity() {
             !Library.hasAccess(this) -> leaveFor(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             book == null -> leaveFor(Intent(this, WidgetBooksActivity::class.java))
             // The home screen did not say where the book stands, or it is gone: the reader says so.
-            at == null || at.isEmpty || !book.isFile || savedInstanceState != null -> read(book)
+            at == null || at.isEmpty || !book.isDoc || savedInstanceState != null -> read(book)
             else -> open(book, at)
         }
     }

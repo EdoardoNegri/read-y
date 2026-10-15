@@ -4,13 +4,10 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
-import android.os.ParcelFileDescriptor
 import androidx.core.graphics.createBitmap
 import java.io.Closeable
 import java.io.File
 import java.io.IOException
-import java.util.zip.ZipEntry
-import java.util.zip.ZipFile
 import kotlin.math.min
 import kotlin.math.sqrt
 
@@ -51,7 +48,7 @@ interface PageSource : Closeable {
     }
 
     private class PdfPages(file: File) : PageSource {
-        private val renderer = PdfRenderer(ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY))
+        private val renderer = PdfRenderer(Store.descriptor(file))
         override val count = renderer.pageCount
         override val firstRatio: Float
         override val print get() = true
@@ -79,8 +76,8 @@ interface PageSource : Closeable {
 
     /** A comic book: a zip file of pictures, which are its pages in the order of their names. */
     private class CbzPages(file: File) : PageSource {
-        private val zip = ZipFile(file)
-        private val pages: List<ZipEntry> = zip.entries().asSequence()
+        private val zip = ZipArchive(Store.open(file))
+        private val pages: List<ZipArchive.Entry> = zip.entries().asSequence()
             .filter { !it.isDirectory && it.name.substringAfterLast('.').lowercase() in IMAGES && !it.name.substringAfterLast('/').startsWith(".") }
             .sortedWith { a, b -> compareNames(a.name, b.name) }
             .toList()

@@ -51,7 +51,7 @@ interface ReaderEngine {
     /** Gives the content a chance to handle a tap (e.g. a link) before it turns the page. */
     fun tap(x: Float, y: Float, done: (handled: Boolean) -> Unit) = done(false)
 
-    /** Whether the page can be enlarged by pinching it, as a fixed page can: the text of a book is sized in the settings. */
+    /** Whether a pinch enlarges the page, as it does a fixed page, or the text of a book of flowing text. */
     val zoomable: Boolean get() = false
 
     /** Whether the page is enlarged now; a swipe then moves it about rather than turning it. */

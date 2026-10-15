@@ -7,10 +7,9 @@ import org.xmlpull.v1.XmlPullParser
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
-import java.util.zip.ZipFile
 
 /** Minimal EPUB container reader: metadata, reading order (spine), contents, cover and resource streams. */
-class EpubBook private constructor(private val zip: ZipFile) : FlowBook {
+class EpubBook private constructor(private val zip: ZipArchive) : FlowBook {
 
     override var title = ""
         private set
@@ -32,7 +31,7 @@ class EpubBook private constructor(private val zip: ZipFile) : FlowBook {
 
     companion object {
         fun open(file: File): EpubBook {
-            val book = EpubBook(ZipFile(file))
+            val book = EpubBook(ZipArchive(Store.open(file)))
             try {
                 book.parse()
             } catch (e: Exception) {
@@ -101,7 +100,7 @@ class EpubBook private constructor(private val zip: ZipFile) : FlowBook {
             val path = manifest[id] ?: continue
             if (zip.getEntry(path) != null) spine.add(path)
         }
-        weights = LongArray(spine.size) { zip.getEntry(spine[it]).size.coerceAtLeast(1) }
+        weights = LongArray(spine.size) { zip.getEntry(spine[it])!!.size.coerceAtLeast(1) }
         // Older books list their chapters in an NCX file, newer ones in a navigation document;
         // the first is the simpler to read, so it is tried first.
         for ((path, read) in listOf(ncx to ::readNcx, nav to ::readNav)) {

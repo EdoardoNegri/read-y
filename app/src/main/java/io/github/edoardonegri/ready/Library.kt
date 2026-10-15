@@ -1,8 +1,6 @@
 package io.github.edoardonegri.ready
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -15,7 +13,6 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
@@ -25,7 +22,6 @@ import android.text.TextPaint
 import android.text.TextUtils
 import android.util.Log
 import android.util.LruCache
-import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.withTranslation
@@ -118,7 +114,7 @@ class ShelfSpec(val width: Int, val columns: Int, val density: Float) {
     }
 }
 
-/** The on-disk library: the "Read-y" folder in shared storage, plus cached metadata and reading state. */
+/** The library: the "Read_y" folder the reader let the app have (see [Store]), plus cached metadata and reading state. */
 object Library {
     private const val TAG = "Library"
     private const val COVER_W = 360
@@ -153,19 +149,37 @@ object Library {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
 
-    fun root(): File = File(Environment.getExternalStorageDirectory(), "Read-y")
+    fun root(): File = Store.root()
 
-    fun hasAccess(ctx: Context): Boolean =
-        if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager()
-        else ContextCompat.checkSelfPermission(ctx, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
-            PackageManager.PERMISSION_GRANTED
+    @Suppress("UNUSED_PARAMETER")
+    fun hasAccess(ctx: Context): Boolean = Store.hasAccess()
+
+    /**
+     * Makes the folder [uri], which the reader picked, the library. What was remembered about the
+     * books in the folder used before is remembered for the same places in this one, so that a
+     * library moved over keeps its places. False if [uri] cannot be the library.
+     */
+    fun grant(ctx: Context, uri: Uri): Boolean {
+        val old = Store.grant(uri) ?: return false
+        if (old != root()) remember(ctx, old.path, root().path)
+        adopted = false
+        stamp++
+        FavoritesWidget.refresh(ctx)
+        return true
+    }
 
     /** A book of flowing text, which FlowEngine lays out, rather than one of fixed pages for PageEngine. */
     fun isFlowing(f: File) = f.extension.lowercase() in FlowBook.EXTENSIONS
-    fun isBook(f: File) = f.isFile && f.extension.lowercase().let { it in FlowBook.EXTENSIONS || it in PageSource.EXTENSIONS }
+    fun isBook(f: File) = f.isDoc && f.extension.lowercase().let { it in FlowBook.EXTENSIONS || it in PageSource.EXTENSIONS }
 
-    /** What stands on the shelf [dir], in the order chosen for the library. */
+    /** What stands on the shelf [dir], in the order chosen for the library. Blocking: the folder is listed anew. */
     fun shelf(ctx: Context, dir: File): List<File> = arrange(ctx, dir, list(dir))
+
+    /**
+     * What stood on the shelf [dir] when its folder was last listed, in the order chosen for the
+     * library; null if it never was. Quick, for showing the shelf while [shelf] looks again.
+     */
+    fun knownShelf(ctx: Context, dir: File): List<File>? = Store.known(dir)?.let { arrange(ctx, dir, shown(it)) }
 
     // ---- order ----
 
@@ -219,7 +233,7 @@ object Library {
      */
     fun arrange(ctx: Context, dir: File?, items: List<File>): List<File> {
         // Everything is looked up once, however often the sorting compares it, the disk included.
-        val shelves = items.filterTo(HashSet()) { it.isDirectory }
+        val shelves = items.filterTo(HashSet()) { it.isFolder }
         val byName = items.sortedWith(compareBy({ it !in shelves }, { it.name.lowercase() }))
         val titles by lazy {
             byName.associateWith { (if (it in shelves) it.name else cachedMeta(ctx, it)?.title ?: it.nameWithoutExtension).lowercase() }
@@ -269,7 +283,7 @@ object Library {
     /** Makes a new shelf, a folder, on the shelf [dir]. False if the name cannot be used or is taken. */
     fun createShelf(ctx: Context, dir: File, name: String): Boolean {
         val clean = cleanName(name) ?: return false
-        val made = File(dir, clean).let { !it.exists() && it.mkdir() }
+        val made = Store.mkdir(File(dir, clean))
         if (made) stamp++
         return made
     }
@@ -279,7 +293,7 @@ object Library {
      * there, e.g. because [dest] already has something of that name.
      */
     fun move(ctx: Context, f: File, dest: File): Boolean =
-        dest.isDirectory && dest != f && !dest.path.startsWith(f.path + File.separator) &&
+        dest.isFolder && dest != f && !dest.path.startsWith(f.path + File.separator) &&
             relocate(ctx, f, File(dest, f.name))
 
     /**
@@ -290,14 +304,14 @@ object Library {
     fun rename(ctx: Context, f: File, name: String): File? {
         val clean = cleanName(name) ?: return null
         val parent = f.parentFile ?: return null
-        val target = File(parent, if (f.isDirectory) clean else "$clean.${f.extension}")
+        val target = File(parent, if (f.isFolder) clean else "$clean.${f.extension}")
         if (target != f) {
             if (!relocate(ctx, f, target)) return null
             // It keeps its place on the shelf.
             val names = order(ctx, parent)
             if (f.name in names) setOrder(ctx, parent, names.map { if (it == f.name) target.name else it })
         }
-        if (!target.isDirectory) libraryPrefs(ctx).edit { putString(TITLE + target.path, clean) }
+        if (!target.isFolder) libraryPrefs(ctx).edit { putString(TITLE + target.path, clean) }
         stamp++
         return target
     }
@@ -313,7 +327,7 @@ object Library {
     fun delete(ctx: Context, f: File): File? {
         // Several things deleted in the same moment each get a place of their own.
         val place = File(bin(), "${System.currentTimeMillis()}-${binned++}")
-        if (!place.mkdirs()) return null
+        if (!Store.mkdirs(place)) return null
         val target = File(place, f.name)
         return if (relocate(ctx, f, target)) target else null
     }
@@ -323,12 +337,12 @@ object Library {
 
     /** Deletes for good whatever is left in the bin, e.g. after the app was closed in the middle of deleting. Blocking. */
     fun emptyBin(ctx: Context) {
-        if (bin().exists()) erase(ctx, bin())
+        if (Store.exists(bin())) erase(ctx, bin())
     }
 
     private fun erase(ctx: Context, f: File) {
         val books = booksIn(f)
-        if (!f.deleteRecursively()) return
+        if (!Store.delete(f)) return
         remember(ctx, f.path, null)
         for ((path, modified) in books) coverFile(ctx, path, modified).delete()
     }
@@ -357,7 +371,7 @@ object Library {
         if (adopted || !hasAccess(ctx)) return false
         adopted = true
         val file = backupFile()
-        if (!file.isFile || sig(file) == libraryPrefs(ctx).getString(BACKUP_SIG, null)) return false
+        if (!file.isDoc || sig(file) == libraryPrefs(ctx).getString(BACKUP_SIG, null)) return false
         val taken = restoreBackup(ctx)
         libraryPrefs(ctx).edit { putString(BACKUP_SIG, sig(file)) }
         return taken
@@ -383,8 +397,8 @@ object Library {
         try {
             val text = backupText(ctx)
             if (text == written) return
-            root().mkdirs()
-            backupFile().writeText(text)
+            Store.mkdirs(root())
+            Store.writeText(backupFile(), text)
             written = text
             libraryPrefs(ctx).edit { putString(BACKUP_SIG, sig(backupFile())) }
         } catch (e: Exception) {
@@ -432,7 +446,7 @@ object Library {
 
     /** Takes over what [saveBackup] wrote, in place of what is remembered now. */
     private fun restoreBackup(ctx: Context): Boolean = try {
-        val o = JSONObject(backupFile().readText())
+        val o = JSONObject(Store.readText(backupFile()))
         val base = root().path
         fun paths(key: String) = o.optJSONArray(key).let { a -> if (a == null) emptySet() else List(a.length()) { base + a.getString(it) }.toHashSet() }
         statePrefs(ctx).edit {
@@ -479,14 +493,22 @@ object Library {
     // ---- books from other apps ----
 
     /**
-     * Copies the book another app handed over as [uri] onto the first shelf of the library and
-     * returns it there; a book that already is in the library is returned as it is. Null if it
-     * is not a book of a kind that can be read. [mime] is what the other app said it is. Blocking.
+     * A book another app handed over, as it now stands in the library. [moved] says that the
+     * file it came from is to go, so that the book is kept only once: it was copied, or the same
+     * book was found in the library and the file is known to lie elsewhere.
      */
-    fun import(ctx: Context, uri: Uri, mime: String?): File? {
-        if (uri.scheme == "file") uri.path?.let(::File)?.let {
-            if (it.path.startsWith(root().path + File.separator) && isBook(it)) return it
-        }
+    class Imported(val book: File, val moved: Boolean)
+
+    /**
+     * Copies the book another app handed over as [uri] onto the shelf [dir], by default the
+     * first shelf of the library, and returns it there; a book that already is in the library is
+     * returned as it is. Null if it is not a book of a kind that can be read. [mime] is what the
+     * other app said it is. Blocking.
+     */
+    fun import(ctx: Context, uri: Uri, mime: String?, dir: File = root()): Imported? {
+        val from = if (uri.scheme == "file") uri.path?.let(::File) else Store.locate(uri)
+        // A book of the library opened from elsewhere, e.g. a file manager, is read where it stands.
+        if (from != null && from.path.startsWith(root().path + File.separator)) return if (isBook(from)) Imported(from, false) else null
         var name = uri.lastPathSegment?.substringAfterLast('/').orEmpty()
         var size = -1L
         if (uri.scheme == "content") try {
@@ -499,8 +521,8 @@ object Library {
         } catch (e: Exception) {
             // The name is only a nicety.
         }
-        root().mkdirs()
-        val temp = File(root(), ".import")
+        Store.mkdirs(dir)
+        val temp = File(ctx.cacheDir, "import")
         val head = ByteArray(68)
         (ctx.contentResolver.openInputStream(uri) ?: return null).use { ins ->
             FileOutputStream(temp).use { ins.copyTo(it) }
@@ -521,29 +543,50 @@ object Library {
             }
         }
         val base = (cleanName(name.substringBeforeLast('.', name)) ?: "Book").take(120)
-        var target = File(root(), "$base.$ext")
+        var target = File(dir, "$base.$ext")
         var n = 2
         // The same book handed over again is not added a second time.
-        while (target.exists() && target.length() != temp.length()) target = File(root(), "$base (${n++}).$ext")
-        if (target.exists()) temp.delete() else if (!temp.renameTo(target)) return null
+        while (Store.exists(target) && Store.length(target) != temp.length()) target = File(dir, "$base (${n++}).$ext")
+        val fresh = !Store.exists(target)
+        try {
+            if (fresh) temp.inputStream().use { ins -> Store.outputStream(target).use { ins.copyTo(it) } }
+            // Only a whole copy lets the file it came from go.
+            if (fresh && Store.length(target) != temp.length()) throw java.io.IOException("Incomplete copy")
+        } catch (e: Exception) {
+            Log.w(TAG, "Cannot keep the book $name", e)
+            Store.delete(target)
+            return null
+        } finally {
+            temp.delete()
+        }
         stamp++
-        return target
+        // A book found in the library already may be the very file handed over, under another
+        // name for it; that is only let go where it is known to lie elsewhere.
+        return Imported(target, fresh || from != null)
     }
 
     /** The books that are [f] or inside it, each with its date: what their covers are filed under. */
     private fun booksIn(f: File): Map<String, Long> =
-        (if (f.isDirectory) f.walkTopDown().filter(::isBook) else sequenceOf(f)).associate { it.path to it.lastModified() }
+        (if (f.isFolder) Store.walk(f).filter(::isBook) else sequenceOf(f)).associate { it.path to Store.lastModified(it) }
 
     /** Takes [f] to [target], which must be free, taking along what is remembered about it. */
     private fun relocate(ctx: Context, f: File, target: File): Boolean {
         // Storage that does not tell capitals apart says that a name which only changes them is
         // taken, by the very thing being renamed; the listing has the name as it is really written.
-        val recapitalized = target.path.equals(f.path, ignoreCase = true) && target.parentFile?.list()?.contains(target.name) != true
-        if (target.exists() && !recapitalized) return false
+        val recapitalized = target.path.equals(f.path, ignoreCase = true) &&
+            target.parentFile?.let(Store::list)?.any { it.name == target.name } != true
+        if (Store.exists(target) && !recapitalized) return false
         val old = f.path
         // Note the covers before the paths change.
         val books = booksIn(f)
-        if (!(if (recapitalized) renameViaTemp(f, target) else f.renameTo(target))) return false
+        // It either changes its name or its shelf, never both.
+        val done = when {
+            recapitalized -> renameViaTemp(f, target)
+            target.parentFile == f.parentFile -> Store.rename(f, target.name)
+            target.name == f.name -> Store.move(f, target.parentFile ?: return false)
+            else -> false
+        }
+        if (!done) return false
         remember(ctx, old, target.path)
         for ((path, modified) in books) {
             coverFile(ctx, path, modified).renameTo(coverFile(ctx, target.path + path.removePrefix(old), modified))
@@ -560,9 +603,9 @@ object Library {
      */
     private fun renameViaTemp(f: File, target: File): Boolean {
         val temp = File(f.parentFile ?: return false, ".renaming-${System.nanoTime()}")
-        if (!f.renameTo(temp)) return false
-        if (temp.renameTo(target)) return true
-        temp.renameTo(f)
+        if (!Store.rename(f, temp.name)) return false
+        if (Store.rename(temp, target.name)) return true
+        Store.rename(temp, f.name)
         return false
     }
 
@@ -604,7 +647,7 @@ object Library {
                 if (key.startsWith(kind) && value is String && within(path)) {
                     remove(key)
                     if (new != null) putString(kind + moved(path), value)
-                    else if (kind == COVER) File(coversDir(), value).delete()
+                    else if (kind == COVER) Store.delete(File(coversDir(), value))
                 }
             }
         }
@@ -629,23 +672,24 @@ object Library {
     }
 
     /** Every book on the shelf [dir] and the shelves inside it: by default, every book in the library. */
-    fun books(dir: File = root()): Sequence<File> = dir.walkTopDown().onEnter { !it.name.startsWith(".") }.filter(::isBook)
+    fun books(dir: File = root()): Sequence<File> = Store.walk(dir) { !it.name.startsWith(".") }.filter(::isBook)
 
     /** Sub-folders first, then books, both alphabetical. */
-    fun list(dir: File): List<File> =
-        dir.listFiles()
-            ?.filter { !it.name.startsWith(".") && (it.isDirectory || isBook(it)) }
-            ?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
-            ?: emptyList()
+    fun list(dir: File): List<File> = shown(Store.list(dir))
+
+    /** Of the things in a folder, the shelves and books, without what is hidden; sub-folders first, then books, both alphabetical. */
+    private fun shown(kids: List<File>): List<File> =
+        kids.filter { !it.name.startsWith(".") && (it.isFolder || isBook(it)) }
+            .sortedWith(compareBy({ !it.isFolder }, { it.name.lowercase() }))
 
     // ---- metadata & covers ----
 
     private fun metaPrefs(ctx: Context) = ctx.getSharedPreferences("meta", Context.MODE_PRIVATE)
     private fun statePrefs(ctx: Context) = ctx.getSharedPreferences("state", Context.MODE_PRIVATE)
 
-    private fun sig(f: File) = "${f.lastModified()}_${f.length()}"
+    private fun sig(f: File) = "${Store.lastModified(f)}_${Store.length(f)}"
 
-    fun coverFile(ctx: Context, f: File): File = coverFile(ctx, f.path, f.lastModified())
+    fun coverFile(ctx: Context, f: File): File = coverFile(ctx, f.path, Store.lastModified(f))
 
     private fun coverFile(ctx: Context, path: String, modified: Long): File =
         File(File(ctx.filesDir, "covers"), "${Integer.toHexString(path.hashCode())}_$modified.jpg")
@@ -690,7 +734,7 @@ object Library {
     /** Reads title, author, date, page count and cover from the file. Blocking; results are cached. */
     fun meta(ctx: Context, f: File): BookMeta {
         // Gone, e.g. deleted while its cover was being asked for: nothing is made or remembered of it.
-        if (!f.isFile) return BookMeta(f.nameWithoutExtension, "", 0)
+        if (!f.isDoc) return BookMeta(f.nameWithoutExtension, "", 0)
         val cover = coverFile(ctx, f)
         cachedMeta(ctx, f)?.let { if (cover.exists()) return it }
 
@@ -752,14 +796,14 @@ object Library {
         stamp++
     }
 
-    private fun coverKey(f: File) = "${f.path}:${f.lastModified()}"
+    private fun coverKey(f: File) = "${f.path}:${Store.lastModified(f)}"
 
     fun cachedCover(f: File): Bitmap? = bitmaps.get(coverKey(f))
 
     /** Decodes the cover the book is shown with: the one it was given, or else the one written by [meta]. Blocking. */
     fun cover(ctx: Context, f: File): Bitmap? {
         cachedCover(f)?.let { return it }
-        val bmp = BitmapFactory.decodeFile(coverImage(ctx, f).path) ?: return null
+        val bmp = decodeCover(ctx, f) ?: return null
         bitmaps.put(coverKey(f), bmp)
         return bmp
     }
@@ -772,12 +816,17 @@ object Library {
 
     /** The cover the reader gave the book [f]; null while it has its own. */
     private fun customCover(ctx: Context, f: File): File? =
-        libraryPrefs(ctx).getString(COVER + f.path, null)?.let { File(coversDir(), it) }?.takeIf { it.isFile }
+        libraryPrefs(ctx).getString(COVER + f.path, null)?.let { File(coversDir(), it) }?.takeIf { it.isDoc }
 
     fun hasCustomCover(ctx: Context, f: File) = customCover(ctx, f) != null
 
-    /** The picture the book [f] is shown with. Unless it was given one, it is written by [meta]. */
-    fun coverImage(ctx: Context, f: File): File = customCover(ctx, f) ?: coverFile(ctx, f)
+    /** Decodes the picture the book [f] is shown with. Unless it was given one, it is written by [meta]. Blocking. */
+    fun decodeCover(ctx: Context, f: File, opts: BitmapFactory.Options? = null): Bitmap? = try {
+        customCover(ctx, f)?.let { c -> Store.inputStream(c).use { BitmapFactory.decodeStream(it, null, opts) } }
+            ?: BitmapFactory.decodeFile(coverFile(ctx, f).path, opts)
+    } catch (e: Exception) {
+        null
+    }
 
     /**
      * Gives the book [f] the picture [uri] as its cover, or gives it back its own, the first
@@ -791,15 +840,15 @@ object Library {
             val bmp = readPicture(ctx, uri, COVER_W * 2) ?: return false
             val name = "${UUID.randomUUID()}.jpg"
             try {
-                coversDir().mkdirs()
-                FileOutputStream(File(coversDir(), name)).use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+                Store.mkdirs(coversDir())
+                Store.outputStream(File(coversDir(), name)).use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
             } catch (e: Exception) {
                 Log.w(TAG, "Cannot save the cover for ${f.path}", e)
                 return false
             }
             libraryPrefs(ctx).edit { putString(COVER + f.path, name) }
         }
-        old?.delete()
+        old?.let(Store::delete)
         bitmaps.remove(coverKey(f))
         stamp++
         FavoritesWidget.refresh(ctx)
@@ -851,7 +900,7 @@ object Library {
     // A miniature drawn while things are carried lacks them, and is a picture of its own. So is
     // one that shows what is chosen.
     private fun folderKey(dir: File, spec: ShelfSpec) =
-        "dir:${dir.path}:${dir.lastModified()}:$stamp:${spec.width}:${spec.columns}" +
+        "dir:${dir.path}:${Store.lastModified(dir)}:$stamp:${spec.width}:${spec.columns}" +
             carried.let { if (it.isEmpty()) "" else ":${it.hashCode()}" } +
             within(dir, chosen).let { if (it.isEmpty()) "" else ":c${it.hashCode()}" }
 
@@ -908,7 +957,7 @@ object Library {
             val faint = picked.isNotEmpty() && f !in picked && picked.none { it.path.startsWith(f.path + File.separator) }
             val layer = if (faint) c.saveLayerAlpha(0f, 0f, w, h, FAINT_ALPHA) else -1
             val name: String
-            if (f.isDirectory) {
+            if (f.isFolder) {
                 name = f.name
                 // A case is a little wider than a book and stands taller, up to the shelf above.
                 val inner = folderPreview(ctx, f, spec, depth + 1)
@@ -930,8 +979,8 @@ object Library {
                 cover.right.toInt(), (cover.bottom + spec.px(6) + spec.px(32)).toInt(),
             )
             PlaqueDrawable(spec.density).apply {
-                favorite = !f.isDirectory && isFavorite(ctx, f)
-                finished = !f.isDirectory && isFinished(ctx, f)
+                favorite = !f.isFolder && isFavorite(ctx, f)
+                finished = !f.isFolder && isFinished(ctx, f)
                 bounds = plaque
                 draw(c)
             }
@@ -1122,7 +1171,7 @@ object Library {
     private fun standing(paths: Collection<String>): List<File> =
         paths.map(::File)
             // A deleted book lies in the bin until it is gone for good, and counts for nothing there.
-            .filter { it.isFile && !it.path.startsWith(bin().path + File.separator) }
+            .filter { it.isDoc && !it.path.startsWith(bin().path + File.separator) }
 
     /**
      * The books put on the home-screen widget. Until the reader puts one on it or takes one off,

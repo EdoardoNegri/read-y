@@ -68,7 +68,7 @@ class ShelfDecoration(ctx: Context, private val columns: Int) : RecyclerView.Ite
             val v = parent.getChildAt(i)
             val h = parent.getChildViewHolder(v) as? ShelfAdapter.Holder ?: continue
             // What is carried about has left its place, shadow and all.
-            if (h.file?.isDirectory != true || !h.cover.isVisible) continue
+            if (h.file?.isFolder != true || !h.cover.isVisible) continue
             val x = v.left + v.translationX + h.frame.left
             val y = v.top + v.translationY + h.frame.top
             ShelfArt.drawCastShadow(c, x, y, x + h.frame.width, y + h.frame.height, d, paint)

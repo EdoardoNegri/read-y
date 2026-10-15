@@ -1,6 +1,5 @@
 package io.github.edoardonegri.ready
 
-import android.Manifest
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -8,10 +7,8 @@ import android.graphics.Paint
 import android.graphics.Point
 import android.graphics.Rect
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
-import android.provider.Settings
 import android.view.DragEvent
 import android.view.Gravity
 import android.view.View
@@ -29,8 +26,6 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
-import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnPreDraw
@@ -220,7 +215,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Goes to the shelf [book] stands on, with the book in view. False if there is no such book to go to. */
     private fun showShelfOf(book: File): Boolean {
-        if (!book.isFile || !Library.hasAccess(this)) return false
+        if (!book.isDoc || !Library.hasAccess(this)) return false
         picked = null
         if (searching) closeSearch()
         current = book.parentFile ?: Library.root()
@@ -246,7 +241,12 @@ class MainActivity : AppCompatActivity() {
         coverFor?.let { outState.putString(KEY_COVER, it.path) }
     }
 
-    private fun refresh() {
+    /**
+     * Shows the shelf being looked at, or what a search found. A shelf whose folder was listed
+     * before is shown as it was found then, at once, and listed anew in the background, unless
+     * [relist] is false: it is shown again if anything on it changed.
+     */
+    private fun refresh(relist: Boolean = true) {
         val root = Library.root()
         if (!Library.hasAccess(this)) {
             showRail()
@@ -256,17 +256,23 @@ class MainActivity : AppCompatActivity() {
             adapter.submit(emptyList())
             empty.visibility = View.VISIBLE
             grant.visibility = View.VISIBLE
-            emptyText.text = getString(R.string.need_access, root.path)
+            emptyText.text = getString(R.string.need_access, root.path.removePrefix(Store.storage().path).trimStart('/'))
             return
         }
-        root.mkdirs()
+        Store.mkdirs(root)
         // A backup that came with the folder, e.g. from another phone, is taken over before anything is shown.
         Library.adoptBackup(this)
-        if (!current.isDirectory || !current.path.startsWith(root.path)) current = root
+        if (!current.isFolder || !current.path.startsWith(root.path)) current = root
         val atRoot = current == root
         showWood()
         val results = found
-        val books = if (results != null) Library.arrange(this, null, results) else Library.shelf(this, current)
+        val known = if (results == null) Library.knownShelf(this, current) else null
+        val books = when {
+            results != null -> Library.arrange(this, null, results)
+            known != null -> known
+            else -> Library.shelf(this, current)
+        }
+        if (known != null && relist) relist(current, known)
         // What is carried has left its places. It is given one empty place on the shelf being
         // shown, for the finger to take to wherever it should stand.
         val held = dragged
@@ -289,6 +295,20 @@ class MainActivity : AppCompatActivity() {
             results != null && starred && query.text.isBlank() -> getString(R.string.favorites_empty)
             results != null -> getString(R.string.no_results)
             else -> getString(R.string.empty_folder, current.path)
+        }
+    }
+
+    /**
+     * Lists the folder of the shelf [dir] anew in the background, for what another app may have
+     * changed in it since it was shown as [shown], and shows it again if anything did.
+     */
+    private fun relist(dir: File, shown: List<File>) {
+        val app = applicationContext
+        Library.io.execute {
+            val now = Library.shelf(app, dir)
+            Library.main.post {
+                if (!isDestroyed && current == dir && found == null && now != shown) refresh(relist = false)
+            }
         }
     }
 
@@ -329,8 +349,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun open(f: File, from: View? = null) {
         // While things are chosen a tap chooses more; a shelf is opened with two.
-        if (picked != null) return if (f.isDirectory) tapShelf(f, from) else pick(f)
-        if (f.isDirectory) enter(f, from) else read(f, from)
+        if (picked != null) return if (f.isFolder) tapShelf(f, from) else pick(f)
+        if (f.isFolder) enter(f, from) else read(f, from)
     }
 
     /** The shelf tapped once while things are chosen, which is chosen unless it is tapped again at once. */
@@ -407,11 +427,52 @@ class MainActivity : AppCompatActivity() {
 
     private fun showMenu() {
         val choices = ArrayList<Pair<String, () -> Unit>>()
-        if (Library.hasAccess(this)) choices += getString(R.string.new_shelf) to ::askNewShelf
+        if (Library.hasAccess(this)) {
+            choices += getString(R.string.add_books) to ::addBooks
+            choices += getString(R.string.new_shelf) to ::askNewShelf
+        }
         choices += getString(R.string.sort_by) to ::askSort
         choices += getString(R.string.settings) to { settings.launch(Intent(this, SettingsActivity::class.java)) }
         // It is closed by a tap beside it; the dialogs it leads to have an arrow back to it.
         ShelfDialog(this).title(getString(R.string.menu)).uncrossed().options(choices).show()
+    }
+
+    /**
+     * Books picked anywhere on the phone in Android's picker, which are moved onto the shelf
+     * being shown: Android lets the files picked there be deleted, so they are kept only once.
+     */
+    private val pickBooks = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val data = result.data ?: return@registerForActivityResult
+        val uris = data.clipData?.let { c -> List(c.itemCount) { c.getItemAt(it).uri } } ?: listOfNotNull(data.data)
+        if (uris.isEmpty()) return@registerForActivityResult
+        val app = applicationContext
+        val dir = current
+        Library.io.execute {
+            var unreadable = 0
+            var kept = 0
+            for (uri in uris) {
+                val imported = try {
+                    Library.import(app, uri, app.contentResolver.getType(uri), dir)
+                } catch (e: Exception) {
+                    null
+                }
+                if (imported == null) unreadable++ else if (imported.moved && !Store.removeOriginal(uri)) kept++
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                refresh()
+                if (unreadable > 0) toast(R.string.cannot_import)
+                else if (kept > 0) toast(R.string.cannot_delete)
+            }
+        }
+    }
+
+    private fun addBooks() {
+        try {
+            pickBooks.launch(Store.pickIntent(several = true))
+        } catch (e: Exception) {
+            toast(R.string.cannot_import)
+        }
     }
 
     /** The settings, which lead back to the menu if they are left by their arrow. */
@@ -453,7 +514,7 @@ class MainActivity : AppCompatActivity() {
         pickRow.visibility = if (picked != null) View.VISIBLE else View.GONE
         // While things are carried, the shelves show in full.
         Library.chosen = if (dragged == null) picked?.toSet().orEmpty() else emptySet()
-        val books = picked?.filter { it.isFile } ?: return
+        val books = picked?.filter { it.isDoc } ?: return
         val favorites = books.isNotEmpty() && books.all { Library.isFavorite(this, it) }
         val read = books.isNotEmpty() && books.all { Library.isFinished(this, it) }
         pickStar.setImageResource(if (favorites) R.drawable.ic_star else R.drawable.ic_star_outline)
@@ -465,7 +526,7 @@ class MainActivity : AppCompatActivity() {
      * are, they no longer are. The shelves among them are left as they are.
      */
     private fun mark(chosen: List<File>, favorite: Boolean) {
-        val books = chosen.filter { it.isFile }
+        val books = chosen.filter { it.isDoc }
         val on = !books.all { if (favorite) Library.isFavorite(this, it) else Library.isFinished(this, it) }
         for (b in books) if (favorite) Library.setFavorite(this, b, on) else Library.setFinished(this, b, on)
     }
@@ -789,7 +850,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val across = (x - child.left) / child.width
-        if (target.isDirectory && across in 0.25f..0.75f) {
+        if (target.isFolder && across in 0.25f..0.75f) {
             hold(target, child)
             return
         }
@@ -917,17 +978,19 @@ class MainActivity : AppCompatActivity() {
         ghost.setImageBitmap(null)
     }
 
+    /** The library folder the reader picked; it becomes the library, and the first shelf is shown. */
+    private val pickFolder = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val uri = result.data?.data ?: return@registerForActivityResult
+        if (Library.grant(this, uri)) current = Library.root() else toast(R.string.cannot_use_folder)
+        refresh()
+    }
+
+    /** Asks the reader for the library folder, Read_y: the only part of the phone's storage the app is let into. */
     private fun requestAccess() {
-        if (Build.VERSION.SDK_INT >= 30) {
-            try {
-                startActivity(
-                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, "package:$packageName".toUri()),
-                )
-            } catch (e: Exception) {
-                startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-            }
-        } else {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 1)
+        try {
+            pickFolder.launch(Store.askIntent())
+        } catch (e: Exception) {
+            toast(R.string.cannot_use_folder)
         }
     }
 
@@ -940,9 +1003,9 @@ class MainActivity : AppCompatActivity() {
     private fun onPlaque(f: File) = if (picked != null) edit(f) else showInfo(f)
 
     private fun showInfo(f: File) {
-        if (f.isDirectory) {
+        if (f.isFolder) {
             val kids = Library.shelf(this, f)
-            val folders = kids.count { it.isDirectory }
+            val folders = kids.count { it.isFolder }
             // The counts down the left, and where the shelf is on the right, however long that is.
             val rows = ArrayList<Pair<String, String>>()
             rows += getString(R.string.info_books) to "${kids.size - folders}"
@@ -958,7 +1021,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun edit(f: File) {
-        if (f.isDirectory) return editShelf(f)
+        if (f.isFolder) return editShelf(f)
         val app = applicationContext
         Library.io.execute {
             val meta = Library.meta(app, f)
@@ -1097,7 +1160,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** The name a book or a shelf goes by. */
-    private fun nameOf(f: File) = if (f.isDirectory) f.name else Library.cachedMeta(this, f)?.title ?: f.nameWithoutExtension
+    private fun nameOf(f: File) = if (f.isFolder) f.name else Library.cachedMeta(this, f)?.title ?: f.nameWithoutExtension
 
     /** Deleting takes the files off the phone, so it is asked about first. */
     private fun askDelete(things: List<File>) {
@@ -1105,9 +1168,9 @@ class MainActivity : AppCompatActivity() {
         val only = things.singleOrNull()
         val warning = when {
             only == null -> resources.getQuantityString(R.plurals.delete_many, things.size, things.size)
-            only.isDirectory -> {
-                val inside = only.walkTopDown().filter { it != only && !it.name.startsWith(".") }.toList()
-                getString(R.string.delete_shelf, only.name, inside.count(Library::isBook), inside.count { it.isDirectory })
+            only.isFolder -> {
+                val inside = Store.walk(only).filter { it != only && !it.name.startsWith(".") }.toList()
+                getString(R.string.delete_shelf, only.name, inside.count(Library::isBook), inside.count { it.isFolder })
             }
             else -> getString(R.string.delete_book, nameOf(only))
         }

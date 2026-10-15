@@ -1,7 +1,6 @@
 package io.github.edoardonegri.ready
 
 import java.io.File
-import java.io.RandomAccessFile
 
 /**
  * Reads the title, the author and the date a PDF carries in its information dictionary. Android's PdfRenderer
@@ -16,8 +15,8 @@ object PdfInfo {
 
     /** Title, author and the date the file was made, any of which may be empty; null if the file gives none. */
     fun read(f: File): Triple<String, String, String>? = try {
-        if (f.length() > MAX_SIZE) null
-        else RandomAccessFile(f, "r").use { file ->
+        if (Store.length(f) > MAX_SIZE) null
+        else Store.open(f).use { file ->
             val info = last(file, Regex("/Info\\s+(\\d+)\\s+(\\d+)\\s+R"))
             val text = when {
                 info == null -> null
@@ -44,7 +43,7 @@ object PdfInfo {
     }
 
     /** The bytes of the file from [at], as text with one character per byte. */
-    private fun text(file: RandomAccessFile, at: Long, length: Int): String {
+    private fun text(file: BookFile, at: Long, length: Int): String {
         val bytes = ByteArray(minOf(length.toLong(), file.length() - at).toInt().coerceAtLeast(0))
         file.seek(at)
         file.readFully(bytes)
@@ -52,7 +51,7 @@ object PdfInfo {
     }
 
     /** Where in the file [pattern] matches last, with the match. */
-    private fun last(file: RandomAccessFile, pattern: Regex): Pair<Long, MatchResult>? {
+    private fun last(file: BookFile, pattern: Regex): Pair<Long, MatchResult>? {
         var found: Pair<Long, MatchResult>? = null
         var at = 0L
         while (at < file.length()) {

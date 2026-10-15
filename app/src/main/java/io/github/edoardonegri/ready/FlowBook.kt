@@ -105,7 +105,7 @@ class TxtBook(file: File) : FlowBook {
             name = null
             size = 0
         }
-        for (p in paragraphs(decode(file.readBytes()))) {
+        for (p in paragraphs(decode(Store.readBytes(file)))) {
             val heading = p.length < 80 && HEADING.containsMatchIn(p)
             if (size > PART || heading && size > PART / 16) end()
             // The first chapter heading to come names the part, though a title or two may stand before it.

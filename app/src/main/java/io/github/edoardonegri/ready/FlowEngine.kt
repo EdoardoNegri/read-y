@@ -321,6 +321,37 @@ class FlowEngine(
 
     private fun relayout() = web.evaluateJavascript("window.__r&&__r.apply(${config()},null,null)", null)
 
+    // ---- sizing the text by pinching ----
+
+    /**
+     * How many times larger the fingers have made the text since the pinch began. Until they are
+     * lifted the page is only enlarged on the screen, around where they first met; then the text
+     * is laid out again at that size, which is the one the settings give it from then on.
+     */
+    private var pinch = 1f
+
+    override val zoomable get() = true
+
+    override fun zoomBy(factor: Float, x: Float, y: Float) {
+        if (pinch == 1f) {
+            web.pivotX = x
+            web.pivotY = y
+        }
+        pinch = (pinch * factor).coerceIn(MIN_TEXT.toFloat() / s.fontSize, MAX_TEXT.toFloat() / s.fontSize)
+        web.scaleX = pinch
+        web.scaleY = pinch
+    }
+
+    override fun zoomEnd() {
+        val size = ((s.fontSize * pinch / TEXT_STEP).roundToInt() * TEXT_STEP).coerceIn(MIN_TEXT, MAX_TEXT)
+        pinch = 1f
+        web.scaleX = 1f
+        web.scaleY = 1f
+        if (size == s.fontSize) return
+        s.fontSize = size
+        applySettings()
+    }
+
     override fun seekTo(fraction: Float) {
         atEnd = fraction >= 1f
         val (index, inChapter) = place(fraction)
@@ -354,6 +385,11 @@ class FlowEngine(
 
     companion object {
         private const val HOST = "epub.local"
+
+        /** The sizes a pinch can give the text, in percent, as the slider in the settings does (OptionsPanel). */
+        const val MIN_TEXT = 50
+        const val MAX_TEXT = 300
+        const val TEXT_STEP = 5
 
         /** Where on [HOST] the font imported from the phone is served, and the name it goes by there (as in SCRIPT). */
         private const val FONTS_PATH = ".fonts/"
@@ -391,6 +427,10 @@ class FlowEngine(
     }
     s += 'img,svg,video,canvas{max-width:100%!important;height:auto;object-fit:contain;break-inside:avoid;'
       + (c.vertical ? '' : 'max-height:' + ih + 'px!important;') + '}';
+    // A box that holds nothing but a picture, such as the cover of a book from Project Gutenberg,
+    // shows the page through it: its own colour, made to fill the page, would stand out below the
+    // picture, which keeps its shape.
+    s += '*:has(> img:only-child),*:has(> svg:only-child){background:transparent!important;}';
     if (c.vertical) {
       s += 'html{overflow-x:hidden!important;overflow-y:auto!important;}'
         + 'body{width:auto!important;height:auto!important;min-height:' + H + 'px;}';

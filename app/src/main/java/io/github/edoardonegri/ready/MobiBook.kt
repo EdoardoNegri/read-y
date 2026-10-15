@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
-import java.io.RandomAccessFile
 import java.nio.charset.Charset
 
 /**
@@ -14,7 +13,7 @@ import java.nio.charset.Charset
  * with the rarer Huffman scheme, cannot be read.
  */
 class MobiBook(file: File) : FlowBook {
-    private val data = RandomAccessFile(file, "r")
+    private val data = Store.open(file)
 
     /** Where each record starts, and after the last one where the file ends. */
     private val offsets: IntArray

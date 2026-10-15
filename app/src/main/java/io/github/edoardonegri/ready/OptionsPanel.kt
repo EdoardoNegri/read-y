@@ -75,7 +75,7 @@ class OptionsPanel(
 
         if (epub) {
             section(t(R.string.opt_text))
-            slider(t(R.string.opt_size), 50, 300, 5, s.fontSize, false, ::percent) {
+            slider(t(R.string.opt_size), FlowEngine.MIN_TEXT, FlowEngine.MAX_TEXT, FlowEngine.TEXT_STEP, s.fontSize, false, ::percent) {
                 s.fontSize = it
                 onLayout()
             }

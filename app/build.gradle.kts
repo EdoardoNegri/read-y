@@ -9,10 +9,10 @@ android {
     }
 
     defaultConfig {
-        applicationId = "io.github.edoardonegri.ready"
+        applicationId = "com.edoardonegri.readY"
         minSdk = 24
         targetSdk = 37
-        versionCode = 1
+        versionCode = 2
         versionName = "1.0"
     }
 

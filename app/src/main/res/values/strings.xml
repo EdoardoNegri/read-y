@@ -1,7 +1,6 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">Read-y</string>
-    <string name="widget_name">Books</string>
-    <string name="widget_description">The books you choose, one tap away</string>
+    <string name="widget_name">Library</string>
     <string name="widget_empty">Tap to choose the books that stand here</string>
     <string name="widget_books">Widget</string>
     <string name="widget_choose">Choose the books</string>
@@ -31,20 +30,28 @@
     <string name="sort_last_read">Last read</string>
     <string name="sort_progress">How far read</string>
     <string name="sample_page">It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.\n\nHowever little known the feelings or views of such a man may be on his first entering a neighbourhood, this truth is so well fixed in the minds of the surrounding families, that he is considered as the rightful property of some one or other of their daughters.\n\n“My dear Mr. Bennet,” said his lady to him one day, “have you heard that Netherfield Park is let at last?”\n\nMr. Bennet replied that he had not.</string>
-    <string name="grant_access">Allow access to files</string>
-    <string name="need_access">Read-y keeps your books in a normal folder:\n%1$s\n\nAllow access to all files so it can read that folder.</string>
+    <string name="grant_access">Choose the Read_y folder</string>
+    <string name="need_access">Read-y keeps your books in a folder of their own:\n%1$s\n\nTap below, then \"Use this folder\" and \"Allow\". Read-y is let into that folder and nothing else on your phone. Put books in it with any file manager.</string>
+    <string name="cannot_use_folder">That folder cannot hold the library. Choose a folder on the phone\'s own storage, such as Documents/Read_y.</string>
     <string name="empty_folder">This shelf is empty.\n\nCopy books (EPUB, PDF, MOBI, CBZ or TXT) and folders into\n%1$s</string>
     <string name="close">Close</string>
     <string name="favorite">Favorite</string>
     <string name="resume">Continue reading</string>
     <string name="nothing_read">No book has been read yet</string>
     <string name="finished">Finished</string>
-    <string name="name">Name</string>
     <string name="delete">Delete</string>
     <string name="delete_book">%1$s will be deleted from the phone.</string>
     <string name="delete_shelf" tools:ignore="PluralsCandidate">The shelf %1$s will be deleted from the phone with everything on it: %2$d books and %3$d shelves.</string>
     <string name="cannot_import">That file is not a book Read-y can open (EPUB, PDF, MOBI, CBZ or TXT), or it could not be read.</string>
-    <string name="import_needs_access">Allow Read-y access to files first, so that it can keep the book.</string>
+    <string name="add_books">Add books</string>
+    <string name="original_title">Remove the original?</string>
+    <string name="original_ask">%1$s is on your shelf now. The app it came from did not let Read-y remove the original file, %2$s, so the book is still there too.
+
+Tap below and choose that file: Read-y will remove it, so that the book is kept only once.</string>
+    <string name="original_choose">Choose the original</string>
+    <string name="original_removed">The original was removed. The book is only on your shelf now.</string>
+    <string name="original_other">That is not the same file, so nothing was removed.</string>
+    <string name="import_needs_access">Choose the Read_y folder first, so that Read-y can keep the book.</string>
     <string name="cannot_delete">It could not be deleted.</string>
     <string name="contents">Contents</string>
     <string name="page_of">%1$d / %2$d</string>

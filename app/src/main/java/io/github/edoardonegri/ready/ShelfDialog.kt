@@ -6,6 +6,7 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.Typeface
+import android.os.Build
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.TextUtils
@@ -29,6 +30,7 @@ import android.widget.TextView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.toDrawable
+import androidx.core.view.isNotEmpty
 import androidx.core.view.isVisible
 
 /**
@@ -151,7 +153,7 @@ class ShelfDialog(private val ctx: Context) {
             typeface = Typeface.SERIF
             textSize = 13f
             setTextColor(ContextCompat.getColor(ctx, R.color.gold))
-            if (fields.childCount > 0) setPadding(0, (10 * d).toInt(), 0, 0)
+            if (fields.isNotEmpty()) setPadding(0, (10 * d).toInt(), 0, 0)
         })
     }
 
@@ -168,7 +170,7 @@ class ShelfDialog(private val ctx: Context) {
         field.isSingleLine = true
         field.imeOptions = EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_EXTRACT_UI
         field.inputType = EditorInfo.TYPE_CLASS_TEXT or EditorInfo.TYPE_TEXT_FLAG_CAP_WORDS
-        field.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+        if (Build.VERSION.SDK_INT >= 26) field.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
         // Done puts the keyboard away; what was typed is taken when the dialog closes.
         field.setOnEditorActionListener { v, _, _ ->
             v.clearFocus()
@@ -176,7 +178,9 @@ class ShelfDialog(private val ctx: Context) {
             true
         }
         fields.addView(field, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (40 * d).toInt()))
-        // The keyboard pushes the dialog up rather than covering the field.
+        // The keyboard pushes the dialog up rather than covering the field. A dialog's window
+        // still needs the old way to be told so: it draws no insets of its own.
+        @Suppress("DEPRECATION")
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         return field
     }

@@ -118,7 +118,7 @@ class ShelfAdapter(
         val place = h.itemView as ViewGroup
         val faint = !moving && picked.let { it != null && f !in it }
         // A shelf with something chosen on it shows that: its miniature is faint but for that.
-        val holds = faint && f.isDirectory && picked.orEmpty().any { it.path.startsWith(f.path + File.separator) }
+        val holds = faint && f.isFolder && picked.orEmpty().any { it.path.startsWith(f.path + File.separator) }
         for (i in 0 until place.childCount) place.getChildAt(i).apply {
             visibility = if (carried) View.INVISIBLE else View.VISIBLE
             alpha = if (faint && !(holds && this === h.frame)) FAINT else 1f
@@ -126,19 +126,19 @@ class ShelfAdapter(
         // A recycled view may have been left enlarged as the shelf something was dragged over.
         h.itemView.scaleX = 1f
         h.itemView.scaleY = 1f
-        h.place.visibility = if (showPlaces && !f.isDirectory) View.VISIBLE else View.GONE
+        h.place.visibility = if (showPlaces && !f.isFolder) View.VISIBLE else View.GONE
         if (showPlaces) h.place.text = f.parentFile.let {
             if (it == null || it == Library.root()) ctx.getString(R.string.app_name) else it.name
         }
         val shelfSpec = spec()
-        h.cover.binding = !f.isDirectory
-        h.cover.cased = f.isDirectory
-        if (f.isDirectory) h.cover.wood = Library.wood(ctx, f)
+        h.cover.binding = !f.isFolder
+        h.cover.cased = f.isFolder
+        if (f.isFolder) h.cover.wood = Library.wood(ctx, f)
         // A book fills its place; a case rises above the books, through the gap the row leaves
         // at its top, up to the shelf above, and is wider by as much as that makes it larger.
-        val rise = if (f.isDirectory && shelfSpec.width > 0) shelfSpec.miniRise else 0
-        h.cover.scaleType = if (f.isDirectory) ImageView.ScaleType.FIT_XY else ImageView.ScaleType.CENTER_CROP
-        h.cover.setBackgroundColor(if (f.isDirectory) 0 else 0xFF24160D.toInt())
+        val rise = if (f.isFolder && shelfSpec.width > 0) shelfSpec.miniRise else 0
+        h.cover.scaleType = if (f.isFolder) ImageView.ScaleType.FIT_XY else ImageView.ScaleType.CENTER_CROP
+        h.cover.setBackgroundColor(if (f.isFolder) 0 else 0xFF24160D.toInt())
         val wider = if (rise > 0) (shelfSpec.miniW - shelfSpec.coverW) / 2 else 0
         (h.frame.layoutParams as ViewGroup.MarginLayoutParams).apply {
             leftMargin = -wider
@@ -150,7 +150,7 @@ class ShelfAdapter(
         h.gap.layoutParams.height = shelfSpec.miniRise - rise
         h.gap.requestLayout()
         val plate = h.plaque.background as PlaqueDrawable
-        if (f.isDirectory) {
+        if (f.isFolder) {
             h.plaque.text = f.name
             plate.favorite = false
             plate.finished = false
