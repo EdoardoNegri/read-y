@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.MutableContextWrapper
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.net.Uri
 import android.view.View
 import android.webkit.JavascriptInterface
@@ -169,10 +170,22 @@ class FlowEngine(
         }
     }
 
+    /** Whether the host was told the first page is shown (ReaderHost.shown). */
+    private var told = false
+
     private fun reveal() {
         if (ready) return
         ready = true
         web.alpha = 1f
+        // The first page, once all of it is there to be drawn.
+        if (!told) {
+            told = true
+            web.postVisualStateCallback(0, object : WebView.VisualStateCallback() {
+                override fun onComplete(requestId: Long) {
+                    if (!closed) host.shown()
+                }
+            })
+        }
         // The page left, which stood in front while this one was laid out (see load), can go.
         host.release()
     }
@@ -189,6 +202,7 @@ class FlowEngine(
     }
 
     private fun show() {
+        resetZoom()
         ready = false
         injected = false
         stale = false
@@ -223,6 +237,8 @@ class FlowEngine(
             .put("mv", s.marginV)
             .put("vertical", s.vertical)
             .put("hy", HYPHENATION.getOrElse(s.hyphenation) { "" })
+            // The pictures lie in the warm light too: how much of red, green and blue it has.
+            .put("lamp", s.lamp.let { if (it == Color.WHITE) "" else "%.4f %.4f %.4f".format(Locale.US, Color.red(it) / 255f, Color.green(it) / 255f, Color.blue(it) / 255f) })
             // Words are broken by the rules of the language the book is in; one that does not say
             // is taken to be in that of the phone.
             .put("lang", book.language.ifEmpty { Locale.getDefault().toLanguageTag() })
@@ -273,6 +289,7 @@ class FlowEngine(
 
     private fun step(direction: Int) {
         if (!ready) return
+        resetZoom()
         web.evaluateJavascript("window.__r?__r.step($direction,${s.slidePages && s.vertical}):null") { moved ->
             val target = chapter + direction
             if (moved == "false" && !closed && target in book.spine.indices) {
@@ -386,6 +403,7 @@ class FlowEngine(
     override fun prev() = step(-1)
 
     override fun applySettings() {
+        resetZoom()
         web.settings.textZoom = s.fontSize
         preRaster()
         web.setBackgroundColor(s.litPalette.bg)
@@ -402,38 +420,63 @@ class FlowEngine(
 
     private fun relayout() = web.evaluateJavascript("window.__r&&__r.apply(${config()},null,null)", null)
 
-    // ---- sizing the text by pinching ----
+    // ---- enlarging the page by pinching ----
 
     /**
-     * How many times larger the fingers have made the text since the pinch began. Until they are
-     * lifted the page is only enlarged on the screen, around where they first met; then the text
-     * is laid out again at that size, which is the one the settings give it from then on.
+     * How many times larger than the screen the page is shown, as the fingers made it: all of it
+     * alike, as if looked at closer, the text laid out as it was. Fingers move it about; turning
+     * the page, or laying it out anew, shows it whole again.
      */
-    private var pinch = 1f
+    private var zoom = 1f
+
+    /** Where the enlarged page starts, from the top left of the view: never positive. */
+    private var tx = 0f
+    private var ty = 0f
 
     override val zoomable get() = true
+    override val zoomed get() = zoom > 1f
 
     override fun zoomBy(factor: Float, x: Float, y: Float) {
-        if (pinch == 1f) {
-            web.pivotX = x
-            web.pivotY = y
-        }
-        pinch = (pinch * factor).coerceIn(MIN_TEXT.toFloat() / s.fontSize, MAX_TEXT.toFloat() / s.fontSize)
-        web.scaleX = pinch
-        web.scaleY = pinch
+        val to = (zoom * factor).coerceIn(1f, MAX_ZOOM)
+        val by = to / zoom
+        tx = x - (x - tx) * by
+        ty = y - (y - ty) * by
+        zoom = to
+        placeZoom()
+    }
+
+    override fun panBy(dx: Float, dy: Float) {
+        tx += dx
+        ty += dy
+        placeZoom()
     }
 
     override fun zoomEnd() {
-        val size = ((s.fontSize * pinch / TEXT_STEP).roundToInt() * TEXT_STEP).coerceIn(MIN_TEXT, MAX_TEXT)
-        pinch = 1f
-        web.scaleX = 1f
-        web.scaleY = 1f
-        if (size == s.fontSize) return
-        s.fontSize = size
-        applySettings()
+        if (zoom < SNAP_ZOOM) resetZoom()
+    }
+
+    /** Shows the page where [tx] and [ty] and the size say it is, kept on the screen. */
+    private fun placeZoom() {
+        tx = tx.coerceIn(web.width * (1 - zoom), 0f)
+        ty = ty.coerceIn(web.height * (1 - zoom), 0f)
+        web.pivotX = 0f
+        web.pivotY = 0f
+        web.scaleX = zoom
+        web.scaleY = zoom
+        web.translationX = tx
+        web.translationY = ty
+    }
+
+    /** Shows the page whole again. */
+    private fun resetZoom() {
+        zoom = 1f
+        tx = 0f
+        ty = 0f
+        placeZoom()
     }
 
     override fun seekTo(fraction: Float) {
+        resetZoom()
         atEnd = fraction >= 1f
         val (index, inChapter) = place(fraction)
         if (index == chapter && ready) {
@@ -452,9 +495,10 @@ class FlowEngine(
         }
         // In vertical mode the WebView receives the touch itself and follows links natively; all
         // that is asked here is whether there is a link, which is not also a tap for the page or the menu.
-        val d = act.resources.displayMetrics.density
+        // A page enlarged is asked about the place of its own that was tapped.
+        val d = act.resources.displayMetrics.density * zoom
         val ask = if (s.vertical) "linked" else "tap"
-        web.evaluateJavascript("window.__r?__r.$ask(${x / d},${y / d}):false") { done(it == "true") }
+        web.evaluateJavascript("window.__r?__r.$ask(${(x - tx) / d},${(y - ty) / d}):false") { done(it == "true") }
     }
 
     override fun close() {
@@ -544,7 +588,11 @@ class FlowEngine(
             }
         }
 
-        /** The sizes a pinch can give the text, in percent, as the slider in the settings does (OptionsPanel). */
+        /** The most a pinch enlarges the page, and the least it is left enlarged by rather than shown whole. */
+        private const val MAX_ZOOM = 4f
+        private const val SNAP_ZOOM = 1.1f
+
+        /** The sizes the text can have, in percent, as the slider in the settings gives them (OptionsPanel). */
         const val MIN_TEXT = 50
         const val MAX_TEXT = 300
         const val TEXT_STEP = 5
@@ -584,6 +632,8 @@ class FlowEngine(
         + 'border-color:' + c.fg + '!important;}a,a *{color:' + c.link + '!important;}';
     }
     s += 'body,body *{line-height:' + c.lh + '!important;}';
+    // The pictures are seen in the warm light, as the page is (see lamp).
+    if (c.lamp) s += 'img,svg:not(#readyLamp),video,canvas{filter:url(#readyLampLight)!important;}';
     // Words are broken at the ends of the lines as readily as the reader asked: hy says how many
     // letters a word must have, and keep before and after the break; none, and they are broken
     // only where the book itself marks it.
@@ -615,6 +665,29 @@ class FlowEngine(
         + 'column-fill:auto!important;overflow:visible!important;}';
     }
     return s;
+  }
+
+  // The warm light on the pictures: a filter that leaves as much of each of their colours as the
+  // light has of it, made once and changed with the light. It is drawn into a picture once, as the
+  // picture is, and costs nothing as the page stands or turns.
+  var lampSvg = null;
+  function lamp(rgb) {
+    if (!rgb) return;
+    var ns = 'http://www.w3.org/2000/svg';
+    if (!lampSvg) {
+      lampSvg = document.createElementNS(ns, 'svg');
+      lampSvg.setAttribute('id', 'readyLamp');
+      lampSvg.setAttribute('style', 'position:absolute;top:0;left:0;width:0;height:0;overflow:hidden;');
+      var f = document.createElementNS(ns, 'filter');
+      f.setAttribute('id', 'readyLampLight');
+      f.setAttribute('color-interpolation-filters', 'sRGB');
+      f.appendChild(document.createElementNS(ns, 'feColorMatrix')).setAttribute('type', 'matrix');
+      lampSvg.appendChild(f);
+      document.body.appendChild(lampSvg);
+    }
+    var v = rgb.split(' ');
+    lampSvg.getElementsByTagNameNS(ns, 'feColorMatrix')[0].setAttribute('values',
+      v[0] + ' 0 0 0 0 0 ' + v[1] + ' 0 0 0 0 0 ' + v[2] + ' 0 0 0 0 0 1 0');
   }
 
   // The pages sit side by side in columns; showing one moves the text rather than scrolling the
@@ -672,6 +745,7 @@ class FlowEngine(
     var root = document.documentElement;
     if (c.lang && !root.getAttribute('lang') && !root.getAttribute('xml:lang')) root.setAttribute('lang', c.lang);
     st.textContent = css(c, R.W, R.H);
+    lamp(c.lamp);
     edge.style.left = '0';
     shift(0);
     window.scrollTo(0, 0);

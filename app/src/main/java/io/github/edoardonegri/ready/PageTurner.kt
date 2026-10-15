@@ -129,10 +129,7 @@ class PageTurner(
      */
     private fun place(): String? {
         if (engine()?.zoomed == true) return null
-        return listOf(
-            chapter, fraction, s.fontSize, s.lineSpacing, s.marginH, s.marginV, s.font, s.fontFile, s.hyphenation,
-            s.darkMode, s.warmth, s.infoLayout, content.width, content.height,
-        ).joinToString(":")
+        return listOf(chapter, fraction, s.look, content.width, content.height).joinToString(":")
     }
 
     /**

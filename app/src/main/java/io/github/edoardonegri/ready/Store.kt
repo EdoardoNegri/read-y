@@ -34,6 +34,7 @@ class ReadyApp : Application() {
         if (level != TRIM_MEMORY_UI_HIDDEN) {
             KeptBook.drop()
             BookPrep.drop()
+            BookOpening.forget()
             FlowEngine.release()
         }
         Library.trim(level)

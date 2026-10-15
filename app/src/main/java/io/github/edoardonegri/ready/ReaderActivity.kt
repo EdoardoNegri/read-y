@@ -2,11 +2,17 @@ package io.github.edoardonegri.ready
 
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.view.KeyEvent
+import android.view.PixelCopy
+import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -18,11 +24,11 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.createBitmap
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.core.view.doOnPreDraw
 import androidx.core.view.isVisible
 import java.io.File
 import kotlin.math.abs
@@ -84,6 +90,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         fromShelf = intent.getBooleanExtra(EXTRA_FROM_SHELF, false)
         // Started behind the book opening on the shelf, the reader is not seen until the book is open.
         val handoff = if (behindOpening) BookOpening.handoff else null
+        this.handoff = handoff
         if (handoff != null) {
             hidden = true
             window.attributes = window.attributes.apply { alpha = 0f }
@@ -200,9 +207,10 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
 
         applyBrightness()
         applyLayout()
-        // Once the page is laid out and drawn, unseen, the book opens on the shelf; the text is
-        // set out behind it meanwhile, and the reader shows itself when the book is open.
-        if (handoff != null) root.doOnPreDraw { root.post { handoff.ready(::reveal) } }
+        // Once the page is set out and drawn, unseen, the book opens on the shelf onto a picture of
+        // it (see shown), and the reader shows itself when the book is open; not later than this
+        // all the same, should the page never be set out.
+        if (handoff != null) root.postDelayed({ pictured(null) }, SHOW_WAIT_MS)
         if (!s.hintShown) {
             s.hintShown = true
             Toast.makeText(this, R.string.reader_hint, Toast.LENGTH_LONG).show()
@@ -300,14 +308,56 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     /** Whether the reader is still waiting, unseen, for its book to open on the shelf. */
     private var hidden = false
 
+    /** The book opening on the shelf that the reader waits for, unseen, until it has pictured its page for it. */
+    private var handoff: BookOpening.Handoff? = null
+
+    override fun shown() {
+        if (handoff == null || !hidden) return
+        // Two frames on, the page is on the screen to be copied.
+        root.postOnAnimation { root.postOnAnimation { capture(::pictured) } }
+    }
+
+    /** Hands [print], the page as it is seen, to the book opening on the shelf, after which the reader shows itself. */
+    private fun pictured(print: Bitmap?) {
+        val h = handoff ?: return
+        handoff = null
+        h.pictured(print)
+        h.ready(::reveal)
+    }
+
+    /**
+     * A copy of the window as it is drawn now, for [then]: copied from the screen, which shows
+     * what the web view draws as no drawing of the page in memory does, and is as cheap as it
+     * gets. Null if one cannot be had.
+     */
+    private fun capture(then: (Bitmap?) -> Unit) {
+        if (Build.VERSION.SDK_INT < 26) return then(content.picture())
+        if (root.width == 0 || root.height == 0) return then(null)
+        val bmp = try {
+            createBitmap(root.width, root.height)
+        } catch (e: OutOfMemoryError) {
+            return then(null)
+        }
+        try {
+            PixelCopy.request(window, bmp, { then(if (it == PixelCopy.SUCCESS) bmp else null) }, Handler(Looper.getMainLooper()))
+        } catch (e: IllegalArgumentException) {
+            // Nothing is drawn in the window yet.
+            then(null)
+        }
+    }
+
     /** Shows the reader, once its book has opened on the shelf, and makes it a solid window again. */
     private fun reveal() {
         if (!hidden || isFinishing) return
         hidden = false
         window.attributes = window.attributes.apply { alpha = 1f }
         window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
-        // The shelf under it need no longer be drawn.
-        if (Build.VERSION.SDK_INT >= 30) setTranslucent(false)
+        // The shelf under it need no longer be drawn: once the reader is seen, two frames on. Made
+        // solid at once, the shelf and the book opening on it would be hidden while the reader is
+        // still unseen, and a frame would show neither.
+        if (Build.VERSION.SDK_INT >= 30) {
+            root.postOnAnimation { root.postOnAnimation { if (!isFinishing) setTranslucent(false) } }
+        }
     }
 
     override fun reopen() {
@@ -329,11 +379,45 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
 
     /** Back to the shelf. */
     private fun leave() {
+        if (leaving) return
+        leaving = true
         // Left before its book had opened on the shelf, the reader does not wait for that any more.
         if (hidden) BookOpening.handoff = null
-        // The shelf closes the book from the page it was at. It stands upright, so a page read sideways does not fit it.
-        // The picture is of the page alone, without the menu, in the warm light it was read in.
-        if (fromShelf && content.width < content.height) content.picture()?.let { BookOpening.left = BookOpening.Left(file, it) }
+        // The shelf closes the book from the page it was at, as it is seen, but for the menu.
+        if (!fromShelf || hidden) return goBack(null)
+        if (!menu.isVisible) return capture(::upright)
+        menu.visibility = View.GONE
+        root.postOnAnimation { root.postOnAnimation { capture(::upright) } }
+    }
+
+    /**
+     * Goes back to the shelf with [page], turned upright if it was read sideways: the shelf stands
+     * upright, and the page is shown on it as it was seen in the hand, turned as the screen was.
+     */
+    private fun upright(page: Bitmap?) {
+        if (page == null || page.width < page.height) return goBack(page)
+        @Suppress("DEPRECATION")
+        val rotation = if (Build.VERSION.SDK_INT >= 30) display?.rotation else windowManager.defaultDisplay.rotation
+        val turn = Matrix().apply { setRotate(if (rotation == Surface.ROTATION_270) -90f else 90f) }
+        val turned = try {
+            Bitmap.createBitmap(page, 0, 0, page.width, page.height, turn, true)
+        } catch (e: OutOfMemoryError) {
+            null
+        }
+        // Only a page read upright is opened on again, which looks as it would be read.
+        goBack(turned, keep = false)
+    }
+
+    /** The reader is on its way back to the shelf, see [leave]. */
+    private var leaving = false
+
+    /** Goes back to the shelf, which closes the book from [page], the page it was left at as it was seen, if there is one. */
+    private fun goBack(page: Bitmap?, keep: Boolean = true) {
+        if (page != null) {
+            BookOpening.left = BookOpening.Left(file, page)
+            // Opened again next, the book opens on it at once.
+            if (keep) BookOpening.keep(file, s.look, page)
+        }
         // A book opened on the home screen is closed on the bookshelf all the same: on the shelf it
         // stands on, in place of whatever else was open there.
         if (fromWidget) startActivity(
@@ -587,6 +671,9 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         const val EXTRA_FROM_WIDGET = "fromWidget"
 
         private const val SAVE_EVERY_MS = 30_000L
+
+        /** The longest the book opening on the shelf waits for the reader's page, see [pictured]. */
+        private const val SHOW_WAIT_MS = 2500L
 
         /** How near the place the knob was let go the book must tell it is, and how long it has to get there. */
         private const val SEEK_NEAR = 0.03f

@@ -126,7 +126,7 @@ class WidgetOpenActivity : AppCompatActivity() {
     /** Opens the book whose cover [cover] shows, on paper of the colour [paper], and hands it to the reader. */
     private fun openBook(book: File, cover: View, paper: Int) {
         if (Build.VERSION.SDK_INT < 30) {
-            BookOpening(this).open(cover, paper) { read(book) }
+            BookOpening(this).open(cover, paper, BookOpening.kept(book, ReaderSettings(this).look), bare = false) { read(book) }
             return
         }
         // The reader starts at once, unseen over the book opening, and sets out its page
@@ -136,7 +136,7 @@ class WidgetOpenActivity : AppCompatActivity() {
         val handoff = BookOpening.Handoff()
         BookOpening.handoff = handoff
         read(book, handoff)
-        BookOpening.Detached(this).also { detached = it }.open(cover, paper, handoff::opened)
+        BookOpening.Detached(this).also { detached = it }.open(cover, paper, book, ReaderSettings(this).look, handoff)
     }
 
     /** The book opening while the reader starts over it, see [openBook]. */

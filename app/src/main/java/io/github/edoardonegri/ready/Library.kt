@@ -894,16 +894,15 @@ object Library {
 
     /**
      * Decodes the cover the book is shown with: the one it was given, or else the one written by
-     * [meta]. From Android 9 on it is kept by the drawing hardware alone, so it takes no room in
-     * the app's own memory and needs no copying there as it first comes into view; a picture
-     * drawn in memory, as the miniatures of the shelves are, draws [coverToDraw] instead. Blocking.
+     * [meta]. It is kept in the app's own memory rather than by the drawing hardware alone: some
+     * phones leave a picture kept there out of a snapshot of the shelf (View.snapshot), which the
+     * shelves zoom and the books open from. Blocking.
      */
     fun cover(ctx: Context, f: File): Bitmap? {
         cachedCover(f)?.let { return it }
-        val opts = if (Build.VERSION.SDK_INT >= 28) BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.HARDWARE } else null
-        val bmp = decodeCover(ctx, f, opts) ?: return null
+        val bmp = decodeCover(ctx, f) ?: return null
         // Handed to the drawing hardware now, rather than as it first comes into view.
-        if (Build.VERSION.SDK_INT < 28) bmp.prepareToDraw()
+        bmp.prepareToDraw()
         bitmaps.put(coverKey(f), bmp)
         return bmp
     }

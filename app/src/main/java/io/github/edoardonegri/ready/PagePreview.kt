@@ -21,8 +21,8 @@ import kotlin.math.roundToInt
 /**
  * The page of a book as the reader would show it, in the settings, to see what they do: a sample
  * book laid out by the reader's own engine, as wide as the reader's screen is in the turn the
- * reader would give it, with what is shown around the text, and the phone's camera cutting into
- * the screen where it would. It is as tall as there is room for, and shown smaller where the
+ * reader would give it, with what is shown around the text, and the room the phone's camera takes
+ * from the screen left where it would be. It is as tall as there is room for, and shown smaller where the
  * screen is wider than that room, as it is turned on its side. Its pages turn, or scroll, as the
  * reader's do.
  */
@@ -185,7 +185,6 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         if (screenW == 0 || screenH == 0) return
         arranged = "${screenW}x$screenH"
         val c = shownCutout()
-        info.shownCutout = c
         val (top, bottom) = info.arrange(screenW, screenH, c, s.infoUsed(), infoSide(s, true, resources), engine?.innerMargin ?: 0)
         content.setPadding(c.insets.left, c.insets.top + top, c.insets.right, c.insets.bottom + bottom)
     }

@@ -68,6 +68,15 @@ class ReaderSettings(ctx: Context) {
 
     fun setInfoAt(item: InfoItem, place: Int) = p.edit { putInt(INFO + item.key, place) }
 
+    /**
+     * How a page looks, but for where in the book it is, as one word: a picture of a page is shown
+     * again only for one that looks the same.
+     */
+    val look: String
+        get() = listOf(
+            fontSize, lineSpacing, marginH, marginV, font, fontFile, hyphenation, darkMode, warmth, infoLayout, orientation, vertical,
+        ).joinToString(":")
+
     /** Where everything is shown around the text, as one word: a picture of a page is shown again only for one laid out the same. */
     val infoLayout: String get() = if (!showPage) "" else InfoItem.entries.joinToString("") { infoAt(it).toString() }
 

@@ -47,6 +47,9 @@ class PageEngine(
 
     /** A book of one page has been taken to its end, by the seek bar or by being marked as read. */
     private var atEnd = start.percent >= Library.FINISHED_AT
+
+    /** Whether the host was told the first page is shown (ReaderHost.shown). */
+    private var told = false
     private var filter: ColorFilter? = null
 
     @Volatile
@@ -145,6 +148,10 @@ class PageEngine(
                         it.img.ratio = ratios[i]
                         it.img.setImageBitmap(result)
                     }
+                }
+                if (!told && (s.vertical || i == page)) {
+                    told = true
+                    host.shown()
                 }
             }
         }

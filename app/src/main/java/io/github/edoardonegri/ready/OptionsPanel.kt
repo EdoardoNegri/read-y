@@ -105,14 +105,14 @@ class OptionsPanel(
                 s.marginV = it
                 onLayout()
             }
-            label(t(R.string.opt_font))
-            fonts = BrassDropdown(ctx) { pickFont(it, onLayout) }
-            section.addView(fonts, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)).apply { topMargin = dp(4) })
-            showFonts()
             slider(t(R.string.opt_hyphenation), 0, ReaderSettings.HYPHENATION_MAX, 1, s.hyphenation, false, { t(HYPHENATION[it]) }) {
                 s.hyphenation = it
                 onLayout()
             }
+            label(t(R.string.opt_font))
+            fonts = BrassDropdown(ctx) { pickFont(it, onLayout) }
+            section.addView(fonts, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)).apply { topMargin = dp(4) })
+            showFonts()
         }
 
         section(t(R.string.opt_turning))
@@ -120,16 +120,15 @@ class OptionsPanel(
         toggle(t(R.string.opt_tap_sides), s.tapToTurn) { s.tapToTurn = it }
         toggle(t(R.string.opt_reverse_swipe), s.reverseSwipe) { s.reverseSwipe = it }
         toggle(t(R.string.opt_volume_up), s.volumeUpNext) { s.volumeUpNext = it }
-        // Only where the screen can be drawn at more than one rate.
+        // Only where the screen can be drawn at more than one rate; it is drawn so in the reader alone.
         val act = ctx as? Activity
         val rates = act?.let { ReaderSettings.refreshRates(it) }.orEmpty()
         if (act != null && rates.size > 1) {
             val values = listOf(0) + rates
             val labels = listOf(t(R.string.refresh_auto)) + rates.map { ctx.getString(R.string.refresh_hz, it) }
             val now = values.indexOf(s.refreshRate).takeIf { it >= 0 } ?: values.indices.minBy { abs(values[it] - s.refreshRate) }
-            choice(t(R.string.opt_refresh_rate), labels, now) {
+            slider(t(R.string.opt_refresh_rate), 0, values.lastIndex, 1, now, false, { labels[it] }) {
                 s.refreshRate = values[it]
-                s.refresh(act)
             }
         }
     }
@@ -157,14 +156,6 @@ class OptionsPanel(
         into.addView(row)
     }
 
-    /** [items] to choose one of: brass buttons side by side where there are few, else a menu. */
-    private fun choice(name: String, items: List<String>, selected: Int, onChange: (Int) -> Unit) {
-        if (items.size <= MAX_BUTTONS) return buttons(name, items, selected, onChange)
-        label(name)
-        val menu = BrassDropdown(ctx, onChange)
-        section.addView(menu, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)).apply { topMargin = dp(4) })
-        menu.show(items, selected)
-    }
 
     private fun dp(v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
 
@@ -341,8 +332,5 @@ class OptionsPanel(
 
         /** How wide the menu of the place of something shown around the text is, in dp. */
         const val PLACE_DP = 176
-
-        /** The most choices shown as buttons side by side, rather than in a menu. */
-        const val MAX_BUTTONS = 4
     }
 }

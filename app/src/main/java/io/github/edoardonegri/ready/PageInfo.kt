@@ -3,12 +3,8 @@ package io.github.edoardonegri.ready
 import android.content.Context
 import android.content.res.Resources
 import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.Rect
-import android.graphics.RectF
 import android.graphics.Typeface
 import android.text.TextPaint
 import android.text.TextUtils
@@ -125,18 +121,15 @@ private fun duration(ctx: Context, minutes: Float): String {
 
 /**
  * The parts of the screen a camera takes from it: how far in from each edge the page keeps clear
- * of them ([insets]), the bounds of each ([holes]) and, where the phone tells it, their outline
- * ([path]), in the coordinates of the page.
+ * of them ([insets]), and the bounds of each ([holes]), in the coordinates of the page.
  */
-class Cutout(val insets: Rect = Rect(), val holes: List<Rect> = emptyList(), val path: Path? = null) {
+class Cutout(val insets: Rect = Rect(), val holes: List<Rect> = emptyList()) {
     /** The same cutout on the screen turned a quarter to the left, as for landscape, the upright screen being [w] wide. */
     fun turned(w: Int): Cutout {
         // A point (x, y) of the upright screen comes to (y, w - x).
-        val turn = Matrix().apply { setValues(floatArrayOf(0f, 1f, 0f, -1f, 0f, w.toFloat(), 0f, 0f, 1f)) }
         return Cutout(
             Rect(insets.top, insets.right, insets.bottom, insets.left),
             holes.map { Rect(it.top, w - it.right, it.bottom, w - it.left) },
-            path?.let { Path(it).apply { transform(turn) } },
         )
     }
 }
@@ -156,8 +149,6 @@ class PageInfoView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         typeface = Typeface.SERIF
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, TEXT_SP, resources.displayMetrics)
     }
-    private val black = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
-    private val hollow = RectF()
 
     /** The colour of the print. */
     var color: Int
@@ -165,16 +156,6 @@ class PageInfoView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         set(value) {
             if (paint.color == value) return
             paint.color = value
-            invalidate()
-        }
-
-    /**
-     * The camera's cutout, drawn in black where the page stands for a screen (PagePreview); none
-     * on the screen itself, which has it.
-     */
-    var shownCutout: Cutout? = null
-        set(value) {
-            field = value
             invalidate()
         }
 
@@ -292,15 +273,6 @@ class PageInfoView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     }
 
     override fun onDraw(canvas: Canvas) {
-        shownCutout?.let { c ->
-            val outline = c.path
-            if (outline != null) canvas.drawPath(outline, black)
-            else for (hole in c.holes) {
-                val round = min(hole.width(), hole.height()) / 2f
-                hollow.set(hole)
-                canvas.drawRoundRect(hollow, round, round, black)
-            }
-        }
         for (place in 1 until InfoPlace.COUNT) {
             val text = texts[place] ?: continue
             val room = ends[place] - starts[place]

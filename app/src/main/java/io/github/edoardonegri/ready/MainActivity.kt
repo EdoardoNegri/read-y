@@ -357,26 +357,22 @@ class MainActivity : AppCompatActivity() {
         refresh()
         val index = adapter.indexOf(left)
         if (snapshot == null || index < 0) return
-        // Keep showing the shelf being left until the parent is laid out and its miniature can be found.
-        shelf.animate().cancel()
-        ghost.animate().cancel()
-        ghost.scaleX = 1f
-        ghost.scaleY = 1f
-        ghost.alpha = 1f
-        ghost.translationZ = 1f
-        ghost.setImageBitmap(snapshot)
-        ghost.visibility = View.VISIBLE
+        // Keep showing the shelf being left until the parent is laid out, its miniature can be
+        // found, and its places show their covers.
+        cover(snapshot)
         shelf.scrollToPosition(index)
         shelf.doOnPreDraw {
-            val thumbnail = shelf.findViewHolderForAdapterPosition(index)?.itemView?.findViewById<View>(R.id.cover)
-            if (thumbnail != null) zoom(locate(thumbnail), snapshot, opening = false) else hideGhost()
+            whenShown {
+                val thumbnail = shelf.findViewHolderForAdapterPosition(index)?.itemView?.findViewById<View>(R.id.cover)
+                if (thumbnail != null) zoom(locate(thumbnail), snapshot, opening = false) else hideGhost()
+            }
         }
     }
 
     private fun open(f: File, from: View? = null) {
         // While things are chosen a tap chooses more; a shelf is opened with two.
         if (picked != null) return if (f.isFolder) tapShelf(f, from) else pick(f)
-        if (f.isFolder) enter(f, from) else read(f, from)
+        if (f.isFolder) enter(f, from) else read(f, from?.findViewById(R.id.cover))
     }
 
     /** The shelf tapped once while things are chosen, which is chosen unless it is tapped again at once. */
@@ -394,12 +390,15 @@ class MainActivity : AppCompatActivity() {
         shelf.postDelayed(tappedOnce, ViewConfiguration.getDoubleTapTimeout().toLong())
     }
 
-    /** Opens the book [f] in the reader, out of its place [from] on the shelf if that is given. */
-    private fun read(f: File, from: View?) {
+    /**
+     * Opens the book [f] in the reader, out of [cover], its cover on the shelf or whatever else it
+     * is opened from, if that is given; as a [bare] page growing out of it, without the book opening.
+     */
+    private fun read(f: File, cover: View?, bare: Boolean = false) {
         // The book is read in the background meanwhile, rather than by the reader as it starts.
         BookPrep.prepare(f)
         val reader = Intent(this, ReaderActivity::class.java).putExtra(ReaderActivity.EXTRA_PATH, f.path)
-        val cover = from?.findViewById<View>(R.id.cover) ?: return startActivity(reader)
+        if (cover == null) return startActivity(reader)
         // The book opens on the shelf, and the reader takes over once its page fills the screen.
         val settings = ReaderSettings(this)
         val paper = settings.lit(settings.palette.bg)
@@ -413,10 +412,10 @@ class MainActivity : AppCompatActivity() {
                     .putExtra(ReaderActivity.EXTRA_FROM_SHELF, true).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION),
             )
             // It opens in a window of its own, which the reader starting meanwhile does not hold up.
-            detached.open(cover, paper, handoff::opened)
+            detached.open(cover, paper, f, settings.look, handoff, bare)
             return
         }
-        opening.open(cover, paper) {
+        opening.open(cover, paper, BookOpening.kept(f, settings.look), bare) {
             startActivity(reader.putExtra(ReaderActivity.EXTRA_FROM_SHELF, true).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION))
         }
     }
@@ -432,7 +431,9 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 if (last == null) return@runOnUiThread toast(R.string.nothing_read)
-                read(last, shelf.findViewHolderForAdapterPosition(adapter.indexOf(last))?.itemView)
+                // Its page grows out of the button, wherever the book stands; it is closed on its
+                // own shelf, see closeBook.
+                read(last, findViewById(R.id.resume), bare = true)
             }
         }
     }
@@ -456,6 +457,10 @@ class MainActivity : AppCompatActivity() {
 
     /** The reader came back with [left], the page its book was at: the book closes from it, where it stands. */
     private fun closeBook(left: BookOpening.Left) {
+        // Opened from elsewhere than its place in view, such as the button that goes on with the
+        // last book read, it goes back to the shelf it stands on all the same.
+        val at = adapter.indexOf(left.file)
+        if (at < 0) showShelfOf(left.file) else shelf.scrollToPosition(at)
         val settings = ReaderSettings(this)
         opening.close(left.page, settings.lit(settings.palette.bg)) {
             shelf.findViewHolderForAdapterPosition(adapter.indexOf(left.file))?.itemView?.findViewById(R.id.cover)
@@ -469,9 +474,11 @@ class MainActivity : AppCompatActivity() {
         current = dir
         refresh()
         shelf.scrollToPosition(0)
-        // Start only once the folder's books are laid out, so no frame shows the old shelf shrunk.
+        // Start only once the folder's books are laid out and show their covers, so no frame shows
+        // the old shelf shrunk or an empty place; the shelf being left stays in view until then.
         if (miniature != null && snapshot != null) {
-            shelf.doOnPreDraw { zoom(miniature, snapshot, opening = true) }
+            cover(snapshot)
+            shelf.doOnPreDraw { whenShown { zoom(miniature, snapshot, opening = true) } }
         }
     }
 
@@ -775,7 +782,9 @@ class MainActivity : AppCompatActivity() {
         // are carried over shows in full, and they themselves let it show through. Put down
         // again, they are bright once more and the rest faint.
         (from as? ViewGroup)?.let { for (i in 0 until it.childCount) it.getChildAt(i).alpha = 1f }
-        val shadow = from.snapshot()?.let { InHand(it) } ?: View.DragShadowBuilder(from)
+        // Only the book is taken in hand, not its place on the shelf with the plaque under it.
+        val book = from.findViewById<View>(R.id.cover) ?: from
+        val shadow = book.snapshot()?.let { InHand(it) } ?: View.DragShadowBuilder(book)
         adapter.moving = true
         // The miniatures of the shelves no longer show what is taken from them.
         Library.carried = set.toSet()
@@ -1055,6 +1064,32 @@ class MainActivity : AppCompatActivity() {
         ghostMove.start()
     }
 
+    /** Shows [snapshot], of the shelf being left, over the one coming, until the two change places (see [zoom]). */
+    private fun cover(snapshot: Bitmap) {
+        shelf.animate().cancel()
+        ghost.animate().cancel()
+        ghost.scaleX = 1f
+        ghost.scaleY = 1f
+        ghost.alpha = 1f
+        ghost.clipBounds = null
+        ghost.translationZ = 1f
+        ghost.setImageBitmap(snapshot)
+        ghost.visibility = View.VISIBLE
+    }
+
+    /**
+     * Calls [then] once every place in view on the shelf shows its cover or miniature, which load
+     * in the background; or after [SHOWN_WAIT_MS] at most, for any that will not.
+     */
+    private fun whenShown(then: () -> Unit) {
+        val until = SystemClock.uptimeMillis() + SHOWN_WAIT_MS
+        fun check() {
+            if (isDestroyed) return
+            if (adapter.allShown(shelf) || SystemClock.uptimeMillis() >= until) then() else shelf.postOnAnimation { check() }
+        }
+        check()
+    }
+
     private fun hideGhost() {
         ghost.visibility = View.GONE
         ghost.setImageBitmap(null)
@@ -1314,6 +1349,9 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_COVER = "cover"
         private const val TYPING_MS = 200L
         private const val ZOOM_MS = 560L
+
+        /** The longest a change of shelf waits for the covers of the one coming to be shown, see whenShown. */
+        private const val SHOWN_WAIT_MS = 400L
         private const val MOVE_MS = 180L
         private const val OPEN_MS = 700L
 

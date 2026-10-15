@@ -32,6 +32,9 @@ interface ReaderHost {
     /** What [hold] put in front of the page may go: the engine shows its page again. */
     fun release() {}
 
+    /** The engine shows its first page now, drawn in full in the next frame. */
+    fun shown() {}
+
     /**
      * The engine cannot show the book any more, e.g. as the phone ended the process its pages
      * were drawn in to have its memory back: it is to be closed, and the book opened anew.

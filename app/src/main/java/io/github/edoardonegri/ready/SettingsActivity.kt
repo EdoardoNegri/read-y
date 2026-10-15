@@ -1,7 +1,6 @@
 package io.github.edoardonegri.ready
 
 import android.graphics.Rect
-import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.widget.ImageButton
@@ -34,10 +33,9 @@ class SettingsActivity : AppCompatActivity() {
             val i = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             v.setPadding(i.left, 0, i.right, i.bottom)
             bar.padRail(i.top)
-            // The sample page has the camera where the reader's screen has it.
+            // The sample page leaves the room the camera takes where the reader's screen does.
             val c = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
-            val outline = if (Build.VERSION.SDK_INT >= 31) insets.toWindowInsets()?.displayCutout?.cutoutPath else null
-            preview.cutout = Cutout(Rect(c.left, c.top, c.right, c.bottom), insets.displayCutout?.boundingRects.orEmpty(), outline)
+            preview.cutout = Cutout(Rect(c.left, c.top, c.right, c.bottom), insets.displayCutout?.boundingRects.orEmpty())
             insets
         }
         findViewById<TextView>(R.id.barTitle).apply {
@@ -64,8 +62,6 @@ class SettingsActivity : AppCompatActivity() {
         }.build(epub = true, ::applyBrightness, ::applyPage)
         preview.open(this, s)
         applyBrightness()
-        // The page in the settings turns at the rate the reader's do.
-        s.refresh(this)
     }
 
     override fun onResume() {

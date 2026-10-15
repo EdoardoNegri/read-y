@@ -149,6 +149,15 @@ class ShelfAdapter(
         h.plaque.contentDescription = h.itemView.resources.getString(R.string.a11y_details, name)
     }
 
+    /** Whether every place [shelf] shows has its cover or miniature by now, which load in the background. */
+    fun allShown(shelf: RecyclerView): Boolean {
+        for (i in 0 until shelf.childCount) {
+            val h = shelf.getChildViewHolder(shelf.getChildAt(i)) as? Holder ?: continue
+            if (h.cover.drawable == null) return false
+        }
+        return true
+    }
+
     private companion object {
         const val FAINT = 0.4f
     }
@@ -168,8 +177,9 @@ class ShelfAdapter(
             onPickUp(f, h.itemView)
             true
         }
-        // What is carried leaves its place empty. Its parts are hidden rather than the place as a
-        // whole, which the list makes visible again whenever it moves it.
+        // What is carried leaves the place it would be put down in empty: it is only seen in the
+        // hand. Its parts are hidden rather than the place as a whole, which the list makes
+        // visible again whenever it moves it.
         val carried = f in carried
         val place = h.itemView as ViewGroup
         val faint = !moving && picked.let { it != null && f !in it }

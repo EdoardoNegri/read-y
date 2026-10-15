@@ -21,7 +21,6 @@ import androidx.appcompat.widget.AppCompatImageView
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.withClip
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 /**
  * A picture of this view as it is drawn now, on [reuse] if that has the size for it. Null if the
@@ -345,6 +344,8 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         return true
     }
 
+    override fun performClick(): Boolean = super.performClick()
+
     private companion object {
         val PLAIN: Typeface = Typeface.create(Typeface.SERIF, Typeface.NORMAL)
         val BOLD: Typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
@@ -472,7 +473,8 @@ class GestureFrame @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
                 }
             }
         }
-        return consumeAll || super.dispatchTouchEvent(ev) || true
+        // An enlarged page is moved about by the fingers, not scrolled by itself under them.
+        return consumeAll || zoomable && l?.zoomed() == true || super.dispatchTouchEvent(ev) || true
     }
 }
 
