@@ -12,7 +12,7 @@ import java.nio.charset.Charset
  * parts where the book asks for a new page. Books in the later KF8 form alone, and those packed
  * with the rarer Huffman scheme, cannot be read.
  */
-class MobiBook(file: File) : FlowBook {
+class MobiBook(file: File) : PartedBook() {
     private val data = Store.open(file)
 
     /** Where each record starts, and after the last one where the file ends. */
@@ -24,11 +24,7 @@ class MobiBook(file: File) : FlowBook {
     override var author = ""
     override var published = ""
         private set
-    override val spine = ArrayList<String>()
-    override val toc = ArrayList<TocEntry>()
-    override val weights: LongArray
     override val pageWeight get() = 2400
-    private val parts = ArrayList<ByteArray>()
 
     init {
         try {
@@ -65,7 +61,6 @@ class MobiBook(file: File) : FlowBook {
                 if (compression == 2) inflate(r, size, text) else text.add(r, 0, size)
             }
             split(String(text.array, 0, text.size, charset))
-            weights = LongArray(parts.size) { parts[it].size.toLong() }
         } catch (e: Exception) {
             data.close()
             throw e as? IOException ?: IOException("Cannot read the book", e)
@@ -95,7 +90,6 @@ class MobiBook(file: File) : FlowBook {
     /** Cuts the text into parts where the book starts a new page, and long parts once more where a paragraph ends. */
     private fun split(html: String) {
         val body = html.replace(SHELL, "").replace(IMAGE) { "src=\"img/${it.groupValues[1]}\"" }
-        val names = ArrayList<String?>()
         for (page in body.split(BREAK)) {
             var rest = page
             while (rest.isNotBlank()) {
@@ -104,13 +98,11 @@ class MobiBook(file: File) : FlowBook {
                 rest = if (cut < 0) "" else rest.substring(cut + 4)
                 // A page of nothing but tags, such as an empty title page, is left out.
                 if (!piece.contains("<img", true) && piece.replace(TAG, "").isBlank()) continue
-                spine.add("part${parts.size}.html")
-                parts.add(FlowBook.page(piece).toByteArray())
-                names.add(HEADING.find(piece.take(1500))?.groupValues?.get(1)?.replace(TAG, "")?.trim()?.ifEmpty { null })
+                addPart(piece, HEADING.find(piece.take(1500))?.groupValues?.get(1)?.replace(TAG, "")?.trim()?.ifEmpty { null })
             }
         }
-        if (parts.isEmpty()) throw IOException("The book has no text")
-        if (spine.size > 1) spine.forEachIndexed { i, path -> toc.add(TocEntry(names[i].orEmpty(), path, null, 0)) }
+        if (spine.isEmpty()) throw IOException("The book has no text")
+        listParts()
     }
 
     @Synchronized
@@ -122,11 +114,10 @@ class MobiBook(file: File) : FlowBook {
         return bytes
     }
 
-    override fun mimeOf(path: String) = if (path.startsWith("img/")) "image/jpeg" else "text/html"
+    override fun mimeOf(path: String) = if (path.startsWith("img/")) "image/jpeg" else super.mimeOf(path)
 
     override fun stream(path: String): InputStream? = try {
-        if (path.startsWith("img/")) record(firstImage + path.substring(4).toInt() - 1).inputStream()
-        else parts.getOrNull(spine.indexOf(path))?.inputStream()
+        if (path.startsWith("img/")) record(firstImage + path.substring(4).toInt() - 1).inputStream() else super.stream(path)
     } catch (e: Exception) {
         null
     }

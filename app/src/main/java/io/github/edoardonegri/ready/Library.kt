@@ -2,6 +2,7 @@ package io.github.edoardonegri.ready
 
 import android.content.ComponentCallbacks2
 import android.content.Context
+import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -17,7 +18,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
-import android.provider.OpenableColumns
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
@@ -31,6 +31,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
@@ -117,6 +118,9 @@ class ShelfSpec(val width: Int, val columns: Int, val density: Float) {
     companion object {
         /** How many times as tall as wide a book stands on the shelf. */
         const val BOOK = 1.6f
+
+        /** How many places a row of the shelves has on the screen [res] describes: one for every 118 dp of width, and three at least. */
+        fun columns(res: Resources) = (res.configuration.screenWidthDp / 118).coerceAtLeast(3)
     }
 }
 
@@ -135,6 +139,9 @@ object Library {
     private const val AUTHOR = "author:"
     private const val COVER = "cover:"
     private const val WOOD = "wood:"
+
+    /** What is remembered of the shelves and the books by their paths, by its prefix, with the name it has in the backup. */
+    private val BY_PATH = linkedMapOf(ORDER to "orders", TITLE to "titles", AUTHOR to "authors", COVER to "covers", WOOD to "woods")
     private const val FINISHED = "finished"
 
     /** How far into a book it counts as read to the end: the last page, with room for rounding. */
@@ -188,8 +195,7 @@ object Library {
 
     fun root(): File = Store.root()
 
-    @Suppress("UNUSED_PARAMETER")
-    fun hasAccess(ctx: Context): Boolean = Store.hasAccess()
+    fun hasAccess(): Boolean = Store.hasAccess()
 
     /**
      * Makes the folder [uri], which the reader picked, the library. What was remembered about the
@@ -251,7 +257,7 @@ object Library {
     }
 
     fun sort(ctx: Context): Sort =
-        Sort.values().getOrElse(libraryPrefs(ctx).getInt(SORT, 0)) { Sort.MANUAL }
+        Sort.entries.getOrElse(libraryPrefs(ctx).getInt(SORT, 0)) { Sort.MANUAL }
 
     /** Puts the library in the order [sort], the way round that order usually runs. */
     fun setSort(ctx: Context, sort: Sort) {
@@ -278,7 +284,7 @@ object Library {
     private fun order(ctx: Context, dir: File): List<String> {
         val json = libraryPrefs(ctx).getString(ORDER + dir.path, null) ?: return emptyList()
         return try {
-            JSONArray(json).let { a -> List(a.length()) { a.getString(it) } }
+            JSONArray(json).strings()
         } catch (e: Exception) {
             emptyList()
         }
@@ -343,7 +349,7 @@ object Library {
         name.trim().takeIf { it.isNotEmpty() && !it.startsWith(".") && it.none { c -> c == '/' || c == '\\' } }
 
     /** Makes a new shelf, a folder, on the shelf [dir]. False if the name cannot be used or is taken. */
-    fun createShelf(ctx: Context, dir: File, name: String): Boolean {
+    fun createShelf(dir: File, name: String): Boolean {
         val clean = cleanName(name) ?: return false
         val made = Store.mkdir(File(dir, clean))
         if (made) touched(File(dir, clean))
@@ -430,7 +436,7 @@ object Library {
      */
     @Synchronized
     fun adoptBackup(ctx: Context): Boolean {
-        if (adopted || !hasAccess(ctx)) return false
+        if (adopted || !hasAccess()) return false
         adopted = true
         val file = backupFile()
         if (!file.isDoc || sig(file) == libraryPrefs(ctx).getString(BACKUP_SIG, null)) return false
@@ -454,7 +460,7 @@ object Library {
      */
     @Synchronized
     private fun saveBackup(ctx: Context) {
-        if (!hasAccess(ctx)) return
+        if (!hasAccess()) return
         adoptBackup(ctx)
         try {
             val text = backupText(ctx)
@@ -476,27 +482,18 @@ object Library {
         fun set(key: String) = JSONArray(
             (statePrefs(ctx).getStringSet(key, null) ?: emptySet()).filter(::inLibrary).map { it.removePrefix(base) },
         )
-        val orders = JSONObject()
-        val titles = JSONObject()
-        val authors = JSONObject()
-        val covers = JSONObject()
-        val woods = JSONObject()
+        val byPath = BY_PATH.mapValues { JSONObject() }
         for ((key, value) in libraryPrefs(ctx).all) {
             if (value !is String) continue
-            if (key.startsWith(ORDER)) orders.put(key.removePrefix(ORDER).removePrefix(base), value)
-            if (key.startsWith(TITLE)) titles.put(key.removePrefix(TITLE).removePrefix(base), value)
-            if (key.startsWith(AUTHOR)) authors.put(key.removePrefix(AUTHOR).removePrefix(base), value)
-            if (key.startsWith(COVER)) covers.put(key.removePrefix(COVER).removePrefix(base), value)
-            if (key.startsWith(WOOD)) woods.put(key.removePrefix(WOOD).removePrefix(base), value)
+            for ((kind, saved) in byPath) if (key.startsWith(kind)) saved.put(key.removePrefix(kind).removePrefix(base), value)
         }
         val settings = JSONObject()
         for ((key, value) in ctx.applicationContext.getSharedPreferences("reader", Context.MODE_PRIVATE).all) {
             if (value is Int || value is Boolean) settings.put(key, value)
         }
-        val o = JSONObject().put("version", 1).put("positions", positions)
-            .put("favorites", set(FAVORITES))
-            .put("orders", orders).put("titles", titles).put("authors", authors).put("covers", covers).put("woods", woods)
-            .put("sort", sort(ctx).ordinal).put("settings", settings)
+        val o = JSONObject().put("version", 1).put("positions", positions).put("favorites", set(FAVORITES))
+        for ((kind, saved) in byPath) o.put(BY_PATH.getValue(kind), saved)
+        o.put("sort", sort(ctx).ordinal).put("settings", settings)
         if (libraryPrefs(ctx).contains(DESCENDING)) o.put("descending", descending(ctx))
         // Left out until the reader has chosen the books for the widget, which shows the favorites till then.
         if (statePrefs(ctx).contains(WIDGET)) {
@@ -510,7 +507,7 @@ object Library {
     private fun restoreBackup(ctx: Context): Boolean = try {
         val o = JSONObject(Store.readText(backupFile()))
         val base = root().path
-        fun paths(key: String) = o.optJSONArray(key).let { a -> if (a == null) emptySet() else List(a.length()) { base + a.getString(it) }.toHashSet() }
+        fun paths(key: String) = o.optJSONArray(key)?.strings().orEmpty().mapTo(HashSet()) { base + it }
         statePrefs(ctx).edit {
             o.optJSONObject("positions")?.let { for (key in it.keys()) putString(base + key, it.getString(key)) }
             putStringSet(FAVORITES, paths("favorites"))
@@ -518,7 +515,7 @@ object Library {
             if (o.has("finished")) putStringSet(FINISHED, paths("finished"))
             if (o.has("widget")) {
                 // The backup lists them in the order they stand in on the widget.
-                val listed = o.getJSONArray("widget").let { a -> List(a.length()) { base + a.getString(it) } }
+                val listed = o.getJSONArray("widget").strings().map { base + it }
                 putStringSet(WIDGET, listed.toHashSet()).putString(WIDGET_ORDER, JSONArray(listed).toString())
             } else {
                 remove(WIDGET).remove(WIDGET_ORDER)
@@ -528,11 +525,7 @@ object Library {
         forgetStates()
         adoptFinished(ctx)
         libraryPrefs(ctx).edit {
-            o.optJSONObject("orders")?.let { for (key in it.keys()) putString(ORDER + base + key, it.getString(key)) }
-            o.optJSONObject("titles")?.let { for (key in it.keys()) putString(TITLE + base + key, it.getString(key)) }
-            o.optJSONObject("authors")?.let { for (key in it.keys()) putString(AUTHOR + base + key, it.getString(key)) }
-            o.optJSONObject("covers")?.let { for (key in it.keys()) putString(COVER + base + key, it.getString(key)) }
-            o.optJSONObject("woods")?.let { for (key in it.keys()) putString(WOOD + base + key, it.getString(key)) }
+            for ((kind, name) in BY_PATH) o.optJSONObject(name)?.let { for (key in it.keys()) putString(kind + base + key, it.getString(key)) }
             putInt(SORT, o.optInt("sort"))
             if (o.has("descending")) putBoolean(DESCENDING, o.optBoolean("descending")) else remove(DESCENDING)
         }
@@ -572,18 +565,9 @@ object Library {
         val from = if (uri.scheme == "file") uri.path?.let(::File) else Store.locate(uri)
         // A book of the library opened from elsewhere, e.g. a file manager, is read where it stands.
         if (from != null && from.path.startsWith(root().path + File.separator)) return if (isBook(from)) Imported(from, false) else null
-        var name = uri.lastPathSegment?.substringAfterLast('/').orEmpty()
-        var size = -1L
-        if (uri.scheme == "content") try {
-            ctx.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
-                if (c.moveToFirst()) {
-                    c.getString(0)?.let { name = it }
-                    if (!c.isNull(1)) size = c.getLong(1)
-                }
-            }
-        } catch (e: Exception) {
-            // The name is only a nicety.
-        }
+        // The name the other app gives it is only a nicety.
+        val name = (if (uri.scheme == "content") Store.describe(uri).first else null)
+            ?: uri.lastPathSegment?.substringAfterLast('/').orEmpty()
         Store.mkdirs(dir)
         val temp = File(ctx.cacheDir, "import")
         val head = ByteArray(68)
@@ -614,7 +598,7 @@ object Library {
         try {
             if (fresh) temp.inputStream().use { ins -> Store.outputStream(target).use { ins.copyTo(it) } }
             // Only a whole copy lets the file it came from go.
-            if (fresh && Store.length(target) != temp.length()) throw java.io.IOException("Incomplete copy")
+            if (fresh && Store.length(target) != temp.length()) throw IOException("Incomplete copy")
         } catch (e: Exception) {
             Log.w(TAG, "Cannot keep the book $name", e)
             Store.delete(target)
@@ -707,7 +691,7 @@ object Library {
         }
         val library = libraryPrefs(ctx)
         library.edit {
-            for ((key, value) in library.all) for (kind in arrayOf(ORDER, TITLE, AUTHOR, COVER, WOOD)) {
+            for ((key, value) in library.all) for (kind in BY_PATH.keys) {
                 val path = key.removePrefix(kind)
                 if (key.startsWith(kind) && value is String && within(path)) {
                     remove(key)
@@ -988,7 +972,7 @@ object Library {
 
     /** The wood the shelf [dir] is made of. */
     fun wood(ctx: Context, dir: File): Wood =
-        libraryPrefs(ctx).getString(WOOD + dir.path, null)?.let { name -> Wood.values().firstOrNull { it.name == name } }
+        libraryPrefs(ctx).getString(WOOD + dir.path, null)?.let { name -> Wood.entries.firstOrNull { it.name == name } }
             ?: Wood.WALNUT
 
     fun setWood(ctx: Context, dir: File, wood: Wood) {
@@ -1076,7 +1060,7 @@ object Library {
                 )
             } else {
                 name = meta(ctx, f).title
-                paint.color = 0xFF24160D.toInt()
+                paint.color = ShelfArt.LEATHER
                 c.drawRect(cover, paint)
                 coverToDraw(ctx, f)?.let { drawCropped(c, it, cover, paint) }
                 ShelfArt.drawBinding(c, cover, spec.density, paint)
@@ -1288,7 +1272,7 @@ object Library {
             for (name in arrayOf("library", "state", "meta", "reader", "widget")) ctx.getSharedPreferences(name, Context.MODE_PRIVATE)
             upgrade(ctx)
             withStates(ctx) {}
-            if (hasAccess(ctx)) {
+            if (hasAccess()) {
                 Store.list(root())
                 adoptBackup(ctx)
             }
@@ -1304,9 +1288,8 @@ object Library {
         @Suppress("DEPRECATION")
         when {
             level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE -> bitmaps.evictAll()
-            level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND -> bitmaps.trimToSize(bitmaps.maxSize() / 2)
-            level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW || level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ->
-                bitmaps.trimToSize(bitmaps.maxSize() / 2)
+            level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND || level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
+                level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> bitmaps.trimToSize(bitmaps.maxSize() / 2)
         }
     }
 
@@ -1329,7 +1312,7 @@ object Library {
 
     /** The order the reader gave the books on the widget. */
     private fun widgetOrder(ctx: Context): List<String> = try {
-        statePrefs(ctx).getString(WIDGET_ORDER, null)?.let(::JSONArray)?.let { a -> List(a.length()) { a.getString(it) } }.orEmpty()
+        statePrefs(ctx).getString(WIDGET_ORDER, null)?.let(::JSONArray)?.strings().orEmpty()
     } catch (e: Exception) {
         emptyList()
     }
@@ -1356,4 +1339,7 @@ object Library {
     }
 
     fun widgetBooks(ctx: Context): List<File> = standing(widgetList(ctx))
+
+    /** The strings this array holds, in order. */
+    private fun JSONArray.strings(): List<String> = List(length()) { getString(it) }
 }

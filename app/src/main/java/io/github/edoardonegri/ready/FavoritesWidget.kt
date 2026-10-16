@@ -45,7 +45,7 @@ class FavoritesWidget : AppWidgetProvider() {
         // was tapped is not told, so the widget asks for it again for a moment, now that it works.
         if (intent.action == AppWidgetManager.ACTION_APPWIDGET_UPDATE && wokenAfterForceStop(ctx)) {
             val app = ctx.applicationContext
-            val ids = AppWidgetManager.getInstance(app).getAppWidgetIds(ComponentName(app, FavoritesWidget::class.java))
+            val ids = placed(app)
             val pending = goAsync()
             Library.io.execute {
                 try {
@@ -112,6 +112,10 @@ class FavoritesWidget : AppWidgetProvider() {
 
         private val pending = Any()
 
+        /** The widgets of the app placed on the home screen. */
+        private fun placed(ctx: Context): IntArray =
+            AppWidgetManager.getInstance(ctx).getAppWidgetIds(ComponentName(ctx, FavoritesWidget::class.java))
+
         /**
          * Puts the shelves of every placed widget together again, e.g. when a book is put on it:
          * once, a moment after the last of the changes that follow each other closely.
@@ -120,7 +124,7 @@ class FavoritesWidget : AppWidgetProvider() {
             val app = ctx.applicationContext
             Library.main.removeCallbacksAndMessages(pending)
             HandlerCompat.postDelayed(Library.main, {
-                val ids = AppWidgetManager.getInstance(app).getAppWidgetIds(ComponentName(app, FavoritesWidget::class.java))
+                val ids = placed(app)
                 if (ids.isNotEmpty()) Library.io.execute { show(app, ids) }
             }, pending, SETTLE_MS)
         }
@@ -301,7 +305,7 @@ private class WidgetShelf(ctx: Context, manager: AppWidgetManager, id: Int) {
 private class Shelves(private val ctx: Context, private val shelf: WidgetShelf) {
     constructor(ctx: Context, id: Int) : this(ctx, WidgetShelf(ctx, AppWidgetManager.getInstance(ctx), id))
 
-    private val access = Library.hasAccess(ctx)
+    private val access = Library.hasAccess()
     private val items = if (access) Library.widgetBooks(ctx) else emptyList()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
@@ -398,7 +402,7 @@ private class Shelves(private val ctx: Context, private val shelf: WidgetShelf) 
         val c = Canvas(bmp)
         val area = RectF(0f, bmp.height - bmp.width * 1.5f, bmp.width.toFloat(), bmp.height.toFloat())
         val d = bmp.width / shelf.coverW
-        paint.color = 0xFF24160D.toInt()
+        paint.color = ShelfArt.LEATHER
         c.drawRect(area, paint)
         Library.decodeCover(ctx, f, BitmapFactory.Options().apply { inSampleSize = 2 })?.let { Library.drawCropped(c, it, area, paint) }
         ShelfArt.drawBinding(c, area, d, paint)

@@ -13,6 +13,7 @@ import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.View
 import androidx.core.content.edit
+import androidx.core.view.WindowInsetsCompat
 import java.io.File
 import java.util.Date
 import kotlin.math.ceil
@@ -131,6 +132,14 @@ class Cutout(val insets: Rect = Rect(), val holes: List<Rect> = emptyList()) {
             Rect(insets.top, insets.right, insets.bottom, insets.left),
             holes.map { Rect(it.top, w - it.right, it.bottom, w - it.left) },
         )
+    }
+
+    companion object {
+        /** The cutout as the window [insets] tell it. */
+        fun of(insets: WindowInsetsCompat): Cutout {
+            val c = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+            return Cutout(Rect(c.left, c.top, c.right, c.bottom), insets.displayCutout?.boundingRects.orEmpty())
+        }
     }
 }
 

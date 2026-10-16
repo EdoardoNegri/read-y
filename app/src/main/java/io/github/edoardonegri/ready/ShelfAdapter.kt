@@ -35,7 +35,7 @@ class ShelfAdapter(
     /** Sets [picked] and shows it on the shelf as it stands, without laying it out anew. */
     fun choose(chosen: Set<File>?) {
         picked = chosen
-        notifyItemRangeChanged(0, items.size, "drag")
+        notifyItemRangeChanged(0, items.size, SMALL)
     }
 
     /** Things are being carried about: the whole shelf shows in full meanwhile, chosen or not. */
@@ -47,10 +47,9 @@ class ShelfAdapter(
     /** What is being dragged; its places on the shelf stay empty while it is carried about. */
     var carried: Set<File> = emptySet()
         set(value) {
-            val changed = field + value
+            val either = field + value
             field = value
-            // Said to be a small change, so that the place is not faded over into a new view.
-            for (f in changed) indexOf(f).let { if (it >= 0) notifyItemChanged(it, "drag") }
+            for (f in either) changed(f)
         }
 
     class Holder(v: View) : RecyclerView.ViewHolder(v) {
@@ -122,7 +121,7 @@ class ShelfAdapter(
 
     /** Shows [f] anew where it stands, e.g. after it was chosen or let go of. */
     fun changed(f: File) {
-        indexOf(f).let { if (it >= 0) notifyItemChanged(it, "drag") }
+        indexOf(f).let { if (it >= 0) notifyItemChanged(it, SMALL) }
     }
 
     /** Takes the item at [from] to the place [to], the others closing up behind it. */
@@ -156,10 +155,6 @@ class ShelfAdapter(
             if (h.cover.drawable == null) return false
         }
         return true
-    }
-
-    private companion object {
-        const val FAINT = 0.4f
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
@@ -205,7 +200,7 @@ class ShelfAdapter(
         val rise = if (f.isFolder && shelfSpec.width > 0) shelfSpec.miniRise else 0
         h.cover.scaleType = if (f.isFolder) ImageView.ScaleType.FIT_XY else ImageView.ScaleType.CENTER_CROP
         // A book shows dark leather until its cover comes, which hides it, and is not painted over it for nothing.
-        h.cover.setBackgroundColor(if (f.isFolder || Library.cachedCover(f) != null) 0 else 0xFF24160D.toInt())
+        h.cover.setBackgroundColor(if (f.isFolder || Library.cachedCover(f) != null) 0 else ShelfArt.LEATHER)
         val wider = if (rise > 0) (shelfSpec.miniW - shelfSpec.coverW) / 2 else 0
         (h.frame.layoutParams as ViewGroup.MarginLayoutParams).apply {
             leftMargin = -wider
@@ -243,9 +238,10 @@ class ShelfAdapter(
         h.progress.visibility = if (begun && st.percent > 0f && !plate.finished) View.VISIBLE else View.GONE
         h.progress.progress = (st.percent * 100).roundToInt()
         val known = Library.cachedMeta(ctx, f)
-        h.plaque.text = known?.title ?: f.nameWithoutExtension
+        val title = known?.title ?: f.nameWithoutExtension
+        h.plaque.text = title
         val read = if (h.progress.isVisible) (st.percent * 100).roundToInt() else 0
-        describeBook(h, known?.title ?: f.nameWithoutExtension, known?.author.orEmpty(), read, plate.favorite, plate.finished)
+        describeBook(h, title, known?.author.orEmpty(), read, plate.favorite, plate.finished)
         val cached = Library.cachedCover(f)
         h.cover.setImageBitmap(cached)
         if (cached == null) Library.shelfWork.execute {
@@ -262,5 +258,15 @@ class ShelfAdapter(
                 }
             }
         }
+    }
+
+    private companion object {
+        const val FAINT = 0.4f
+
+        /**
+         * What a place is told when it changes but a little, e.g. as it is chosen or carried: so
+         * that it is not faded over into a new view.
+         */
+        const val SMALL = "small"
     }
 }

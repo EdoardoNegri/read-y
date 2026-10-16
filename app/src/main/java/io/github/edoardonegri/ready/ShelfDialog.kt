@@ -44,6 +44,8 @@ class ShelfDialog(private val ctx: Context) {
     @SuppressLint("InflateParams")
     private val view: View = LayoutInflater.from(ctx).inflate(R.layout.dialog_shelf, null)
     private val d = ctx.resources.displayMetrics.density
+
+    private fun dp(v: Int) = (v * d).toInt()
     private val input: EditText = view.findViewById(R.id.dialogInput)
     private val column: LinearLayout = view.findViewById(R.id.dialogOptions)
 
@@ -71,23 +73,18 @@ class ShelfDialog(private val ctx: Context) {
     fun details(rows: List<Pair<String, String>>, byColumn: Boolean = false) = apply {
         val grid = view.findViewById<LinearLayout>(R.id.dialogGrid)
         grid.visibility = View.VISIBLE
-        val gap = (10 * d).toInt()
+        fun wide(gap: Int) = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            .apply { topMargin = gap }
         if (byColumn) {
             val line = LinearLayout(ctx)
             line.isBaselineAligned = false
             rows.chunked((rows.size + 1) / 2).forEachIndexed { i, column ->
                 val stack = LinearLayout(ctx)
                 stack.orientation = LinearLayout.VERTICAL
-                for (row in column) {
-                    stack.addView(
-                        detail(row),
-                        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                            .apply { topMargin = gap },
-                    )
-                }
+                for (row in column) stack.addView(detail(row), wide(dp(10)))
                 line.addView(stack, column(i))
             }
-            grid.addView(line, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            grid.addView(line, wide(0))
             return@apply
         }
         for (pair in rows.chunked(2)) {
@@ -96,17 +93,13 @@ class ShelfDialog(private val ctx: Context) {
             // A last one left over keeps to the left column, with the right one empty.
             line.weightSum = 2f
             pair.forEachIndexed { i, row -> line.addView(detail(row), column(i)) }
-            grid.addView(
-                line,
-                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                    .apply { topMargin = gap },
-            )
+            grid.addView(line, wide(dp(10)))
         }
     }
 
     /** The place of the column [i] of the details, 0 on the left. */
     private fun column(i: Int) = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        .apply { if (i > 0) marginStart = (12 * d).toInt() }
+        .apply { if (i > 0) marginStart = dp(12) }
 
     /** One of the details: its name in gold over its value. */
     private fun detail(row: Pair<String, String>): TextView {
@@ -153,7 +146,7 @@ class ShelfDialog(private val ctx: Context) {
             typeface = Typeface.SERIF
             textSize = 13f
             setTextColor(ContextCompat.getColor(ctx, R.color.gold))
-            if (fields.isNotEmpty()) setPadding(0, (10 * d).toInt(), 0, 0)
+            if (fields.isNotEmpty()) setPadding(0, dp(10), 0, 0)
         })
     }
 
@@ -166,7 +159,7 @@ class ShelfDialog(private val ctx: Context) {
         field.typeface = Typeface.SERIF
         field.textSize = 15f
         field.setTextColor(ContextCompat.getColor(ctx, R.color.cream))
-        field.setPadding((10 * d).toInt(), 0, (10 * d).toInt(), 0)
+        field.setPadding(dp(10), 0, dp(10), 0)
         field.isSingleLine = true
         field.imeOptions = EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_EXTRACT_UI
         field.inputType = EditorInfo.TYPE_CLASS_TEXT or EditorInfo.TYPE_TEXT_FLAG_CAP_WORDS
@@ -177,7 +170,7 @@ class ShelfDialog(private val ctx: Context) {
             ctx.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(v.windowToken, 0)
             true
         }
-        fields.addView(field, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (40 * d).toInt()))
+        fields.addView(field, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)))
         // The keyboard pushes the dialog up rather than covering the field. A dialog's window
         // still needs the old way to be told so: it draws no insets of its own.
         @Suppress("DEPRECATION")
@@ -189,7 +182,7 @@ class ShelfDialog(private val ctx: Context) {
     fun choice(label: Int, onPick: (Int) -> Unit): BrassDropdown {
         fieldLabel(label)
         val menu = BrassDropdown(ctx, onPick)
-        fields.addView(menu, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (40 * d).toInt()))
+        fields.addView(menu, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)))
         return menu
     }
 
@@ -204,7 +197,7 @@ class ShelfDialog(private val ctx: Context) {
         menu.show(labels, selected)
         column.addView(
             menu,
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (40 * d).toInt()).apply { topMargin = (10 * d).toInt() },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)).apply { topMargin = dp(10) },
         )
     }
 
@@ -297,8 +290,8 @@ class ShelfDialog(private val ctx: Context) {
         button.background = PlaqueDrawable(d)
         column.addView(
             button,
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (40 * d).toInt())
-                .apply { topMargin = (10 * d).toInt() },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40))
+                .apply { topMargin = dp(10) },
         )
         return button
     }
@@ -337,21 +330,17 @@ class ShelfDialog(private val ctx: Context) {
             input.requestFocus()
         }
         dialog.show()
-        val width = minOf(ctx.resources.displayMetrics.widthPixels - (40 * d).toInt(), (400 * d).toInt())
+        val width = minOf(ctx.resources.displayMetrics.widthPixels - dp(40), dp(400))
         dialog.window?.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 }
 
 /**
- * Shows this brass button as held [down], or as standing out again: it goes down into its rim,
- * and its wording with it. Its background must be a [PlaqueDrawable].
+ * Shows this brass button as held [down], its plate turned to bronze, or as standing out again.
+ * Its background must be a [PlaqueDrawable].
  */
 fun TextView.holdBrass(down: Boolean) {
     (background as PlaqueDrawable).sunk = down
-    // A plate that only changes its metal stays where it stands, and its wording with it.
-    if (PlaqueDrawable.BRONZE_WHEN_HELD) return
-    val shadow = (PlaqueDrawable.SHADOW_DP * resources.displayMetrics.density).toInt()
-    setPadding(paddingLeft, if (down) shadow else 0, paddingRight, if (down) 0 else shadow)
 }
 
 /**
@@ -363,6 +352,8 @@ fun TextView.holdBrass(down: Boolean) {
 @SuppressLint("ViewConstructor")
 class BrassDropdown(ctx: Context, private val onPick: (Int) -> Unit) : AppCompatTextView(ctx) {
     private val d = ctx.resources.displayMetrics.density
+
+    private fun dp(v: Int) = (v * d).toInt()
     private val plate = PlaqueDrawable(d).apply { arrows = 1 }
     private var labels: List<String> = emptyList()
     private var faces: List<Typeface?>? = null
@@ -420,8 +411,8 @@ class BrassDropdown(ctx: Context, private val onPick: (Int) -> Unit) : AppCompat
                 val made = i == chosen
                 typeface = Typeface.create(faces?.getOrNull(i) ?: Typeface.SERIF, if (made) Typeface.BOLD else Typeface.NORMAL)
                 setTextColor(ContextCompat.getColor(context, if (made) R.color.gold_light else R.color.cream))
-                val side = (16 * d).toInt()
-                setPadding(side, (12 * d).toInt(), side, (12 * d).toInt())
+                val side = dp(16)
+                setPadding(side, dp(12), side, dp(12))
                 setOnClickListener {
                     board?.dismiss()
                     if (i == chosen) return@setOnClickListener
@@ -441,9 +432,9 @@ class BrassDropdown(ctx: Context, private val onPick: (Int) -> Unit) : AppCompat
         getWindowVisibleDisplayFrame(screen)
         val at = IntArray(2)
         getLocationOnScreen(at)
-        val room = screen.bottom - (at[1] + height) - (8 * d).toInt()
+        val room = screen.bottom - (at[1] + height) - dp(8)
         scroll.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.UNSPECIFIED)
-        val tall = scroll.measuredHeight.coerceAtMost(room.coerceAtLeast((48 * d).toInt()))
+        val tall = scroll.measuredHeight.coerceAtMost(room.coerceAtLeast(dp(48)))
         board = PopupWindow(scroll, width, tall, true).apply {
             setBackgroundDrawable(Color.TRANSPARENT.toDrawable())
             elevation = 8 * d

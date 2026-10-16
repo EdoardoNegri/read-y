@@ -83,30 +83,52 @@ interface FlowBook : Closeable {
 }
 
 /**
+ * A book of flowing text that the app cuts into parts of its own, out of one long text: each
+ * part a document of the [spine], named in the table of contents as it is added.
+ */
+abstract class PartedBook : FlowBook {
+    final override val spine = ArrayList<String>()
+    final override val toc = ArrayList<TocEntry>()
+    private val parts = ArrayList<ByteArray>()
+    private val names = ArrayList<String?>()
+
+    /** The size of each part; asked for only once all are added. */
+    final override val weights by lazy { LongArray(parts.size) { parts[it].size.toLong() } }
+
+    /** Adds [body] as the next part, named [name] in the table of contents. */
+    protected fun addPart(body: CharSequence, name: String?) {
+        spine.add("part${parts.size}.html")
+        parts.add(FlowBook.page(body).toByteArray())
+        names.add(name)
+    }
+
+    /** Lists the parts in the table of contents, once all are added; a book of one part has none. */
+    protected fun listParts() {
+        if (spine.size > 1) spine.mapIndexedTo(toc) { i, path -> TocEntry(names[i].orEmpty(), path, null, 0) }
+    }
+
+    override fun mimeOf(path: String) = "text/html"
+    override fun stream(path: String): InputStream? = parts.getOrNull(spine.indexOf(path))?.inputStream()
+}
+
+/**
  * A plain text file as a book. Its paragraphs are told apart by the empty lines between them,
  * or line by line where there are none, and gathered into parts that are quick to lay out; a
  * line that names a chapter starts a new one.
  */
-class TxtBook(file: File) : FlowBook {
+class TxtBook(file: File) : PartedBook() {
     override val title: String = file.nameWithoutExtension
     override val author = ""
     override val published = ""
-    override val spine = ArrayList<String>()
-    override val toc = ArrayList<TocEntry>()
-    override val weights: LongArray
     override val pageWeight get() = 1900
-    private val parts = ArrayList<ByteArray>()
 
     init {
-        val names = ArrayList<String?>()
         val part = StringBuilder()
         var name: String? = null
         var size = 0
         fun end() {
             if (part.isEmpty()) return
-            spine.add("part${parts.size}.html")
-            parts.add(FlowBook.page(part).toByteArray())
-            names.add(name)
+            addPart(part, name)
             part.setLength(0)
             name = null
             size = 0
@@ -122,17 +144,10 @@ class TxtBook(file: File) : FlowBook {
         }
         end()
         // An empty file is a book of one empty page.
-        if (parts.isEmpty()) {
-            spine.add("part0.html")
-            parts.add(FlowBook.page("").toByteArray())
-            names.add(null)
-        }
-        weights = LongArray(parts.size) { parts[it].size.toLong() }
-        if (spine.size > 1) spine.forEachIndexed { i, path -> toc.add(TocEntry(names[i].orEmpty(), path, null, 0)) }
+        if (spine.isEmpty()) addPart("", null)
+        listParts()
     }
 
-    override fun mimeOf(path: String) = "text/html"
-    override fun stream(path: String): InputStream? = parts.getOrNull(spine.indexOf(path))?.inputStream()
     override fun coverBitmap(maxWidth: Int): Bitmap? = null
     override fun close() {}
 

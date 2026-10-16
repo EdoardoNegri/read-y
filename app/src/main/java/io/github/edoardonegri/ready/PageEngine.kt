@@ -85,10 +85,10 @@ class PageEngine(
     }
 
     init {
-        single.pivotX = 0f
-        single.pivotY = 0f
-        list.pivotX = 0f
-        list.pivotY = 0f
+        for (v in arrayOf(single, list)) {
+            v.pivotX = 0f
+            v.pivotY = 0f
+        }
         list.layoutManager = lm
         list.adapter = adapter
         list.addOnScrollListener(object : RecyclerView.OnScrollListener() {
@@ -116,7 +116,7 @@ class PageEngine(
     /** The first page is none of the book read and the last all of it; a book of one page is read once at its end. */
     private fun report() {
         val read = if (count > 1) page.toFloat() / (count - 1) else if (atEnd) 1f else 0f
-        host.onPosition(page, 0f, read, frame.context.getString(R.string.page_n_of_cap, page + 1, count), null)
+        host.onPosition(page, 0f, read)
     }
 
     /** Draws page [i] for the current view size in the background and delivers it when done. */
@@ -129,11 +129,7 @@ class PageEngine(
         val trim = s.trimMargins
         exec.execute {
             // The page stays blank if it cannot be drawn.
-            val bmp = try {
-                if (closed) null else source.render(i, w, h, trim)
-            } catch (e: Throwable) {
-                null
-            }
+            val bmp = render(i, w, h, trim)
             main.post {
                 if (closed || gen != generation) return@post
                 pending.remove(i)
@@ -155,6 +151,13 @@ class PageEngine(
                 }
             }
         }
+    }
+
+    /** Draws page [i] as [PageSource.render] does, on [exec]; null if the book is closed or the page cannot be drawn. */
+    private fun render(i: Int, w: Int, h: Int, trim: Boolean): Bitmap? = try {
+        if (closed) null else source.render(i, w, h, trim)
+    } catch (e: Throwable) {
+        null
     }
 
     private fun showSingle() {
@@ -303,11 +306,7 @@ class PageEngine(
         val gen = generation
         val trim = s.trimMargins
         exec.execute {
-            val bmp = try {
-                if (closed) null else source.render(shown, w, h, trim)
-            } catch (e: Throwable) {
-                null
-            }
+            val bmp = render(shown, w, h, trim)
             main.post {
                 if (!closed && bmp != null && gen == generation && shown == page && zoom > 1f) single.setImageBitmap(bmp)
             }

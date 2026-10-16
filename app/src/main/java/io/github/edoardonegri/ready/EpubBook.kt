@@ -58,43 +58,35 @@ class EpubBook private constructor(private val zip: ZipArchive) : FlowBook {
         var nav: String? = null
 
         zip.getInputStream(opfEntry).use { ins ->
-            val x = Xml.newPullParser()
-            x.setInput(ins, null)
-            var ev = x.eventType
-            while (ev != XmlPullParser.END_DOCUMENT) {
-                if (ev == XmlPullParser.START_TAG) {
-                    when (x.name.substringAfter(':')) {
-                        "title" -> if (title.isEmpty()) title = text(x)
-                        "creator" -> text(x).let { if (it.isNotEmpty()) authors.add(it) }
-                        "language" -> if (language.isEmpty()) language = text(x)
-                        "date" -> {
-                            // Older books date several things; the first that is not said to be something else is taken.
-                            val event = (0 until x.attributeCount)
-                                .firstOrNull { x.getAttributeName(it).substringAfter(':') == "event" }?.let(x::getAttributeValue)
-                            val date = text(x)
-                            if (event == "publication" || published.isEmpty() && event != "modification") published = date
-                        }
-                        "meta" -> if (x.getAttributeValue(null, "name") == "cover") {
-                            coverId = x.getAttributeValue(null, "content")
-                        }
-                        "item" -> {
-                            val id = x.getAttributeValue(null, "id")
-                            val href = x.getAttributeValue(null, "href")
-                            if (id != null && href != null) {
-                                val path = resolve(base, href)
-                                manifest[id] = path
-                                x.getAttributeValue(null, "media-type")?.let { mimes[path] = it }
-                                if (mimes[path] == "application/x-dtbncx+xml") ncx = path
-                                if (x.getAttributeValue(null, "properties")?.split(' ')?.contains("nav") == true) nav = path
-                                if (x.getAttributeValue(null, "properties")?.contains("cover-image") == true) {
-                                    coverPath = path
-                                }
-                            }
-                        }
-                        "itemref" -> x.getAttributeValue(null, "idref")?.let(spineIds::add)
+            tags(ins) { x, name ->
+                if (x.eventType != XmlPullParser.START_TAG) return@tags
+                when (name) {
+                    "title" -> if (title.isEmpty()) title = text(x)
+                    "creator" -> text(x).let { if (it.isNotEmpty()) authors.add(it) }
+                    "language" -> if (language.isEmpty()) language = text(x)
+                    "date" -> {
+                        // Older books date several things; the first that is not said to be something else is taken.
+                        val event = (0 until x.attributeCount)
+                            .firstOrNull { x.getAttributeName(it).substringAfter(':') == "event" }?.let(x::getAttributeValue)
+                        val date = text(x)
+                        if (event == "publication" || published.isEmpty() && event != "modification") published = date
                     }
+                    "meta" -> if (x.getAttributeValue(null, "name") == "cover") coverId = x.getAttributeValue(null, "content")
+                    "item" -> {
+                        val id = x.getAttributeValue(null, "id")
+                        val href = x.getAttributeValue(null, "href")
+                        if (id != null && href != null) {
+                            val path = resolve(base, href)
+                            manifest[id] = path
+                            x.getAttributeValue(null, "media-type")?.let { mimes[path] = it }
+                            if (mimes[path] == "application/x-dtbncx+xml") ncx = path
+                            val properties = x.getAttributeValue(null, "properties").orEmpty()
+                            if ("nav" in properties.split(' ')) nav = path
+                            if ("cover-image" in properties) coverPath = path
+                        }
+                    }
+                    "itemref" -> x.getAttributeValue(null, "idref")?.let(spineIds::add)
                 }
-                ev = x.next()
             }
         }
 
@@ -116,7 +108,7 @@ class EpubBook private constructor(private val zip: ZipArchive) : FlowBook {
             toc.retainAll { it.path in spine }
         }
         // A book that lists no chapters can still be gone through document by document.
-        if (toc.isEmpty() && spine.size > 1) spine.forEachIndexed { i, path -> toc.add(TocEntry("", path, null, 0)) }
+        if (toc.isEmpty() && spine.size > 1) spine.mapTo(toc) { TocEntry("", it, null, 0) }
         if (coverPath == null) coverPath = coverId?.let { manifest[it] }
         if (coverPath == null) {
             coverPath = manifest.values.firstOrNull {
@@ -126,36 +118,27 @@ class EpubBook private constructor(private val zip: ZipArchive) : FlowBook {
     }
 
     private fun readNcx(ins: InputStream, base: String) {
-        val x = Xml.newPullParser()
-        x.setInput(ins, null)
         var depth = 0
         var label = ""
-        var ev = x.eventType
-        while (ev != XmlPullParser.END_DOCUMENT) {
-            val name = if (ev == XmlPullParser.START_TAG || ev == XmlPullParser.END_TAG) x.name.substringAfter(':') else ""
-            if (ev == XmlPullParser.START_TAG) when (name) {
+        tags(ins) { x, name ->
+            if (x.eventType == XmlPullParser.START_TAG) when (name) {
                 "navPoint" -> {
                     depth++
                     label = ""
                 }
                 "text" -> if (depth > 0 && label.isEmpty()) label = text(x)
                 "content" -> x.getAttributeValue(null, "src")?.let { if (depth > 0) addToc(label, base, it, depth - 1) }
-            } else if (ev == XmlPullParser.END_TAG && name == "navPoint") {
+            } else if (name == "navPoint") {
                 depth--
             }
-            ev = x.next()
         }
     }
 
     private fun readNav(ins: InputStream, base: String) {
-        val x = Xml.newPullParser()
-        x.setInput(ins, null)
         var inToc = false
         var depth = 0
-        var ev = x.eventType
-        while (ev != XmlPullParser.END_DOCUMENT) {
-            val name = if (ev == XmlPullParser.START_TAG || ev == XmlPullParser.END_TAG) x.name.substringAfter(':') else ""
-            if (ev == XmlPullParser.START_TAG) when (name) {
+        tags(ins) { x, name ->
+            if (x.eventType == XmlPullParser.START_TAG) when (name) {
                 "nav" -> inToc = (0 until x.attributeCount).any {
                     x.getAttributeName(it).substringAfter(':') == "type" && "toc" in x.getAttributeValue(it).split(' ')
                 }
@@ -173,11 +156,10 @@ class EpubBook private constructor(private val zip: ZipArchive) : FlowBook {
                     }
                     if (href != null) addToc(title.toString(), base, href, (depth - 1).coerceAtLeast(0))
                 }
-            } else if (ev == XmlPullParser.END_TAG) when (name) {
+            } else when (name) {
                 "ol" -> if (inToc) depth--
                 "nav" -> if (inToc) return
             }
-            ev = x.next()
         }
     }
 
@@ -187,16 +169,19 @@ class EpubBook private constructor(private val zip: ZipArchive) : FlowBook {
     }
 
     private fun findRootFile(ins: InputStream): String? {
+        tags(ins) { x, name -> if (x.eventType == XmlPullParser.START_TAG && name == "rootfile") return x.getAttributeValue(null, "full-path") }
+        return null
+    }
+
+    /** Calls [each] at every start and end of a tag of the XML in [ins], with the tag's name without its prefix. */
+    private inline fun tags(ins: InputStream, each: (x: XmlPullParser, name: String) -> Unit) {
         val x = Xml.newPullParser()
         x.setInput(ins, null)
         var ev = x.eventType
         while (ev != XmlPullParser.END_DOCUMENT) {
-            if (ev == XmlPullParser.START_TAG && x.name.substringAfter(':') == "rootfile") {
-                return x.getAttributeValue(null, "full-path")
-            }
+            if (ev == XmlPullParser.START_TAG || ev == XmlPullParser.END_TAG) each(x, x.name.substringAfter(':'))
             ev = x.next()
         }
-        return null
     }
 
     private fun text(x: XmlPullParser): String = try {

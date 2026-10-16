@@ -138,15 +138,7 @@ class OptionsPanel(
         val row = LinearLayout(ctx)
         row.gravity = Gravity.CENTER_VERTICAL
         row.setPadding(0, dp(8), 0, 0)
-        row.addView(
-            TextView(ctx).apply {
-                text = t(item.label)
-                textSize = 15f
-                typeface = Typeface.SERIF
-                setTextColor(color(R.color.cream))
-            },
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-        )
+        addName(row, t(item.label))
         val where = BrassDropdown(ctx) {
             s.setInfoAt(item, it)
             onLayout()
@@ -156,6 +148,18 @@ class OptionsPanel(
         into.addView(row)
     }
 
+    /** Adds the name of a setting to [row], taking all the room the rest leaves. */
+    private fun addName(row: LinearLayout, name: String) {
+        row.addView(
+            TextView(ctx).apply {
+                text = name
+                textSize = 15f
+                typeface = Typeface.SERIF
+                setTextColor(color(R.color.cream))
+            },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+    }
 
     private fun dp(v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
 
@@ -193,15 +197,7 @@ class OptionsPanel(
     private fun label(name: String, value: String = ""): TextView {
         val row = LinearLayout(ctx)
         row.setPadding(0, dp(12), 0, dp(2))
-        row.addView(
-            TextView(ctx).apply {
-                text = name
-                textSize = 15f
-                typeface = Typeface.SERIF
-                setTextColor(color(R.color.cream))
-            },
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-        )
+        addName(row, name)
         val shown = TextView(ctx).apply {
             text = value
             textSize = 15f

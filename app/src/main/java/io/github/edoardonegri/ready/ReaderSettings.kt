@@ -7,7 +7,6 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
-import android.provider.OpenableColumns
 import android.view.Display
 import android.view.Window
 import android.view.WindowManager
@@ -26,24 +25,17 @@ class ReaderSettings(ctx: Context) {
     private val app = ctx.applicationContext
     private val p = app.getSharedPreferences("reader", Context.MODE_PRIVATE).also(::upgrade)
 
-    /** A setting kept under [key], or the name of the property if there is none. */
-    private fun int(def: Int, key: String? = null) = object : ReadWriteProperty<Any?, Int> {
-        override fun getValue(thisRef: Any?, property: KProperty<*>) = p.getInt(key ?: property.name, def)
-        override fun setValue(thisRef: Any?, property: KProperty<*>, value: Int) =
-            p.edit { putInt(key ?: property.name, value) }
+    /** A setting kept under [key], or the name of the property if there is none, read by [get] and written by [put]. */
+    private fun <T> setting(
+        def: T, key: String?, get: SharedPreferences.(String, T) -> T, put: SharedPreferences.Editor.(String, T) -> Unit,
+    ) = object : ReadWriteProperty<Any?, T> {
+        override fun getValue(thisRef: Any?, property: KProperty<*>) = get(p, key ?: property.name, def)
+        override fun setValue(thisRef: Any?, property: KProperty<*>, value: T) = p.edit { put(this, key ?: property.name, value) }
     }
 
-    private fun string(def: String) = object : ReadWriteProperty<Any?, String> {
-        override fun getValue(thisRef: Any?, property: KProperty<*>) = p.getString(property.name, def) ?: def
-        override fun setValue(thisRef: Any?, property: KProperty<*>, value: String) =
-            p.edit { putString(property.name, value) }
-    }
-
-    private fun bool(def: Boolean) = object : ReadWriteProperty<Any?, Boolean> {
-        override fun getValue(thisRef: Any?, property: KProperty<*>) = p.getBoolean(property.name, def)
-        override fun setValue(thisRef: Any?, property: KProperty<*>, value: Boolean) =
-            p.edit { putBoolean(property.name, value) }
-    }
+    private fun int(def: Int, key: String? = null) = setting(def, key, { k, d -> getInt(k, d) }, { k, v -> putInt(k, v) })
+    private fun string(def: String) = setting(def, null, { k, d -> getString(k, d) ?: d }, { k, v -> putString(k, v) })
+    private fun bool(def: Boolean) = setting(def, null, { k, d -> getBoolean(k, d) }, { k, v -> putBoolean(k, v) })
 
     /** 1..100, or -1 to follow the system brightness. */
     var brightness by int(-1)
@@ -276,10 +268,7 @@ class ReaderSettings(ctx: Context) {
                 else -> null
             }
             if (bytes == null || kind == null) null else {
-                var name = uri.lastPathSegment?.substringAfterLast('/').orEmpty()
-                ctx.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-                    if (it.moveToFirst()) it.getString(0)?.let { shown -> name = shown }
-                }
+                val name = Store.describe(uri).first ?: uri.lastPathSegment?.substringAfterLast('/').orEmpty()
                 val base = name.substringBeforeLast('.').filter { it.isLetterOrDigit() || it in " -_" }.trim().ifEmpty { "Font" }
                 val dir = fontsDir(ctx).apply { mkdirs() }
                 val f = File(dir, "$base.$kind")

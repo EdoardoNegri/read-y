@@ -9,8 +9,6 @@ import android.widget.ImageButton
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
 import androidx.core.widget.doAfterTextChanged
 import androidx.recyclerview.widget.GridLayoutManager
@@ -86,21 +84,14 @@ class WidgetBooksActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Without the library there is nothing to choose from; the bookshelf asks for it.
-        if (!Library.hasAccess(this)) {
+        if (!Library.hasAccess()) {
             startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             finish()
             return
         }
         setContentView(R.layout.activity_widget_books)
         shelf = findViewById(R.id.shelf)
-        val bar = findViewById<View>(R.id.bar)
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.root)) { v, insets ->
-            val i = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            v.setPadding(i.left, 0, i.right, 0)
-            bar.padRail(i.top)
-            shelf.setPadding(shelf.paddingLeft, 0, shelf.paddingRight, i.bottom)
-            insets
-        }
+        fitBookcase(findViewById(R.id.root), findViewById(R.id.bar), shelf)
         findViewById<TextView>(R.id.barTitle).apply {
             setText(R.string.widget_books)
             background = PlaqueDrawable(resources.displayMetrics.density, ornate = true)
@@ -132,7 +123,7 @@ class WidgetBooksActivity : AppCompatActivity() {
             setOnClickListener { finish() }
         }
 
-        columns = (resources.configuration.screenWidthDp / 118).coerceAtLeast(3)
+        columns = ShelfSpec.columns(resources)
         shelf.layoutManager = GridLayoutManager(this, columns)
         shelf.addItemDecoration(ShelfDecoration(this, columns))
         spec().let { shelf.setPadding(it.side, shelf.paddingTop, it.side, shelf.paddingBottom) }

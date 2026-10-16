@@ -24,6 +24,9 @@ import android.view.WindowManager
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
+import androidx.appcompat.widget.AppCompatImageView
+import androidx.core.graphics.get
+import androidx.core.graphics.withClip
 import androidx.core.view.doOnLayout
 import androidx.core.view.doOnPreDraw
 import java.io.File
@@ -49,7 +52,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
 
     /**
      * Where a cover stands on the screen, and what it looks like: [picture], laid over the cover
-     * by [fit] if given, else stretched over it.
+     * by [fit] if given, else stretched over it, with the [binding] of a book on the shelf over it.
      */
     class Spot(val x: Int, val y: Int, val w: Int, val h: Int, val picture: Bitmap, val fit: Matrix? = null, val binding: Boolean = false)
 
@@ -73,7 +76,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
      * as it swings open: drawn [by] times as large as on the shelf, which the book is made as
      * small as again; none for 0.
      */
-    private class Cover(ctx: Activity) : ImageView(ctx) {
+    private class Cover(ctx: Activity) : AppCompatImageView(ctx) {
         private val paint = Paint()
         private val area = RectF()
         var by = 0f
@@ -85,6 +88,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
             ShelfArt.drawBinding(canvas, area, resources.displayMetrics.density * by, paint)
         }
     }
+
     /** The board of the cover, which shows its edge as it swings, and its inside once past upright. */
     private val edge = Edge(act)
     private var animator: ValueAnimator? = null
@@ -221,20 +225,17 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
      */
     private fun steady(on: Boolean) {
         val mode = if (on) ReaderSettings.fastestMode(act) else 0
-        if (detached) {
-            val lp = layer.layoutParams as? WindowManager.LayoutParams ?: return
-            if (lp.preferredDisplayModeId == mode) return
-            lp.preferredDisplayModeId = mode
-            try {
-                act.windowManager.updateViewLayout(layer, lp)
-            } catch (e: Exception) {
-                // The window has gone already.
-            }
-        } else {
-            val lp = act.window.attributes
-            if (lp.preferredDisplayModeId == mode) return
-            lp.preferredDisplayModeId = mode
+        val lp = (if (detached) layer.layoutParams as? WindowManager.LayoutParams else act.window.attributes) ?: return
+        if (lp.preferredDisplayModeId == mode) return
+        lp.preferredDisplayModeId = mode
+        if (!detached) {
             act.window.attributes = lp
+            return
+        }
+        try {
+            act.windowManager.updateViewLayout(layer, lp)
+        } catch (e: Exception) {
+            // The window has gone already.
         }
     }
 
@@ -412,10 +413,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
             corner(backX, backZ, 1f, false)
             corner(-thick * sin, thick * cos, 1f, false)
             band.close()
-            canvas.save()
-            canvas.clipRect(-SPREAD * w, -SPREAD * height, 0f, SPREAD * height)
-            canvas.drawPath(band, inside)
-            canvas.restore()
+            canvas.withClip(-SPREAD * w, -SPREAD * height, 0f, SPREAD * height) { drawPath(band, inside) }
         }
 
         /** Adds to the band the point [x] along and [z] away from the spine, at its top (-1) or bottom ([end] 1), as the eye sees it. */
@@ -664,7 +662,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
                         at[0] *= picture.width / spot.w.toFloat()
                         at[1] *= picture.height / spot.h.toFloat()
                     }
-                    val c = picture.getPixel(at[0].toInt().coerceIn(0, picture.width - 1), at[1].toInt().coerceIn(0, picture.height - 1))
+                    val c = picture[at[0].toInt().coerceIn(0, picture.width - 1), at[1].toInt().coerceIn(0, picture.height - 1)]
                     r += Color.red(c)
                     g += Color.green(c)
                     b += Color.blue(c)

@@ -33,7 +33,7 @@ class ImportActivity : Activity() {
             return
         }
         val uri = intent.data ?: shared()
-        if (uri == null || !Library.hasAccess(this)) {
+        if (uri == null || !Library.hasAccess()) {
             // Without access to the library folder the book cannot be kept; the shelf asks for it.
             if (uri != null) Toast.makeText(this, R.string.import_needs_access, Toast.LENGTH_LONG).show()
             startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

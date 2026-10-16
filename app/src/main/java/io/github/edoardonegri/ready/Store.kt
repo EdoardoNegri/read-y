@@ -3,6 +3,7 @@ package io.github.edoardonegri.ready
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -14,6 +15,7 @@ import android.provider.OpenableColumns
 import android.util.Log
 import androidx.core.content.edit
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
@@ -80,7 +82,7 @@ object Store {
     /** The path of the document [id], which is a volume and a path on it: primary:Documents/Read_y. */
     private fun pathOf(id: String): File {
         val volume = id.substringBefore(':')
-        val base = if (volume == "primary") Environment.getExternalStorageDirectory() else File("/storage", volume)
+        val base = if (volume == "primary") storage() else File("/storage", volume)
         return File(base, id.substringAfter(':'))
     }
 
@@ -106,7 +108,7 @@ object Store {
         if (Build.VERSION.SDK_INT >= 26) {
             val dir = suggested()
             val start = if (dir.isDirectory) dir else dir.parentFile
-            val rel = start?.path?.removePrefix(Environment.getExternalStorageDirectory().path)?.trimStart('/').orEmpty()
+            val rel = start?.path?.removePrefix(storage().path)?.trimStart('/').orEmpty()
             i.putExtra(DocumentsContract.EXTRA_INITIAL_URI, DocumentsContract.buildDocumentUri(AUTHORITY, "primary:$rel"))
         }
         return i
@@ -118,7 +120,7 @@ object Store {
      */
     fun grant(uri: Uri): File? {
         if (uri.authority != AUTHORITY) return null
-        val old = prefs().getString(ROOT, null)?.let(::File) ?: File(Environment.getExternalStorageDirectory(), "Read-y")
+        val old = prefs().getString(ROOT, null)?.let(::File) ?: File(storage(), "Read-y")
         val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         try {
             app.contentResolver.takePersistableUriPermission(uri, flags)
@@ -170,7 +172,7 @@ object Store {
 
     private fun uri(f: File): Uri? = tree?.let { t -> docId(f)?.let { DocumentsContract.buildDocumentUriUsingTree(t, it) } }
 
-    private fun entry(c: android.database.Cursor) = Entry(
+    private fun entry(c: Cursor) = Entry(
         c.getString(1) == Document.MIME_TYPE_DIR,
         if (c.isNull(2)) 0 else c.getLong(2),
         if (c.isNull(3)) 0 else c.getLong(3),
@@ -235,7 +237,7 @@ object Store {
     /** [f] has come into its folder, or left it if not [there]. */
     private fun relist(f: File, there: Boolean) {
         val parent = f.parentFile?.path ?: return
-        listings.computeIfPresent(parent) { _, old -> if (there) old.filter { it != f } + f else old.filter { it != f } }
+        listings.computeIfPresent(parent) { _, old -> old.filter { it != f }.let { if (there) it + f else it } }
     }
 
     /**
@@ -294,11 +296,12 @@ object Store {
             forget(f)
             forget(target)
             val at = done?.let { pathOf(DocumentsContract.getDocumentId(it)) } ?: target
-            // The provider makes up a name of its own for one it cannot use: that is put back.
-            if (at != target) DocumentsContract.renameDocument(app.contentResolver, uri(at)!!, f.name)
             if (at == target) {
                 relist(f, false)
                 relist(target, true)
+            } else {
+                // The provider makes up a name of its own for one it cannot use: that is put back.
+                DocumentsContract.renameDocument(app.contentResolver, uri(at)!!, f.name)
             }
             at == target
         } catch (e: Exception) {
@@ -342,13 +345,13 @@ object Store {
     }
 
     fun inputStream(f: File): InputStream =
-        uri(f)?.let { app.contentResolver.openInputStream(it) } ?: throw java.io.FileNotFoundException(f.path)
+        uri(f)?.let { app.contentResolver.openInputStream(it) } ?: throw FileNotFoundException(f.path)
 
     /** Writes [f] from the start, making it if it is not there. */
     fun outputStream(f: File): OutputStream {
-        val u = (if (exists(f)) uri(f) else create(f, "application/octet-stream")) ?: throw java.io.FileNotFoundException(f.path)
+        val u = (if (exists(f)) uri(f) else create(f, "application/octet-stream")) ?: throw FileNotFoundException(f.path)
         forget(f)
-        return app.contentResolver.openOutputStream(u, "wt") ?: throw java.io.FileNotFoundException(f.path)
+        return app.contentResolver.openOutputStream(u, "wt") ?: throw FileNotFoundException(f.path)
     }
 
     fun readBytes(f: File): ByteArray = inputStream(f).use { it.readBytes() }
@@ -357,7 +360,7 @@ object Store {
 
     /** [f] open for reading, as the system gives it out to be read at any place. */
     fun descriptor(f: File): ParcelFileDescriptor =
-        uri(f)?.let { app.contentResolver.openFileDescriptor(it, "r") } ?: throw java.io.FileNotFoundException(f.path)
+        uri(f)?.let { app.contentResolver.openFileDescriptor(it, "r") } ?: throw FileNotFoundException(f.path)
 
     // ---- files handed over by other apps ----
 

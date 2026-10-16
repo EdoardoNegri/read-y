@@ -1,5 +1,6 @@
 package io.github.edoardonegri.ready
 
+import android.app.Activity
 import android.content.Intent
 import android.graphics.Rect
 import android.os.Build
@@ -27,12 +28,7 @@ class WidgetOpenActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // It is simply there: some home screens would have it slide or grow into place.
-        if (Build.VERSION.SDK_INT >= 34) {
-            overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, 0, 0)
-        } else {
-            @Suppress("DEPRECATION")
-            overridePendingTransition(0, 0)
-        }
+        appearAtOnce()
         // The whole screen is its own, so that a place on the screen is the same place in it.
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val book = intent.getStringExtra(ReaderActivity.EXTRA_PATH)?.let(::File)
@@ -43,7 +39,7 @@ class WidgetOpenActivity : AppCompatActivity() {
         }
         when {
             // Without the library there is nothing to read or to choose from; the bookshelf asks for it.
-            !Library.hasAccess(this) -> leaveFor(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            !Library.hasAccess() -> leaveFor(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             book == null -> leaveFor(Intent(this, WidgetBooksActivity::class.java))
             // The home screen did not say where the book stands, or it is gone: the reader says so.
             at == null || at.isEmpty || !book.isDoc || savedInstanceState != null -> read(book)
@@ -70,7 +66,7 @@ class WidgetOpenActivity : AppCompatActivity() {
         val h = (w * 1.5f).toInt()
         val cover = RatioImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            setBackgroundColor(0xFF24160D.toInt())
+            setBackgroundColor(ShelfArt.LEATHER)
             binding = true
             // The widget still shows the book; this one is only what the opening is drawn from.
             visibility = View.INVISIBLE
@@ -88,8 +84,7 @@ class WidgetOpenActivity : AppCompatActivity() {
                     root.getLocationOnScreen(origin)
                     cover.translationX = (at.centerX() - w / 2 - origin[0]).toFloat()
                     cover.translationY = (at.bottom - h - origin[1]).toFloat()
-                    val settings = ReaderSettings(this)
-                    whenInPlace { openBook(book, cover, settings.lit(settings.palette.bg)) }
+                    whenInPlace { openBook(book, cover) }
                 }
             }
         }
@@ -123,10 +118,12 @@ class WidgetOpenActivity : AppCompatActivity() {
         arrived()
     }
 
-    /** Opens the book whose cover [cover] shows, on paper of the colour [paper], and hands it to the reader. */
-    private fun openBook(book: File, cover: View, paper: Int) {
+    /** Opens the book whose cover [cover] shows, on the paper the reader shows, and hands it to the reader. */
+    private fun openBook(book: File, cover: View) {
+        val settings = ReaderSettings(this)
+        val paper = settings.lit(settings.palette.bg)
         if (Build.VERSION.SDK_INT < 30) {
-            BookOpening(this).open(cover, paper, BookOpening.kept(book, ReaderSettings(this).look), bare = false) { read(book) }
+            BookOpening(this).open(cover, paper, BookOpening.kept(book, settings.look), bare = false) { read(book) }
             return
         }
         // The reader starts at once, unseen over the book opening, and sets out its page
@@ -136,7 +133,7 @@ class WidgetOpenActivity : AppCompatActivity() {
         val handoff = BookOpening.Handoff()
         BookOpening.handoff = handoff
         read(book, handoff)
-        BookOpening.Detached(this).also { detached = it }.open(cover, paper, book, ReaderSettings(this).look, handoff)
+        BookOpening.Detached(this).also { detached = it }.open(cover, paper, book, settings.look, handoff)
     }
 
     /** The book opening while the reader starts over it, see [openBook]. */
@@ -182,4 +179,10 @@ class WidgetOpenActivity : AppCompatActivity() {
          */
         private const val ARRIVAL_MS = 1500L
     }
+}
+
+/** Has this activity come on screen at once, without the transition the system would play for it. */
+fun Activity.appearAtOnce() {
+    if (Build.VERSION.SDK_INT >= 34) overrideActivityTransition(Activity.OVERRIDE_TRANSITION_OPEN, 0, 0)
+    else @Suppress("DEPRECATION") overridePendingTransition(0, 0)
 }

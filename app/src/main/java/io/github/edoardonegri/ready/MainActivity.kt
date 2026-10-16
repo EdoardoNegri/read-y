@@ -29,8 +29,6 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnPreDraw
 import androidx.core.view.isVisible
 import androidx.core.widget.doAfterTextChanged
@@ -140,17 +138,9 @@ class MainActivity : AppCompatActivity() {
         // The grain of the board ends at its round corners.
         empty.clipToOutline = true
 
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.root)) { v, insets ->
-            // The bookcase runs edge to edge: its top rail fills the status bar area, and the rows
-            // can scroll clear of the navigation bar.
-            val i = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            v.setPadding(i.left, 0, i.right, 0)
-            bar.padRail(i.top)
-            shelf.setPadding(shelf.paddingLeft, 0, shelf.paddingRight, i.bottom)
-            insets
-        }
+        fitBookcase(findViewById(R.id.root), bar, shelf)
 
-        columns = (resources.configuration.screenWidthDp / 118).coerceAtLeast(3)
+        columns = ShelfSpec.columns(resources)
         shelf.layoutManager = GridLayoutManager(this, columns)
         decoration = ShelfDecoration(this, columns)
         shelf.addItemDecoration(decoration)
@@ -240,7 +230,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Goes to the shelf [book] stands on, with the book in view. False if there is no such book to go to. */
     private fun showShelfOf(book: File): Boolean {
-        if (!book.isDoc || !Library.hasAccess(this)) return false
+        if (!book.isDoc || !Library.hasAccess()) return false
         picked = null
         if (searching) closeSearch()
         current = book.parentFile ?: Library.root()
@@ -274,7 +264,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun refresh(relist: Boolean = true) {
         val root = Library.root()
-        if (!Library.hasAccess(this)) {
+        if (!Library.hasAccess()) {
             showRail()
             back.isEnabled = false
             up.visibility = View.INVISIBLE
@@ -400,6 +390,7 @@ class MainActivity : AppCompatActivity() {
         val reader = Intent(this, ReaderActivity::class.java).putExtra(ReaderActivity.EXTRA_PATH, f.path)
         if (cover == null) return startActivity(reader)
         // The book opens on the shelf, and the reader takes over once its page fills the screen.
+        reader.putExtra(ReaderActivity.EXTRA_FROM_SHELF, true).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
         val settings = ReaderSettings(this)
         val paper = settings.lit(settings.palette.bg)
         if (Build.VERSION.SDK_INT >= 30) {
@@ -407,17 +398,12 @@ class MainActivity : AppCompatActivity() {
             // book opens; see BookOpening.Handoff.
             val handoff = BookOpening.Handoff()
             BookOpening.handoff = handoff
-            startActivity(
-                Intent(this, OpeningReaderActivity::class.java).putExtras(reader)
-                    .putExtra(ReaderActivity.EXTRA_FROM_SHELF, true).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION),
-            )
+            startActivity(reader.setClass(this, OpeningReaderActivity::class.java))
             // It opens in a window of its own, which the reader starting meanwhile does not hold up.
             detached.open(cover, paper, f, settings.look, handoff, bare)
             return
         }
-        opening.open(cover, paper, BookOpening.kept(f, settings.look), bare) {
-            startActivity(reader.putExtra(ReaderActivity.EXTRA_FROM_SHELF, true).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION))
-        }
+        opening.open(cover, paper, BookOpening.kept(f, settings.look), bare) { startActivity(reader) }
     }
 
     /**
@@ -428,12 +414,11 @@ class MainActivity : AppCompatActivity() {
         val app = applicationContext
         Library.io.execute {
             val last = Library.lastRead(app)
-            runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                if (last == null) return@runOnUiThread toast(R.string.nothing_read)
+            onShelf {
+                if (last == null) return@onShelf toast(R.string.nothing_read)
                 // Out of its cover, if that is in view; else its page grows out of the button. It
                 // is closed on its own shelf all the same, see closeBook.
-                coverInView(last)?.let { return@runOnUiThread read(last, it) }
+                coverInView(last)?.let { return@onShelf read(last, it) }
                 read(last, findViewById(R.id.resume), bare = true)
             }
         }
@@ -497,11 +482,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun toast(text: Int) = Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
 
+    /** Does [action] on the thread that draws the shelf, unless the shelf is gone by then. */
+    private fun onShelf(action: () -> Unit) = runOnUiThread { if (!isFinishing && !isDestroyed) action() }
+
     // ---- menu: new shelf, sorting, settings ----
 
     private fun showMenu() {
         val choices = ArrayList<Pair<String, () -> Unit>>()
-        if (Library.hasAccess(this)) {
+        if (Library.hasAccess()) {
             choices += getString(R.string.add_books) to ::addBooks
             choices += getString(R.string.new_shelf) to ::askNewShelf
         }
@@ -532,8 +520,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (imported == null) unreadable++ else if (imported.moved && !Store.removeOriginal(uri)) kept++
             }
-            runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
+            onShelf {
                 refresh()
                 if (unreadable > 0) toast(R.string.cannot_import)
                 else if (kept > 0) toast(R.string.cannot_delete)
@@ -629,12 +616,12 @@ class MainActivity : AppCompatActivity() {
     private fun askNewShelf() {
         val dialog = ShelfDialog(this).title(getString(R.string.new_shelf)).back(::showMenu).input(R.string.shelf_name)
         dialog.primary(R.string.create) {
-            if (Library.createShelf(this, current, dialog.text)) refresh() else toast(R.string.name_taken)
+            if (Library.createShelf(current, dialog.text)) refresh() else toast(R.string.name_taken)
         }.show()
     }
 
     private fun askSort() {
-        val sorts = Sort.values()
+        val sorts = Sort.entries
         ShelfDialog(this).title(getString(R.string.sort_by)).back(::showMenu)
             .dropdown(sorts.map { getString(it.label) }, Library.sort(this).ordinal) {
                 // The shelf behind the dialog is put in the new order straight away.
@@ -730,7 +717,6 @@ class MainActivity : AppCompatActivity() {
 
     /** Whether the things were dropped somewhere, rather than put down again where they were. */
     private var acted = false
-
 
     /** The shelf the dragged item is held over and would be put into, with its view on screen. */
     private var into: File? = null
@@ -1144,7 +1130,7 @@ class MainActivity : AppCompatActivity() {
         }
         Library.io.execute {
             val meta = Library.meta(applicationContext, f)
-            runOnUiThread { if (!isFinishing && !isDestroyed) showBookInfo(f, meta) }
+            onShelf { showBookInfo(f, meta) }
         }
     }
 
@@ -1153,13 +1139,13 @@ class MainActivity : AppCompatActivity() {
         val app = applicationContext
         Library.io.execute {
             val meta = Library.meta(app, f)
-            runOnUiThread { if (!isFinishing && !isDestroyed) editBook(f, meta) }
+            onShelf { editBook(f, meta) }
         }
     }
 
     /** The shelf [dir] as it stands on the shelf, beside its name and the wood it is made of, which can be changed there. */
     private fun editShelf(dir: File) {
-        val woods = Wood.values()
+        val woods = Wood.entries
         val dialog = ShelfDialog(this).uncrossed().title(dir.name)
         val name = dialog.field(R.string.field_name, dir.name)
         dialog.choice(R.string.field_aspect) {
@@ -1213,7 +1199,7 @@ class MainActivity : AppCompatActivity() {
             binding = true
             ratio = ShelfSpec.BOOK
             scaleType = ImageView.ScaleType.CENTER_CROP
-            setBackgroundColor(0xFF24160D.toInt())
+            setBackgroundColor(ShelfArt.LEATHER)
         }
         editing = f to { cover, custom ->
             dialog.picture.setImageBitmap(cover)

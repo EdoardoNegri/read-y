@@ -19,8 +19,10 @@ import android.webkit.WebViewClient
 import androidx.core.net.toUri
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -66,12 +68,14 @@ class FlowEngine(
         chapter = start.chapter.coerceIn(0, book.spine.lastIndex)
         pendingFraction = start.fraction
 
-        web.settings.javaScriptEnabled = true
-        // A book is read from its file alone; nothing in it may wake the radio.
-        web.settings.blockNetworkLoads = true
-        web.settings.allowFileAccess = false
-        web.settings.allowContentAccess = false
-        web.settings.textZoom = s.fontSize
+        with(web.settings) {
+            javaScriptEnabled = true
+            // A book is read from its file alone; nothing in it may wake the radio.
+            blockNetworkLoads = true
+            allowFileAccess = false
+            allowContentAccess = false
+            textZoom = s.fontSize
+        }
         preRaster()
         web.overScrollMode = View.OVER_SCROLL_NEVER
         web.isHorizontalScrollBarEnabled = false
@@ -140,9 +144,6 @@ class FlowEngine(
                     return@runOnUiThread
                 }
                 reveal()
-                val n = book.spine.size
-                val inChapter = if (s.vertical) "" else act.getString(R.string.page_n_of, page + 1, pages)
-                val label = listOf(act.getString(R.string.chapter_of, chapter + 1, n), inChapter).filter { it.isNotEmpty() }.joinToString(" · ")
                 // How much is read is where the page being shown begins, so the first page is
                 // none of the book. In the last chapter the pages are spread up to the very end of
                 // the line, so that the last page of the book is all of it. A book that is all one
@@ -157,7 +158,7 @@ class FlowEngine(
                 }
                 if (!s.vertical) measure(pages)
                 host.onPosition(
-                    chapter, fraction.toFloat(), bookPercent(shown), label, inChapter,
+                    chapter, fraction.toFloat(), bookPercent(shown),
                     if (s.vertical) null else page + 1 to pages,
                     if (s.vertical) null else inBook(page),
                 )
@@ -255,18 +256,12 @@ class FlowEngine(
 
     override val innerMargin get() = if (s.vertical) 0 else (s.marginV * act.resources.displayMetrics.density).roundToInt()
 
-    override val chapterEnd: Float
-        get() {
-            var upTo = 0L
-            for (i in 0..chapter) upTo += book.weights[i]
-            return (upTo.toFloat() / total).coerceIn(0f, 1f)
-        }
+    /** How much of the book lies before the chapter [index], in [FlowBook.weights]. */
+    private fun before(index: Int) = (0 until index).sumOf { book.weights[it] }
 
-    private fun bookPercent(progress: Float): Float {
-        var before = 0L
-        for (i in 0 until chapter) before += book.weights[i]
-        return ((before + progress * book.weights[chapter]) / total).coerceIn(0f, 1f)
-    }
+    override val chapterEnd get() = (before(chapter + 1).toFloat() / total).coerceIn(0f, 1f)
+
+    private fun bookPercent(progress: Float) = ((before(chapter) + progress * book.weights[chapter]) / total).coerceIn(0f, 1f)
 
     private fun openLink(url: String) {
         val uri = url.toUri()
@@ -365,12 +360,7 @@ class FlowEngine(
     /** A book that is all one page has been taken to its end, by the seek bar or by being marked as read. */
     private var atEnd = start.percent >= Library.FINISHED_AT
 
-    override val contentPositions: List<Float>
-        get() = book.toc.map { entry ->
-            var before = 0L
-            for (i in 0 until book.spine.indexOf(entry.path)) before += book.weights[i]
-            before.toFloat() / total
-        }
+    override val contentPositions get() = book.toc.map { before(book.spine.indexOf(it.path)).toFloat() / total }
 
     override val currentContent get() = book.toc.indexOfLast { book.spine.indexOf(it.path) <= chapter }
 
@@ -562,11 +552,11 @@ class FlowEngine(
          * passed on as it is, with no type. A picture that moves would keep the screen drawing,
          * and the battery draining, for as long as its page is open.
          */
-        private fun still(ins: java.io.InputStream): Pair<java.io.InputStream, String?> {
+        private fun still(ins: InputStream): Pair<InputStream, String?> {
             val bytes = ins.use { it.readBytes() }
             if (!moves(bytes)) return ByteArrayInputStream(bytes) to null
             val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return ByteArrayInputStream(bytes) to null
-            val out = java.io.ByteArrayOutputStream()
+            val out = ByteArrayOutputStream()
             bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
             bmp.recycle()
             return ByteArrayInputStream(out.toByteArray()) to "image/png"

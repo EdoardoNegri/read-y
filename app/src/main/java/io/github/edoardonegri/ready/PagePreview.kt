@@ -214,10 +214,7 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
 
     // ---- the reader's part ----
 
-    override fun onPosition(
-        chapter: Int, fraction: Float, percent: Float, label: String, page: String?,
-        pageOfChapter: Pair<Int, Int>?, pageOfBook: Pair<Int, Int>?,
-    ) {
+    override fun onPosition(chapter: Int, fraction: Float, percent: Float, pageOfChapter: Pair<Int, Int>?, pageOfBook: Pair<Int, Int>?) {
         turner.onPosition(chapter, fraction)
         val e = engine ?: return
         // Scrolled, it is as far into the pages a printed copy would have as into its text.

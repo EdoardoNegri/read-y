@@ -20,7 +20,10 @@ import androidx.appcompat.widget.AppCompatImageButton
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.withClip
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import kotlin.math.abs
+import kotlin.properties.Delegates
 
 /**
  * A picture of this view as it is drawn now, on [reuse] if that has the size for it. Null if the
@@ -57,56 +60,29 @@ fun View.snapshot(): Bitmap? {
     }
 }
 
+/** A property that calls [then] whenever it is set to something other than it was, e.g. to draw a view anew. */
+fun <T> changes(initial: T, then: () -> Unit) = Delegates.observable(initial) { _, old, new -> if (old != new) then() }
+
 /** Image view whose height is always [ratio] times its width. */
 class RatioImageView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = null) :
     AppCompatImageView(ctx, attrs) {
 
-    var ratio = 1.5f
-        set(value) {
-            if (field != value) {
-                field = value
-                requestLayout()
-            }
-        }
+    var ratio by changes(1.5f, ::requestLayout)
 
     /**
      * The height to have whatever the width, if more than 0. The places of a shelf are not all
      * of quite the same width, and what stands in them is to end on one line all the same.
      */
-    var tall = 0
-        set(value) {
-            if (field != value) {
-                field = value
-                requestLayout()
-            }
-        }
+    var tall by changes(0, ::requestLayout)
 
     /** Draws a book binding (shaded spine hinge) over the image. */
-    var binding = false
-        set(value) {
-            if (field != value) {
-                field = value
-                invalidate()
-            }
-        }
+    var binding by changes(false, ::invalidate)
 
     /** Draws the depth of a bookcase (posts and the shadows inside it) over the image. */
-    var cased = false
-        set(value) {
-            if (field != value) {
-                field = value
-                invalidate()
-            }
-        }
+    var cased by changes(false, ::invalidate)
 
     /** The wood of the posts of a bookcase, see [cased]. */
-    var wood = Wood.WALNUT
-        set(value) {
-            if (field != value) {
-                field = value
-                invalidate()
-            }
-        }
+    var wood by changes(Wood.WALNUT, ::invalidate)
 
     private val shade = Paint()
     private val area = RectF()
@@ -150,13 +126,7 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         }
 
     /** The mark of the chapter being read, or -1. */
-    var current = -1
-        set(value) {
-            if (field != value) {
-                field = value
-                invalidate()
-            }
-        }
+    var current by changes(-1, ::invalidate)
 
     /** Where the knob of the seek bar is being dragged, 0..1 along the line, or NaN: the lens shows it meanwhile. */
     var seeking = Float.NaN
@@ -485,6 +455,20 @@ class GestureFrame @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
 fun View.padRail(top: Int) {
     val lift = (6 * resources.displayMetrics.density).toInt().coerceAtMost(top)
     setPadding(0, top - lift, 0, lift)
+}
+
+/**
+ * Runs the bookcase in [root] edge to edge: its top rail [bar] fills the status bar area, and the
+ * rows of [shelf] can scroll clear of the navigation bar.
+ */
+fun fitBookcase(root: View, bar: View, shelf: View) {
+    ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+        val i = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+        v.setPadding(i.left, 0, i.right, 0)
+        bar.padRail(i.top)
+        shelf.setPadding(shelf.paddingLeft, 0, shelf.paddingRight, i.bottom)
+        insets
+    }
 }
 
 /**

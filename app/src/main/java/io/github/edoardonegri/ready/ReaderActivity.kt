@@ -4,7 +4,6 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.graphics.Matrix
-import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -101,12 +100,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             // switches tasks and may play its transition for that whatever the intent flags say;
             // the opened book is already there to take over from without one.
             window.setWindowAnimations(0)
-            if (Build.VERSION.SDK_INT >= 34) {
-                overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, 0, 0)
-            } else {
-                @Suppress("DEPRECATION")
-                overridePendingTransition(0, 0)
-            }
+            appearAtOnce()
         }
         percentRead = findViewById(R.id.percent)
         chapterPage = findViewById(R.id.chapterPage)
@@ -121,9 +115,8 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         }
         // Draw behind the (hidden) system bars but keep text clear of a notch or camera hole.
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
-            val c = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
-            cutout = Cutout(Rect(c.left, c.top, c.right, c.bottom), insets.displayCutout?.boundingRects.orEmpty())
-            menu.setPadding(c.left, c.top, c.right, c.bottom)
+            cutout = Cutout.of(insets)
+            cutout.insets.let { menu.setPadding(it.left, it.top, it.right, it.bottom) }
             arrangeInfo()
             insets
         }
@@ -144,8 +137,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             if (Library.isFlowing(file)) FlowEngine(this, file, s, state, this)
             else PageEngine(this, file, s, state, this)
         } catch (e: Exception) {
-            Toast.makeText(this, getString(R.string.book_unreadable, file.name), Toast.LENGTH_LONG).show()
-            leave()
+            unreadable()
             return
         }
         engine = opened
@@ -311,7 +303,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     override fun shown() {
         if (handoff == null || !hidden) return
         // Two frames on, the page is on the screen to be copied.
-        root.postOnAnimation { root.postOnAnimation { capture(::pictured) } }
+        twoFramesOn { capture(::pictured) }
     }
 
     /** Hands [print], the page as it is seen, to the book opening on the shelf, after which the reader shows itself. */
@@ -363,9 +355,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         // The shelf under it need no longer be drawn: once the reader is seen, two frames on. Made
         // solid at once, the shelf and the book opening on it would be hidden while the reader is
         // still unseen, and a frame would show neither.
-        if (Build.VERSION.SDK_INT >= 30) {
-            root.postOnAnimation { root.postOnAnimation { if (!isFinishing) setTranslucent(false) } }
-        }
+        if (Build.VERSION.SDK_INT >= 30) twoFramesOn { if (!isFinishing) setTranslucent(false) }
     }
 
     override fun reopen() {
@@ -377,13 +367,21 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         val now = SystemClock.elapsedRealtime()
         if (now - reopened < REOPEN_MS) {
             // Again so soon, the book is what fails: it is left rather than opened again and again.
-            Toast.makeText(this, getString(R.string.book_unreadable, file.name), Toast.LENGTH_LONG).show()
-            leave()
+            unreadable()
         } else {
             reopened = now
             recreate()
         }
     }
+
+    /** Says that the book cannot be read, and leaves it. */
+    private fun unreadable() {
+        Toast.makeText(this, getString(R.string.book_unreadable, file.name), Toast.LENGTH_LONG).show()
+        leave()
+    }
+
+    /** Does [action] two frames on, once what is drawn now is on the screen. */
+    private fun twoFramesOn(action: () -> Unit) = root.postOnAnimation { root.postOnAnimation { action() } }
 
     /** Back to the shelf. */
     private fun leave() {
@@ -401,7 +399,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         }
         if (!menu.isVisible) return capture(::upright)
         menu.visibility = View.GONE
-        root.postOnAnimation { root.postOnAnimation { capture(::upright) } }
+        twoFramesOn { capture(::upright) }
     }
 
     /**
@@ -563,10 +561,9 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         return true
     }
 
-    override fun onPosition(
-        chapter: Int, fraction: Float, percent: Float, label: String, page: String?,
-        pageOfChapter: Pair<Int, Int>?, pageOfBook: Pair<Int, Int>?,
-    ) {
+    override fun onPosition(chapter: Int, fraction: Float, percent: Float, pageOfChapter: Pair<Int, Int>?, pageOfBook: Pair<Int, Int>?) {
+        // A book of fixed pages is at the page it shows, which it counts as its chapter.
+        val paged = engine is PageEngine
         turner.onPosition(chapter, fraction)
         // How long each page is read for tells how fast the reader reads, and how long the rest will take.
         if (bookPages > 0 && !seeking) pace.at(percent * bookPages, SystemClock.elapsedRealtime())
@@ -588,12 +585,12 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         // to is shown: the line does not go back to it meanwhile.
         if (seekTarget >= 0) {
             if (abs(percent - seekTarget) > SEEK_NEAR) {
-                skipped = { showPosition(chapter, percent, label, page, pageOfChapter, pageOfBook) }
+                skipped = { showPosition(chapter, percent, paged, pageOfChapter, pageOfBook) }
                 return
             }
             settleSeek()
         }
-        showPosition(chapter, percent, label, page, pageOfChapter, pageOfBook)
+        showPosition(chapter, percent, paged, pageOfChapter, pageOfBook)
     }
 
     /** Where the knob of the seek bar was let go, 0..1, until the book has been taken there; else -1. */
@@ -615,11 +612,8 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         chapters.seeking = Float.NaN
     }
 
-    /** Shows the place told by [onPosition] in the menu and at the foot of the page. */
-    private fun showPosition(
-        chapter: Int, percent: Float, label: String, page: String?,
-        pageOfChapter: Pair<Int, Int>?, pageOfBook: Pair<Int, Int>?,
-    ) {
+    /** Shows the place told by [onPosition] in the menu and at the foot of the page; [paged] for a book of fixed pages. */
+    private fun showPosition(chapter: Int, percent: Float, paged: Boolean, pageOfChapter: Pair<Int, Int>?, pageOfBook: Pair<Int, Int>?) {
         // The chapter is counted as on the line below, by the book's contents, where it has any:
         // the files a book is made of, which the engine counts, also hold its cover and the like.
         val mark = marked.indexOfLast { it <= (engine?.currentContent ?: -1) }
@@ -627,7 +621,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         // PDF is at the page it shows; an EPUB that scrolls as far into the pages a printed
         // one would have as into its text.
         val book = pageOfBook ?: bookPages.takeIf { it > 0 }?.let {
-            (if (page == null) chapter + 1 else 1 + (percent * (it - 1)).roundToInt()).coerceIn(1, it) to it
+            (if (paged) chapter + 1 else 1 + (percent * (it - 1)).roundToInt()).coerceIn(1, it) to it
         }
         reading = engine?.let { if (mark >= 0) chapterName(it, mark) else "" }.orEmpty()
         at = PagePlace(
@@ -638,7 +632,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         // The menu is closed most of the time. What it would show is written into it only when it
         // opens, so that a page that scrolls does not lay out a menu nobody sees.
         if (!menu.isVisible) {
-            behindMenu = { showPosition(chapter, percent, label, page, pageOfChapter, pageOfBook) }
+            behindMenu = { showPosition(chapter, percent, paged, pageOfChapter, pageOfBook) }
             return
         }
         behindMenu = null

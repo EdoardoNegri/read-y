@@ -13,6 +13,9 @@ object PdfInfo {
     private const val OVERLAP = 256
     private const val MAX_SIZE = 300L shl 20
 
+    /** The endings of the working files of programs, whose names some files carry for a title. */
+    private val WORKING_FILES = listOf(".doc", ".docx", ".tex", ".dvi")
+
     /** Title, author and the date the file was made, any of which may be empty; null if the file gives none. */
     fun read(f: File): Triple<String, String, String>? = try {
         if (Store.length(f) > MAX_SIZE) null
@@ -28,14 +31,14 @@ object PdfInfo {
                     }
                 }
             }
-            val title = text?.let { value(it, "Title") }.orEmpty().trim()
-            val author = text?.let { value(it, "Author") }.orEmpty().trim()
+            fun field(key: String) = text?.let { value(it, key) }.orEmpty().trim()
+            val title = field("Title")
+            val author = field("Author")
             // Many files carry the name of the program's working file rather than a title.
             val real = title.takeUnless {
-                it.equals("untitled", true) || it.startsWith("Microsoft Word -") || it.endsWith(".doc", true) ||
-                    it.endsWith(".docx", true) || it.endsWith(".tex", true) || it.endsWith(".dvi", true)
+                it.equals("untitled", true) || it.startsWith("Microsoft Word -") || WORKING_FILES.any { end -> it.endsWith(end, true) }
             }.orEmpty()
-            val date = text?.let { value(it, "CreationDate") }.orEmpty().trim()
+            val date = field("CreationDate")
             if (real.isEmpty() && author.isEmpty() && date.isEmpty()) null else Triple(real, author, date)
         }
     } catch (e: Exception) {

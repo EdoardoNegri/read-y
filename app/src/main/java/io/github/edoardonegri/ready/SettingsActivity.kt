@@ -1,6 +1,5 @@
 package io.github.edoardonegri.ready
 
-import android.graphics.Rect
 import android.os.Bundle
 import android.view.View
 import android.widget.ImageButton
@@ -34,8 +33,7 @@ class SettingsActivity : AppCompatActivity() {
             v.setPadding(i.left, 0, i.right, i.bottom)
             bar.padRail(i.top)
             // The sample page leaves the room the camera takes where the reader's screen does.
-            val c = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
-            preview.cutout = Cutout(Rect(c.left, c.top, c.right, c.bottom), insets.displayCutout?.boundingRects.orEmpty())
+            preview.cutout = Cutout.of(insets)
             insets
         }
         findViewById<TextView>(R.id.barTitle).apply {

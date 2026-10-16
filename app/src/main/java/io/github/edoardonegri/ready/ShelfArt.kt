@@ -30,52 +30,22 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
      * The plate of a favorite book: its corners are scooped out like the ornate plate's, only
      * less, and it is held by two stars instead of screws.
      */
-    var favorite = false
-        set(value) {
-            if (field != value) {
-                field = value
-                invalidateSelf()
-            }
-        }
+    var favorite by changes(false, ::invalidateSelf)
 
-    /**
-     * The plain plate as a button that is held down: it lies where its shadow was, and is
-     * hollow where the plate standing out bulges, lit from below and shaded at the top.
-     */
-    var sunk = false
-        set(value) {
-            if (field != value) {
-                field = value
-                invalidateSelf()
-            }
-        }
+    /** The plain plate as a button that is held down: it turns to bronze, as the plate of a finished book is. */
+    var sunk by changes(false, ::invalidateSelf)
 
     /**
      * The plain plate of a drop-down menu, which has an arrow engraved in place of each screw,
      * a little further in: pointing down, 1, while its choices are closed, and up, -1, while they
      * are open; 0 for the screws.
      */
-    var arrows = 0
-        set(value) {
-            if (field != value) {
-                field = value
-                invalidateSelf()
-            }
-        }
+    var arrows by changes(0, ::invalidateSelf)
 
     /** The plate of a book read to the end: the same plate, of bronze instead of brass. */
-    var finished = false
-        set(value) {
-            if (field != value) {
-                field = value
-                invalidateSelf()
-            }
-        }
+    var finished by changes(false, ::invalidateSelf)
 
-    private val metal get() = if (finished || sunk && BRONZE_WHEN_HELD) BRONZE else BRASS
-
-    /** Whether the plate is drawn lying deeper in its rim, see [sunk]. */
-    private val lowered get() = sunk && !BRONZE_WHEN_HELD
+    private val metal get() = if (finished || sunk) BRONZE else BRASS
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
@@ -92,43 +62,35 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         val b = bounds
         val shadow = SHADOW_DP * d
         val left = b.left.toFloat()
-        val top = if (lowered) b.top + shadow else b.top.toFloat()
+        val top = b.top.toFloat()
         val right = b.right.toFloat()
-        val bottom = if (lowered) b.bottom.toFloat() else b.bottom - shadow
+        val bottom = b.bottom - shadow
 
+        // Shadow the plate casts on the plank.
         paint.shader = null
         paint.style = Paint.Style.FILL
-        if (!lowered) {
-            // Shadow the plate casts on the plank.
-            paint.color = 0x70000000
-            r.set(left + d, top + shadow, right - d, bottom + shadow)
-            c.drawRoundRect(r, 3 * d, 3 * d, paint)
-        }
+        paint.color = 0x70000000
+        r.set(left + d, top + shadow, right - d, bottom + shadow)
+        c.drawRoundRect(r, 3 * d, 3 * d, paint)
 
         // Dark rim, then the plate: bright where the light hits the top, darker towards the bottom.
-        // Held down, it lies in the shadow of its own rim instead.
         val metal = metal
         paint.color = metal.rim
         r.set(left, top, right, bottom)
         c.drawRoundRect(r, 3 * d, 3 * d, paint)
-        paint.shader = LinearGradient(
-            0f, top, 0f, bottom,
-            if (lowered) SUNK else metal.plate,
-            floatArrayOf(0f, 0.3f, 0.72f, 1f), Shader.TileMode.CLAMP,
-        )
+        paint.shader = LinearGradient(0f, top, 0f, bottom, metal.plate, PLATE_STOPS, Shader.TileMode.CLAMP)
         r.inset(d, d)
         c.drawRoundRect(r, 2 * d, 2 * d, paint)
         face.rewind()
         face.addRoundRect(r, 2 * d, 2 * d, Path.Direction.CW)
-        if (lowered) hollow(c, face, r.left, r.top, r.right, r.bottom) else gloss(c, face, r.left, r.top, r.right, r.bottom)
-        paint.shader = null
+        gloss(c, face, r.left, r.top, r.right, r.bottom)
 
-        // Bevel: a lit upper edge and a shaded lower edge just inside the rim, or the other way round.
+        // Bevel: a lit upper edge and a shaded lower edge just inside the rim.
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = d
-        paint.color = if (lowered) metal.shade else metal.lit
+        paint.color = metal.lit
         c.drawLine(left + 3 * d, top + 1.5f * d, right - 3 * d, top + 1.5f * d, paint)
-        paint.color = if (lowered) metal.lit else metal.shade
+        paint.color = metal.shade
         c.drawLine(left + 3 * d, bottom - 1.5f * d, right - 3 * d, bottom - 1.5f * d, paint)
 
         // Engraved border: a dark groove with a lighter lip just below and right of it.
@@ -186,9 +148,7 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         c.drawPath(scooped(left + d, top + shadow, right - d, bottom + shadow), paint)
         paint.color = metal.rim
         c.drawPath(scooped(left, top, right, bottom), paint)
-        paint.shader = LinearGradient(
-            0f, top, 0f, bottom, metal.plate, floatArrayOf(0f, 0.3f, 0.72f, 1f), Shader.TileMode.CLAMP,
-        )
+        paint.shader = LinearGradient(0f, top, 0f, bottom, metal.plate, PLATE_STOPS, Shader.TileMode.CLAMP)
         c.drawPath(scooped(left + d, top + d, right - d, bottom - d), paint)
         paint.shader = null
         face.set(path)
@@ -231,27 +191,6 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
             0f, t, 0f, b,
             intArrayOf(0x44FFFFFF, 0x52FFFFFF, 0x24FFFFFF, 0x00FFFFFF, 0x00000000, 0x1C000000),
             floatArrayOf(0f, 0.16f, 0.4f, 0.62f, 0.7f, 1f), Shader.TileMode.CLAMP,
-        )
-        c.drawPath(outline, paint)
-        paint.shader = LinearGradient(
-            l, 0f, r, 0f, intArrayOf(0x1A000000, 0x00000000, 0x00000000, 0x1A000000),
-            floatArrayOf(0f, 0.14f, 0.86f, 1f), Shader.TileMode.CLAMP,
-        )
-        c.drawPath(outline, paint)
-        paint.shader = null
-    }
-
-    /**
-     * The [gloss] the other way round, for a plate that is held down: it is hollow instead of
-     * bulging, so the light catches it low down and its top lies in shadow, which is deepest
-     * just under the rim; its two ends are a little darker, as on the plate standing out.
-     */
-    private fun hollow(c: Canvas, outline: Path, l: Float, t: Float, r: Float, b: Float) {
-        paint.style = Paint.Style.FILL
-        paint.shader = LinearGradient(
-            0f, t, 0f, b,
-            intArrayOf(0x40000000, 0x24000000, 0x00000000, 0x00FFFFFF, 0x30FFFFFF, 0x44FFFFFF),
-            floatArrayOf(0f, 0.18f, 0.4f, 0.55f, 0.84f, 1f), Shader.TileMode.CLAMP,
         )
         c.drawPath(outline, paint)
         paint.shader = LinearGradient(
@@ -341,12 +280,6 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         /** Height at the bottom of the bounds left for the shadow. */
         const val SHADOW_DP = 2
 
-        /**
-         * A plain plate held down ([sunk]) turns to bronze, as the plate of a finished book is,
-         * standing out as ever; otherwise it goes down into its rim, hollow.
-         */
-        const val BRONZE_WHEN_HELD = true
-
         /** Distance of the screws from the ends, and the space the title must leave for them. */
         const val SCREW_X_DP = 7f
         const val TEXT_INSET_DP = 13
@@ -362,8 +295,8 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         const val FAVORITE_NOTCH_DP = 5f
         const val STAR_X_DP = 8f
 
-        /** The plain plate held down: the brass of the plate standing out, lit from below instead of above. */
-        private val SUNK = intArrayOf(0xFF9C7418.toInt(), 0xFFCDA233.toInt(), 0xFFE6C24C.toInt(), 0xFFFFF3B4.toInt())
+        /** Where the colours of [Metal.plate] lie, from the top of the plate to its bottom. */
+        private val PLATE_STOPS = floatArrayOf(0f, 0.3f, 0.72f, 1f)
 
         private val BRASS = Metal(
             rim = 0xFF5E450C.toInt(),
@@ -409,6 +342,9 @@ enum class Wood(val label: Int, saturation: Float, red: Float, green: Float, blu
 }
 
 object ShelfArt {
+    /** The dark leather a book shows where its cover does not, as while the cover is still being read. */
+    const val LEATHER = 0xFF24160D.toInt()
+
     /** Gives a flat cover the look of a bound book: a shaded hinge along the spine and a lit edge. */
     fun drawBinding(c: Canvas, cover: RectF, d: Float, paint: Paint) {
         val hinge = 5 * d

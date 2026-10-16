@@ -73,14 +73,11 @@ Tap below and choose that file: Read-y will remove it, so that the book is kept 
     <string name="in_chapter">Chapter Page</string>
     <string name="in_book">Book Page</string>
     <string name="read">read</string>
-    <string name="chapter_of">Chapter %1$d/%2$d</string>
     <string name="back">Back</string>
     <string name="book_missing">This book is no longer in the library.</string>
     <string name="book_unreadable">Cannot open %1$s</string>
     <string name="reader_hint">Tap the middle of the screen for the menu</string>
     <string name="percent_read">%1$d%%</string>
-    <string name="page_n_of">page %1$d/%2$d</string>
-    <string name="page_n_of_cap">Page %1$d/%2$d</string>
     <string name="part_n">Part %1$d</string>
     <string name="unknown">Unknown</string>
     <string name="never">Never</string>
