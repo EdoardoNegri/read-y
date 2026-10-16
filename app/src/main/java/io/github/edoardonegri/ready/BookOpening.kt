@@ -41,6 +41,9 @@ import kotlin.math.sin
  */
 class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
 
+    /** Whether the layer is in a window of its own, see [attach]. */
+    private val detached = attach != null
+
     /** The page a book was at when the reader left it for the shelf, for the shelf to close the book from. */
     class Left(val file: File, val page: Bitmap, val at: Long = SystemClock.uptimeMillis())
 
@@ -48,7 +51,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
      * Where a cover stands on the screen, and what it looks like: [picture], laid over the cover
      * by [fit] if given, else stretched over it.
      */
-    class Spot(val x: Int, val y: Int, val w: Int, val h: Int, val picture: Bitmap, val fit: Matrix? = null)
+    class Spot(val x: Int, val y: Int, val w: Int, val h: Int, val picture: Bitmap, val fit: Matrix? = null, val binding: Boolean = false)
 
     private val layer = FrameLayout(act)
     private val book = FrameLayout(act)
@@ -57,16 +60,32 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
 
     /**
      * The cover as it swings open on its spine: its front until it stands edge-on to the eye,
-     * where it can no longer be seen, and from there its [inside], which takes over edge-on.
+     * where it can no longer be seen; past that, its board shows its inside ([Edge]).
      */
-    private val cover = ImageView(act).apply {
+    private val cover = Cover(act).apply {
         scaleType = ImageView.ScaleType.FIT_XY
         // A cover cropped to its place does not spill out of it.
         cropToPadding = true
     }
-    private val inside = View(act).apply { setBackgroundColor(INSIDE) }
 
-    /** The edge of the cover's board, which shows as it swings: a hard cover has some thickness. */
+    /**
+     * A cover with the binding the shelf draws over it (ShelfArt.drawBinding), which goes with it
+     * as it swings open: drawn [by] times as large as on the shelf, which the book is made as
+     * small as again; none for 0.
+     */
+    private class Cover(ctx: Activity) : ImageView(ctx) {
+        private val paint = Paint()
+        private val area = RectF()
+        var by = 0f
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            if (by <= 0f) return
+            area.set(0f, 0f, width.toFloat(), height.toFloat())
+            ShelfArt.drawBinding(canvas, area, resources.displayMetrics.density * by, paint)
+        }
+    }
+    /** The board of the cover, which shows its edge as it swings, and its inside once past upright. */
     private val edge = Edge(act)
     private var animator: ValueAnimator? = null
 
@@ -87,7 +106,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
 
     init {
         val fill = ViewGroup.LayoutParams.MATCH_PARENT
-        for (v in arrayOf(paper, page, inside, edge, cover)) book.addView(v, fill, fill)
+        for (v in arrayOf(paper, page, edge, cover)) book.addView(v, fill, fill)
         // The open cover lies beside the book.
         for (group in arrayOf(layer, book)) {
             group.clipChildren = false
@@ -124,7 +143,6 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         page.setImageBitmap(print)
         printed = print != null
         cover.visibility = if (bare) View.GONE else View.VISIBLE
-        inside.visibility = cover.visibility
         edge.visibility = cover.visibility
         sized {
             if (!place(spot)) return@sized then()
@@ -137,7 +155,8 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
     /**
      * Shows [left], the page a book was left at, over the whole screen. Once the
      * shelf is laid out, [find] gives the cover of that book on it, and the page shrinks back
-     * into the book, which closes; without a cover to go to, the page just fades.
+     * into the book, which closes: the opening played backwards. Without a cover to go to, the
+     * page just fades.
      */
     fun close(left: Bitmap, paperColor: Int, find: () -> View?) {
         animator?.cancel()
@@ -146,7 +165,6 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         page.alpha = 1f
         bare = false
         cover.visibility = View.INVISIBLE
-        inside.visibility = View.INVISIBLE
         edge.visibility = View.INVISIBLE
         pose(1f)
         show()
@@ -155,7 +173,6 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
             val spot = find()?.let(::spot)
             if (spot != null && place(spot)) {
                 cover.visibility = View.VISIBLE
-                inside.visibility = View.VISIBLE
                 edge.visibility = View.VISIBLE
                 pose(1f)
                 run(1f, 0f, ::clear)
@@ -185,6 +202,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         }
         layer.animate().cancel()
         page.animate().cancel()
+        steady(false)
         layer.visibility = View.GONE
         page.setImageBitmap(null)
         cover.setImageDrawable(null)
@@ -193,6 +211,31 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
     private fun show() {
         layer.alpha = 1f
         layer.visibility = View.VISIBLE
+        steady(true)
+    }
+
+    /**
+     * Has the screen drawn as often a second as it can while the book opens or closes ([on]), or
+     * as the app otherwise asks. A screen left to change its speed by itself may do so in the
+     * middle of the book opening, which shows as a flicker, and makes it run unevenly.
+     */
+    private fun steady(on: Boolean) {
+        val mode = if (on) ReaderSettings.fastestMode(act) else 0
+        if (detached) {
+            val lp = layer.layoutParams as? WindowManager.LayoutParams ?: return
+            if (lp.preferredDisplayModeId == mode) return
+            lp.preferredDisplayModeId = mode
+            try {
+                act.windowManager.updateViewLayout(layer, lp)
+            } catch (e: Exception) {
+                // The window has gone already.
+            }
+        } else {
+            val lp = act.window.attributes
+            if (lp.preferredDisplayModeId == mode) return
+            lp.preferredDisplayModeId = mode
+            act.window.attributes = lp
+        }
     }
 
     /** Does [action] once what the layer covers has a size, at once if it has. */
@@ -228,21 +271,28 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
             cover.imageMatrix = Matrix(fit).apply { postScale(f.width / spot.w.toFloat(), f.height / spot.h.toFloat()) }
         }
         // The cover turns on its spine, seen from far enough for it not to loom over the shelf.
-        for (v in arrayOf(cover, inside)) {
-            v.pivotX = 0f
-            v.pivotY = f.height / 2f
-            v.cameraDistance = f.width * CAMERA * act.resources.displayMetrics.density
-        }
-        edge.board(foreEdge(spot.picture), cover.cameraDistance, f.height * THICKNESS)
+        cover.pivotX = 0f
+        cover.pivotY = f.height / 2f
+        cover.cameraDistance = f.width * CAMERA * act.resources.displayMetrics.density
+        cover.by = if (spot.binding) f.width / spot.w.toFloat() else 0f
+        cover.invalidate()
+        edge.board(foreEdge(spot), cover.cameraDistance, f.height * THICKNESS)
         book.pivotX = 0f
         book.pivotY = 0f
         return true
     }
 
+    /**
+     * Plays the book from [from] to [to] (see [pose]), always over the same time, so that closing
+     * is opening played backwards; [then] is called at the end.
+     */
     private fun run(from: Float, to: Float, then: () -> Unit) {
         animator?.cancel()
-        animator = ValueAnimator.ofFloat(from, to).apply {
+        val a = ValueAnimator.ofFloat(from, to).apply {
             duration = OPEN_MS
+            // Evenly: pose eases each part of the way itself. Eased twice, the book would hang at
+            // either end and leap through the middle, a long way from one frame to the next.
+            interpolator = null
             addUpdateListener { pose(it.animatedValue as Float) }
             addListener(object : AnimatorListenerAdapter() {
                 private var cancelled = false
@@ -251,11 +301,32 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
                 }
 
                 override fun onAnimationEnd(animation: Animator) {
-                    if (!cancelled) then()
+                    if (cancelled) return
+                    steady(false)
+                    then()
                 }
             })
-            start()
         }
+        animator = a
+        afterFrame { if (animator === a) a.start() }
+    }
+
+    /**
+     * Does [action] once the frame being drawn now is on the screen. A window's first frame can be
+     * long in coming, and an animation timed from before it would leap past its start.
+     */
+    private fun afterFrame(action: () -> Unit) {
+        var done = false
+        val once = Runnable {
+            if (!done) {
+                done = true
+                action()
+            }
+        }
+        if (Build.VERSION.SDK_INT >= 29) layer.viewTreeObserver.registerFrameCommitCallback(once) else layer.doOnPreDraw { layer.post(once) }
+        // Not later than this all the same, should no frame be drawn.
+        layer.postDelayed(once, FRAME_WAIT_MS)
+        layer.invalidate()
     }
 
     /** Shows the book [t] of the way from shut on the shelf, 0, to its page filling the screen, 1. */
@@ -264,9 +335,8 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         // A bare page grows all the way through; a book's only once its cover has begun to open.
         val zoom = if (bare) EASE.getInterpolation(t) else zoom(t)
         val angle = angle(t)
-        // Past the upright, it is the inside of the cover that shows; either stands edge-on, unseen, while the other shows.
+        // Past the upright, it is the inside of the board that shows, and its front stands edge-on, unseen.
         cover.rotationY = -angle.coerceAtMost(90f)
-        inside.rotationY = -angle.coerceAtLeast(90f)
         edge.turn(-angle)
         // A shelf that was never shown has no size yet to make the book smaller by: it comes back
         // under a book that was opened elsewhere, whose page fills it whatever its size will be.
@@ -280,14 +350,16 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
     private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 
     /**
-     * The edge of a cover's board, seen as the cover swings on its spine: the band between the
-     * front of the board at its outer edge and its back, which lies [thick] further from the eye.
-     * Both are seen as the cover itself is (View.rotationY), so the band stays on the cover's
-     * edge; it is hidden under the cover while the book is shut.
+     * The board of a cover, seen as the cover swings on its spine: its edge, the band between the
+     * front of the board at its outer edge and its back, which lies [thick] further from the eye;
+     * and once the cover is past upright, its back, the inside of the cover, which faces the eye
+     * from there. All of it is seen as the cover itself is (View.rotationY), so the band stays on
+     * the cover's edge; it is hidden under the cover while the book is shut.
      */
     private class Edge(ctx: Activity) : View(ctx) {
         private val band = Path()
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val inside = Paint(Paint.ANTI_ALIAS_FLAG)
         private val dpi = ctx.resources.displayMetrics.densityDpi.toFloat()
         private var turned = 0f
         private var thick = 0f
@@ -312,7 +384,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         }
 
         override fun onDraw(canvas: Canvas) {
-            if (thick <= 0f || width == 0) return
+            if (width == 0) return
             val a = Math.toRadians(turned.toDouble())
             val cos = cos(a).toFloat()
             val sin = sin(a).toFloat()
@@ -329,6 +401,21 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
             corner(backX, backZ, -1f, false)
             band.close()
             canvas.drawPath(band, paint)
+            if (turned >= -90f) return
+            // The inside, from the back of the board at the spine to its outer edge, lit the more
+            // the more it faces the eye. It lies beside the page, never over it: what of it would,
+            // so near the spine, is the board's thickness, which the page hides.
+            inside.color = shade(INSIDE, INSIDE_DARK + (1 - INSIDE_DARK) * -cos)
+            band.rewind()
+            corner(-thick * sin, thick * cos, -1f, true)
+            corner(backX, backZ, -1f, false)
+            corner(backX, backZ, 1f, false)
+            corner(-thick * sin, thick * cos, 1f, false)
+            band.close()
+            canvas.save()
+            canvas.clipRect(-SPREAD * w, -SPREAD * height, 0f, SPREAD * height)
+            canvas.drawPath(band, inside)
+            canvas.restore()
         }
 
         /** Adds to the band the point [x] along and [z] away from the spine, at its top (-1) or bottom ([end] 1), as the eye sees it. */
@@ -531,30 +618,62 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         private const val INSIDE = 0xFFD9CDB4.toInt()
 
         /** How thick the board of a cover is, a part of the height of the book. */
-        private const val THICKNESS = 0.016f
+        private const val THICKNESS = 0.03f
 
-        /** How much darker the edge of the board is than the cover, turned away from the light. */
-        private const val EDGE_SHADE = 0.6f
+        /** How dark the inside of the cover is as it stands edge-on, against facing the eye. */
+        private const val INSIDE_DARK = 0.7f
 
-        /** The edge of a board whose cover looks like [picture]: the colour of the cover along its outer edge, in shade. */
-        private fun foreEdge(picture: Bitmap): Int {
+        /** How far beyond the book, in its sizes, the open cover may reach. */
+        private const val SPREAD = 4f
+
+        /** [color] with its light made [by] times as much. */
+        private fun shade(color: Int, by: Float) =
+            Color.rgb((Color.red(color) * by).toInt(), (Color.green(color) * by).toInt(), (Color.blue(color) * by).toInt())
+
+        /** The longest a book waits for its first frame to be shown before it starts to open or close all the same. */
+        private const val FRAME_WAIT_MS = 250L
+
+        /** How much darker the edge of the board is than the cover, turned a little away from the light. */
+        private const val EDGE_SHADE = 0.85f
+
+        /**
+         * The edge of the board of the cover at [spot]: the colour of the cover along its outer
+         * edge as it shows on the shelf, which wraps round the board, a little in shade.
+         */
+        private fun foreEdge(spot: Spot): Int {
             var r = 0
             var g = 0
             var b = 0
             try {
-                // A picture the drawing hardware keeps cannot be looked into.
-                if (Build.VERSION.SDK_INT >= 26 && picture.config == Bitmap.Config.HARDWARE) return EDGE
-                val x = (picture.width - 2).coerceAtLeast(0)
+                // A picture the drawing hardware keeps cannot be looked into, but a copy of it can.
+                val picture = if (Build.VERSION.SDK_INT >= 26 && spot.picture.config == Bitmap.Config.HARDWARE) {
+                    spot.picture.copy(Bitmap.Config.ARGB_8888, false) ?: return EDGE
+                } else {
+                    spot.picture
+                }
+                // Where the outer edge of the cover on the shelf is in its picture.
+                val back = Matrix()
+                spot.fit?.invert(back)
+                val at = FloatArray(2)
                 for (i in 0 until SAMPLES) {
-                    val c = picture.getPixel(x, (picture.height - 1) * i / (SAMPLES - 1))
+                    at[0] = spot.w - 1.5f
+                    at[1] = spot.h * (i + 0.5f) / SAMPLES
+                    if (spot.fit != null) {
+                        back.mapPoints(at)
+                    } else {
+                        at[0] *= picture.width / spot.w.toFloat()
+                        at[1] *= picture.height / spot.h.toFloat()
+                    }
+                    val c = picture.getPixel(at[0].toInt().coerceIn(0, picture.width - 1), at[1].toInt().coerceIn(0, picture.height - 1))
                     r += Color.red(c)
                     g += Color.green(c)
                     b += Color.blue(c)
                 }
+                if (picture !== spot.picture) picture.recycle()
             } catch (e: Exception) {
                 return EDGE
             }
-            return Color.rgb((r * EDGE_SHADE / SAMPLES).toInt(), (g * EDGE_SHADE / SAMPLES).toInt(), (b * EDGE_SHADE / SAMPLES).toInt())
+            return shade(Color.rgb(r / SAMPLES, g / SAMPLES, b / SAMPLES), EDGE_SHADE)
         }
 
         private const val SAMPLES = 9
@@ -583,7 +702,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
                     fit.set(image.imageMatrix)
                 }
                 fit.postTranslate(image.paddingLeft.toFloat(), image.paddingTop.toFloat())
-                return Spot(at[0], at[1], from.width, from.height, own, fit)
+                return Spot(at[0], at[1], from.width, from.height, own, fit, (from as? RatioImageView)?.binding == true)
             }
             return Spot(at[0], at[1], from.width, from.height, from.snapshot() ?: return null)
         }

@@ -75,9 +75,6 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         setContentView(R.layout.activity_reader)
         // The page covers the whole window, so the window need not paint anything under it.
         window.setBackgroundDrawable(null)
-        // A page of text stands still: a screen that can refresh faster than 60 times a second
-        // only uses more power doing so, unless the reader asks for it.
-        s.refresh(this)
         root = findViewById(R.id.root)
         content = findViewById(R.id.content)
         menu = findViewById(R.id.menu)
@@ -346,10 +343,21 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         }
     }
 
+    /**
+     * A page of text stands still: a screen that can refresh faster than 60 times a second only
+     * uses more power doing so, unless the reader asks for it. Not while the book still opens on
+     * the shelf under the reader, unseen: the screen would change speed in the middle of it,
+     * which shows as a flicker.
+     */
+    private fun paceScreen() {
+        if (!hidden) s.refresh(this)
+    }
+
     /** Shows the reader, once its book has opened on the shelf, and makes it a solid window again. */
     private fun reveal() {
         if (!hidden || isFinishing) return
         hidden = false
+        paceScreen()
         window.attributes = window.attributes.apply { alpha = 1f }
         window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
         // The shelf under it need no longer be drawn: once the reader is seen, two frames on. Made
@@ -385,6 +393,12 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         if (hidden) BookOpening.handoff = null
         // The shelf closes the book from the page it was at, as it is seen, but for the menu.
         if (!fromShelf || hidden) return goBack(null)
+        // The book closes on the shelf as smoothly as the screen can show it, which changes speed
+        // for that now, on a page standing still, rather than once the book has begun to close.
+        window.attributes = window.attributes.apply {
+            preferredDisplayModeId = ReaderSettings.fastestMode(this@ReaderActivity)
+            preferredRefreshRate = 0f
+        }
         if (!menu.isVisible) return capture(::upright)
         menu.visibility = View.GONE
         root.postOnAnimation { root.postOnAnimation { capture(::upright) } }
@@ -458,7 +472,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         pageTurn.paper = s.lit(s.palette.bg)
         // In the colour of the text, but fainter.
         info.color = s.litPalette.fg and 0xFFFFFF or 0x99000000.toInt()
-        s.refresh(this)
+        paceScreen()
         // In paged mode page turns are ours; in scroll mode the content scrolls itself.
         content.consumeAll = !s.vertical
         engine?.applySettings()

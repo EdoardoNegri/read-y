@@ -431,8 +431,9 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 if (last == null) return@runOnUiThread toast(R.string.nothing_read)
-                // Its page grows out of the button, wherever the book stands; it is closed on its
-                // own shelf, see closeBook.
+                // Out of its cover, if that is in view; else its page grows out of the button. It
+                // is closed on its own shelf all the same, see closeBook.
+                coverInView(last)?.let { return@runOnUiThread read(last, it) }
                 read(last, findViewById(R.id.resume), bare = true)
             }
         }
@@ -454,6 +455,16 @@ class MainActivity : AppCompatActivity() {
 
     /** Opens a book while the reader starts behind it, see [read]. */
     private val detached by lazy { BookOpening.Detached(this) }
+
+    /** The cover of [f] on the shelf, if the whole of it is in view. */
+    private fun coverInView(f: File): View? {
+        val at = adapter.indexOf(f)
+        if (at < 0) return null
+        val cover = shelf.findViewHolderForAdapterPosition(at)?.itemView?.findViewById<View>(R.id.cover) ?: return null
+        val seen = Rect()
+        val whole = cover.isShown && cover.getGlobalVisibleRect(seen) && seen.width() == cover.width && seen.height() == cover.height
+        return if (whole) cover else null
+    }
 
     /** The reader came back with [left], the page its book was at: the book closes from it, where it stands. */
     private fun closeBook(left: BookOpening.Left) {

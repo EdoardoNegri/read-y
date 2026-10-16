@@ -241,6 +241,10 @@ class ReaderSettings(ctx: Context) {
             return d.supportedModes.filter { it.physicalWidth == now.physicalWidth && it.physicalHeight == now.physicalHeight }
         }
 
+        /** The way the screen of [act] is drawn most often a second, as [refresh] would choose it; 0 if none can be chosen. */
+        fun fastestMode(act: Activity): Int =
+            displayOf(act)?.let { d -> sameSize(d).maxByOrNull { it.refreshRate }?.modeId } ?: 0
+
         /** How many times a second the screen of [act] can be drawn, from the least; one rate or none if it cannot be chosen. */
         fun refreshRates(act: Activity): List<Int> =
             displayOf(act)?.let { d -> sameSize(d).map { it.refreshRate.roundToInt() }.distinct().sorted() }.orEmpty()
