@@ -58,6 +58,25 @@ interface ReaderEngine {
      */
     fun pagesAt(fraction: Float): Pair<Pair<Int, Int>?, Pair<Int, Int>?> = null to null
 
+    /**
+     * Where in the whole book, 0..1, the page nearest to the place [fraction] stands, as
+     * [ReaderHost.onPosition] tells it for the page shown: the knob of the seek bar is let go on a page, never between two.
+     */
+    fun snap(fraction: Float): Float = fraction
+
+    /**
+     * Whether the book ends on its cover, shown after its last page as if the book were closed,
+     * and the end of the book, 1, is that cover rather than the last page.
+     */
+    val hasCover: Boolean get() = false
+
+    /**
+     * Keeps [bottom] pixels at the foot of the screen free of the cover that ends the book, which
+     * is then shown in the room above them, for the menu that stays over them while it is shown; 0
+     * gives the room back.
+     */
+    fun coverInset(bottom: Int) {}
+
     /** The book's table of contents: each line's title and how deep it is nested. Empty if it has none. */
     val contents: List<Pair<String, Int>> get() = emptyList()
 
@@ -78,6 +97,12 @@ interface ReaderEngine {
      * itself, as the margins of the text: what is shown around the text may go there.
      */
     val innerMargin: Int get() = 0
+
+    /**
+     * Changes whenever the places the engine tells in the whole book, 0..1 (the lines of [contentPositions], [chapterEnd]),
+     * are not where they were: a book counted in pages has them move as the pages of its chapters are counted.
+     */
+    val positionsVersion: Int get() = 0
 
     /** Where in the whole book, 0..1, the chapter being read ends; null if the engine does not read it by chapters. */
     val chapterEnd: Float? get() = null
@@ -124,7 +149,13 @@ object BookPrep {
         if (prepared?.first == file.path || KeptBook.holds(file)) return
         prepared?.second?.let(::discard)
         prepared = file.path to reading.submit(Callable<Closeable> { if (Library.isFlowing(file)) FlowBook.open(file) else PageSource.open(file) })
+        // One that nobody takes, e.g. read as a finger rested on it, is not kept open for long.
+        Library.main.removeCallbacks(expire)
+        Library.main.postDelayed(expire, EXPIRE_MS)
     }
+
+    private const val EXPIRE_MS = 5_000L
+    private val expire = Runnable { drop() }
 
     /** The book [file] as one of [type], kept open (KeptBook) or read by [prepare]; null if neither. Blocking. */
     fun <T : Closeable> take(file: File, type: Class<T>): T? {

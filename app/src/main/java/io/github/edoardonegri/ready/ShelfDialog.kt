@@ -140,14 +140,16 @@ class ShelfDialog(private val ctx: Context) {
     }
 
     /** The name of a field, in gold over it. */
-    private fun fieldLabel(label: Int) {
-        fields.addView(TextView(ctx).apply {
+    private fun fieldLabel(label: Int): TextView {
+        val name = TextView(ctx).apply {
             setText(label)
             typeface = Typeface.SERIF
             textSize = 13f
             setTextColor(ContextCompat.getColor(ctx, R.color.gold))
             if (fields.isNotEmpty()) setPadding(0, dp(10), 0, 0)
-        })
+        }
+        fields.addView(name)
+        return name
     }
 
     /** A field named [label] holding [value], which can be typed into; read it once the dialog closes, see [onClose]. */
@@ -184,6 +186,14 @@ class ShelfDialog(private val ctx: Context) {
         val menu = BrassDropdown(ctx, onPick)
         fields.addView(menu, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)))
         return menu
+    }
+
+    /** Like [choice], with the name of the field given too, to be shown or hidden along with the menu. */
+    fun namedChoice(label: Int, onPick: (Int) -> Unit): Pair<View, BrassDropdown> {
+        val name = fieldLabel(label)
+        val menu = BrassDropdown(ctx, onPick)
+        fields.addView(menu, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)))
+        return name to menu
     }
 
     /** A drop-down menu of [labels] in place of a column of choices, with [selected] picked; [onPick] is told what is picked. */

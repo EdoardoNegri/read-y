@@ -68,6 +68,11 @@ Tap your book again.</string>
     <string name="delete">Delete</string>
     <string name="delete_book">%1$s will be deleted from the phone.</string>
     <string name="delete_shelf" tools:ignore="PluralsCandidate">The shelf %1$s will be deleted from the phone with everything on it: %2$d books and %3$d shelves.</string>
+    <string name="already_on_shelf">That book is already on your shelf.</string>
+    <plurals name="already_here">
+        <item quantity="one">That book was already on your shelf, so it was not added again.</item>
+        <item quantity="other">%1$d books were already on your shelf, so they were not added again.</item>
+    </plurals>
     <string name="cannot_import">That file is not a book Read-y can open (EPUB, PDF, MOBI, CBZ or TXT), or it could not be read.</string>
     <string name="add_books">Add books</string>
     <string name="original_title">Remove the original?</string>
@@ -85,6 +90,8 @@ Tap below and choose that file: Read-y will remove it, so that the book is kept 
     <string name="in_book">Book Page</string>
     <string name="read">read</string>
     <string name="back">Back</string>
+    <string name="the_end">The end</string>
+    <string name="the_end_short">End</string>
     <string name="book_missing">This book is no longer in the library.</string>
     <string name="book_unreadable">Cannot open %1$s</string>
     <string name="reader_hint">Tap the middle of the screen for the menu</string>
@@ -177,9 +184,20 @@ Tap below and choose that file: Read-y will remove it, so that the book is kept 
     <string name="cover_first">First page</string>
     <string name="cover_own">Own picture</string>
     <string name="cover_new">New picture…</string>
+    <string name="cover_book">The book\'s own</string>
+    <string name="cover_made">Made for it</string>
+    <string name="field_tone">Color</string>
+    <string name="tone_red">Red</string>
+    <string name="tone_blue">Blue</string>
+    <string name="tone_green">Green</string>
+    <string name="tone_purple">Purple</string>
+    <string name="tone_brown">Brown</string>
+    <string name="tone_black">Black</string>
+    <string name="tone_teal">Teal</string>
+    <string name="tone_grey">Grey</string>
     <string name="field_name">Name</string>
     <string name="field_author">Author</string>
-    <string name="field_aspect">Aspect</string>
+    <string name="field_aspect">Cover</string>
     <string name="font_import">Import a font…</string>
     <string name="cannot_read_font">That file is not a font that can be used (TTF or OTF).</string>
     <string name="cannot_read_picture">That picture could not be read.</string>

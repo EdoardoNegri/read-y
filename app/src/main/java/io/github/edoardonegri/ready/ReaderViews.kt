@@ -131,6 +131,12 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     /** The mark of the chapter being read, or -1. */
     var current by changes(-1, ::invalidate)
 
+    /**
+     * Whether the book ends on its cover, at the end of the line: the plate that stands over it says
+     * so, rather than giving the number of the last chapter.
+     */
+    var hasEnd = false
+
     /** Where the place being read is, 0..1 along the line, or NaN: the number of its chapter stands over it. */
     var place by changes(Float.NaN, ::invalidate)
 
@@ -283,7 +289,7 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         val chapter = if (!seeking.isNaN()) chapterAt(seeking) else current
         val where = if (!seeking.isNaN()) seeking else place
         val plated = chapter in marks.indices
-        val number = (chapter + 1).toString()
+        val number = if (hasEnd && !where.isNaN() && where >= END_AT) context.getString(R.string.the_end_short) else (chapter + 1).toString()
         paint.typeface = BOLD
         paint.textSize = sp(NUMBER_SP)
         if (plated) {
@@ -367,7 +373,7 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         }
         // Only the chapter the place is in is numbered, over its mark, or at the edge of the
         // glass where its mark lies beyond it.
-        val number = (chapter + 1).toString()
+        val number = if (hasEnd && at >= END_AT) context.getString(R.string.the_end_short) else (chapter + 1).toString()
         val half = paint.measureText(number) / 2 + LENS_PAD_DP * d
         paint.color = BRIGHT
         canvas.drawText(number, inLens(x(marks[chapter])).coerceIn(lens.left + half, lens.right - half), baseline, paint)
@@ -416,6 +422,9 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         /** How wide the lens is, how far its number keeps from its rim, and how far apart it shows the chapters at least, in dp. */
         const val LENS_DP = 110f
         const val LENS_PAD_DP = 6f
+
+        /** From how far along the line, 0..1, a place is the end of the book, which is the cover. */
+        const val END_AT = 0.9995f
         const val MIN_APART_DP = 16f
 
         /** The most the lens enlarges the line. */

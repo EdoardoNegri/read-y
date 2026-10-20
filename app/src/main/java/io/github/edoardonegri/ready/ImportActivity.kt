@@ -51,6 +51,7 @@ class ImportActivity : Activity() {
             // The file it came from goes, now that the library has the book.
             val kept = imported?.moved == true && !Store.removeOriginal(uri)
             runOnUiThread {
+                if (imported?.duplicate == true) Toast.makeText(this, R.string.already_on_shelf, Toast.LENGTH_SHORT).show()
                 when {
                     imported == null -> {
                         Toast.makeText(this, R.string.cannot_import, Toast.LENGTH_LONG).show()

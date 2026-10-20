@@ -3,7 +3,9 @@ package io.github.edoardonegri.ready
 import android.annotation.SuppressLint
 import android.content.Context
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.ProgressBar
@@ -11,6 +13,7 @@ import android.widget.TextView
 import androidx.core.view.isVisible
 import androidx.recyclerview.widget.RecyclerView
 import java.io.File
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
@@ -62,6 +65,14 @@ class ShelfAdapter(
         /** What stands in this place now; read by the threads that load its cover, see [onBindViewHolder]. */
         @Volatile
         var file: File? = null
+
+        /** Whether a shelf in this place shows everything that stands in it yet. */
+        @Volatile
+        var whole = true
+
+        /** Whether the miniature in this place is the one kept from the last use of the app, which may be out of date. */
+        @Volatile
+        var kept = false
     }
 
     fun indexOf(f: File) = items.indexOf(f)
@@ -152,7 +163,7 @@ class ShelfAdapter(
     fun allShown(shelf: RecyclerView): Boolean {
         for (i in 0 until shelf.childCount) {
             val h = shelf.getChildViewHolder(shelf.getChildAt(i)) as? Holder ?: continue
-            if (h.cover.drawable == null) return false
+            if (h.cover.drawable == null || !h.whole) return false
         }
         return true
     }
@@ -160,7 +171,37 @@ class ShelfAdapter(
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
         Holder(LayoutInflater.from(parent.context).inflate(R.layout.item_book, parent, false)).also {
             it.plaque.background = PlaqueDrawable(parent.resources.displayMetrics.density)
+            readyToOpen(it, ViewConfiguration.get(parent.context).scaledTouchSlop)
         }
+
+    /**
+     * A finger that rests on a book for a moment, without moving, is about to open it, most likely:
+     * the book is read in the background from then, rather than from when the finger is lifted. A
+     * finger that moves is scrolling the shelf, and a book chosen along with others is not opened.
+     */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun readyToOpen(h: Holder, slop: Int) {
+        var downX = 0f
+        var downY = 0f
+        val prepare = Runnable {
+            val f = h.file ?: return@Runnable
+            if (picked == null && !moving && Library.isBook(f)) BookPrep.prepare(f)
+        }
+        h.itemView.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = e.x
+                    downY = e.y
+                    v.postDelayed(prepare, REST_MS)
+                }
+                MotionEvent.ACTION_MOVE ->
+                    if (abs(e.x - downX) > slop || abs(e.y - downY) > slop) v.removeCallbacks(prepare)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> v.removeCallbacks(prepare)
+            }
+            // Only watched: the tap, the long press and the scrolling are the shelf's own.
+            false
+        }
+    }
 
     override fun onBindViewHolder(h: Holder, position: Int) {
         val f = items[position]
@@ -220,11 +261,52 @@ class ShelfAdapter(
             h.progress.visibility = View.GONE
             if (shelfSpec.width <= 0) return
             val preview = Library.cachedFolderPreview(f, shelfSpec)
-            h.cover.setImageBitmap(preview)
-            if (preview == null) Library.shelfWork.execute {
-                if (h.file != f) return@execute
-                val bmp = Library.folderPreview(ctx, f, shelfSpec)
-                Library.main.post { if (h.file == f) h.cover.setImageBitmap(bmp) }
+            h.whole = preview != null
+            h.kept = false
+            if (preview != null) {
+                h.cover.setImageBitmap(preview)
+                return
+            }
+            // First the books of the shelf and the wooden case of each shelf in it; then what stands in
+            // those shelves, with the wooden cases of the shelves inside them; then what stands in those.
+            val draft = Library.cachedFolderDraft(f, shelfSpec)
+            val case = if (draft == null) Library.cachedEmptyCase(ctx, f, shelfSpec) else null
+            h.cover.setImageBitmap(draft ?: case)
+            // As the covers are, the miniature kept from the last use is brought along with the first, or else the
+            // wooden case, if it could not be drawn at once. It stays until the miniature is drawn anew.
+            if (draft == null) Library.queue(Library.WORK_FIRST) {
+                if (h.file != f) return@queue
+                val kept = Library.savedFolderPreview(ctx, f, shelfSpec)
+                val wood = if (kept == null && case == null) Library.folderPreview(ctx, f, shelfSpec, 0, Library.DETAIL_CASE) else null
+                Library.main.post {
+                    if (h.file != f || h.whole) return@post
+                    if (kept != null) {
+                        h.kept = true
+                        h.cover.setImageBitmap(kept)
+                    } else if (wood != null && h.cover.drawable == null) h.cover.setImageBitmap(wood)
+                }
+            }
+            Library.later(Library.WORK_BOOKS_IN_SHELF) {
+                if (h.file != f) return@later
+                val books = Library.folderPreview(ctx, f, shelfSpec, 0, Library.DETAIL_BOOKS)
+                val complete = Library.cachedFolderPreview(f, shelfSpec) != null
+                Library.main.post {
+                    if (h.file != f) return@post
+                    // The kept miniature shows more than the books alone, and stays until all is drawn.
+                    if (!h.kept || complete) h.cover.setImageBitmap(books)
+                    if (complete) h.whole = true
+                }
+                if (complete) Library.keepFolderPreview(ctx, f, shelfSpec, books)
+                if (!complete) Library.queue(Library.WORK_NESTED) {
+                    if (h.file != f) return@queue
+                    val everything = Library.folderPreview(ctx, f, shelfSpec)
+                    Library.main.post {
+                        if (h.file != f) return@post
+                        h.cover.setImageBitmap(everything)
+                        h.whole = true
+                    }
+                    Library.keepFolderPreview(ctx, f, shelfSpec, everything)
+                }
             }
             return
         }
@@ -243,10 +325,11 @@ class ShelfAdapter(
         val read = if (h.progress.isVisible) (st.percent * 100).roundToInt() else 0
         describeBook(h, title, known?.author.orEmpty(), read, plate.favorite, plate.finished)
         val cached = Library.cachedCover(f)
+        h.whole = true
         h.cover.setImageBitmap(cached)
-        if (cached == null) Library.shelfWork.execute {
+        if (cached == null) Library.queue(Library.WORK_FIRST) {
             // Scrolled past before its turn came: it is loaded when it is shown again.
-            if (h.file != f) return@execute
+            if (h.file != f) return@queue
             val meta = Library.meta(ctx, f)
             val bmp = Library.cover(ctx, f)
             Library.main.post {
@@ -262,6 +345,9 @@ class ShelfAdapter(
 
     private companion object {
         const val FAINT = 0.4f
+
+        /** How long a finger rests on a book before it is read in the background. */
+        const val REST_MS = 40L
 
         /**
          * What a place is told when it changes but a little, e.g. as it is chosen or carried: so

@@ -19,6 +19,7 @@ import java.io.FileNotFoundException
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.FutureTask
 
 /** Lets [Store] reach the phone's documents from anywhere in the app, the widget included. */
 class ReadyApp : Application() {
@@ -268,8 +269,31 @@ object Store {
     fun length(f: File) = stat(f).size.coerceAtLeast(0)
     fun lastModified(f: File) = stat(f).modified
 
-    /** Whatever is in the folder [dir], hidden things included, as it is now. */
+    /** The folders being listed just now, by their paths, so that a second one asking for the same waits for the first. */
+    private val listing = ConcurrentHashMap<String, FutureTask<List<File>>>()
+
+    /**
+     * Whatever is in the folder [dir], hidden things included, as it is now. A folder that is being
+     * listed already, e.g. by the shelf as it is shown and by the work that readies it as the app
+     * starts, is not listed twice at once: the second waits for the first.
+     */
     fun list(dir: File): List<File> {
+        val mine = FutureTask { listNow(dir) }
+        val running = listing.putIfAbsent(dir.path, mine)
+        if (running != null) return try {
+            running.get()
+        } catch (e: Exception) {
+            emptyList()
+        }
+        try {
+            mine.run()
+            return mine.get()
+        } finally {
+            listing.remove(dir.path)
+        }
+    }
+
+    private fun listNow(dir: File): List<File> {
         val t = tree ?: return emptyList()
         val id = docId(dir) ?: return emptyList()
         val kids = ArrayList<File>()

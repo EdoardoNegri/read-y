@@ -32,14 +32,17 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import java.util.concurrent.LinkedBlockingDeque
+import java.util.concurrent.PriorityBlockingQueue
 import java.util.concurrent.ThreadFactory
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.ceil
 
 /** What a book says about itself. [published] is a day, a month or a year, as 2011-05-17, 2011-05 or 2011; empty if unknown. */
@@ -141,7 +144,12 @@ object Library {
     private const val WOOD = "wood:"
 
     /** What is remembered of the shelves and the books by their paths, by its prefix, with the name it has in the backup. */
-    private val BY_PATH = linkedMapOf(ORDER to "orders", TITLE to "titles", AUTHOR to "authors", COVER to "covers", WOOD to "woods")
+    private const val MODE = "covermode:"
+    private const val TONE = "tone:"
+    private val BY_PATH = linkedMapOf(
+        ORDER to "orders", TITLE to "titles", AUTHOR to "authors", COVER to "covers", WOOD to "woods",
+        MODE to "covermodes", TONE to "tones",
+    )
     private const val FINISHED = "finished"
 
     /** How far into a book it counts as read to the end: the last page, with room for rounding. */
@@ -157,27 +165,51 @@ object Library {
     val io: ExecutorService = Executors.newFixedThreadPool(2, behind("library"))
 
     /**
-     * Reads the covers and draws the miniatures the shelves show, the last asked for first: those
-     * in view rather than those scrolled past, which the shelf may no longer want by then. What is
-     * asked for [ahead] waits behind all of that.
+     * Reads the covers and draws the miniatures the shelves show, in the order the reader sees them
+     * wanted: first the books of the shelf and the wooden case of each shelf in it, then what
+     * stands in those shelves, and then what stands on the shelves in those. What is asked for
+     * [ahead] comes last. Of the same kind the first asked for is done first, which is the top left
+     * of the shelf.
      */
-    val shelfWork: ExecutorService = ThreadPoolExecutor(
-        2, 2, 0L, TimeUnit.MILLISECONDS,
-        object : LinkedBlockingDeque<Runnable>() {
-            override fun offer(e: Runnable) = if (e is Ahead) offerLast(e) else offerFirst(e)
-        },
-        behind("shelf"),
-    )
+    private val shelfWork = ThreadPoolExecutor(
+        2, 2, 0L, TimeUnit.MILLISECONDS, PriorityBlockingQueue<Runnable>(), behind("shelf"),
+    ).apply {
+        // Else the first two jobs would be run at once, whatever waits behind them.
+        prestartAllCoreThreads()
+    }
+
+    /** What is done first in [shelfWork]: lower is sooner. */
+    const val WORK_FIRST = 0
+    const val WORK_BOOKS_IN_SHELF = 1
+    const val WORK_NESTED = 2
+    const val WORK_AHEAD = 3
+
+    private val jobs = AtomicLong()
+
+    private class Job(private val priority: Int, private val work: () -> Unit) : Runnable, Comparable<Job> {
+        private val order = jobs.incrementAndGet()
+        override fun run() = work()
+        override fun compareTo(other: Job): Int =
+            if (priority != other.priority) priority.compareTo(other.priority) else order.compareTo(other.order)
+    }
+
+    /** Has [work] done in the background for the shelves, after all that was asked with a lower [priority]. */
+    fun queue(priority: Int, work: () -> Unit) = shelfWork.execute(Job(priority, work))
+
+    /**
+     * Has [work] queued once what is being done on the screen right now is done: the places of a
+     * shelf are all asked for in one go, and what is asked first must not start before the covers
+     * of the places still to be asked for have been queued behind it.
+     */
+    fun later(priority: Int, work: () -> Unit) {
+        main.post { queue(priority, work) }
+    }
 
     /**
      * Does [work] for the shelves, such as loading a cover about to come into view, once nothing
-     * asked of [shelfWork] otherwise is waiting; work asked for ahead is done in the order asked.
+     * asked of [queue] otherwise is waiting; work asked for ahead is done in the order asked.
      */
-    fun ahead(work: () -> Unit) = shelfWork.execute(Ahead(work))
-
-    private class Ahead(private val work: () -> Unit) : Runnable {
-        override fun run() = work()
-    }
+    fun ahead(work: () -> Unit) = queue(WORK_AHEAD, work)
 
     /** Threads named [name] that work behind the screen, giving way to the thread that draws it. */
     private fun behind(name: String) = ThreadFactory { work ->
@@ -553,7 +585,7 @@ object Library {
      * file it came from is to go, so that the book is kept only once: it was copied, or the same
      * book was found in the library and the file is known to lie elsewhere.
      */
-    class Imported(val book: File, val moved: Boolean)
+    class Imported(val book: File, val moved: Boolean, val duplicate: Boolean = false)
 
     /**
      * Copies the book another app handed over as [uri] onto the shelf [dir], by default the
@@ -566,30 +598,32 @@ object Library {
         // A book of the library opened from elsewhere, e.g. a file manager, is read where it stands.
         if (from != null && from.path.startsWith(root().path + File.separator)) return if (isBook(from)) Imported(from, false) else null
         // The name the other app gives it is only a nicety.
-        val name = (if (uri.scheme == "content") Store.describe(uri).first else null)
-            ?: uri.lastPathSegment?.substringAfterLast('/').orEmpty()
+        val (given, declared) = if (uri.scheme == "content") Store.describe(uri) else (null to -1L)
+        val name = given ?: uri.lastPathSegment?.substringAfterLast('/').orEmpty()
         Store.mkdirs(dir)
+        // An app that says how big the file is lets it be copied onto the shelf in one go, rather than through a copy of its own.
+        if (declared > 0) {
+            try {
+                return importDirect(ctx, uri, mime, dir, name, declared, from)
+            } catch (e: SizeMismatch) {
+                Log.w(TAG, "The size of $name is not what it was said to be", e)
+            }
+        }
         val temp = File(ctx.cacheDir, "import")
-        val head = ByteArray(68)
         (ctx.contentResolver.openInputStream(uri) ?: return null).use { ins ->
             FileOutputStream(temp).use { ins.copyTo(it) }
         }
-        temp.inputStream().use { it.read(head) }
-        // What the file starts with says best what it is.
-        val start = String(head, Charsets.ISO_8859_1)
-        val zipped = start.startsWith("PK")
-        val ext = when {
-            start.startsWith("%PDF") -> "pdf"
-            zipped && (name.endsWith(".cbz", true) || mime?.contains("cbz") == true || mime?.contains("comicbook") == true) -> "cbz"
-            zipped && (name.endsWith(".epub", true) || mime == "application/epub+zip" || mime == "application/octet-stream" || mime == null) -> "epub"
-            start.startsWith("BOOKMOBI", 60) -> "mobi"
-            name.endsWith(".txt", true) || mime == "text/plain" -> "txt"
-            else -> {
-                temp.delete()
-                return null
-            }
+        val ext = kindOf(headOf(temp.inputStream()), name, mime)
+        if (ext == null) {
+            temp.delete()
+            return null
         }
         val base = (cleanName(name.substringBeforeLast('.', name)) ?: "Book").take(120)
+        // The same book under another name is not added a second time either.
+        twin(temp.length(), ext) { digest(temp.inputStream()) }?.let { existing ->
+            temp.delete()
+            return Imported(existing, from != null, duplicate = true)
+        }
         var target = File(dir, "$base.$ext")
         var n = 2
         // The same book handed over again is not added a second time.
@@ -609,7 +643,100 @@ object Library {
         touched(target)
         // A book found in the library already may be the very file handed over, under another
         // name for it; that is only let go where it is known to lie elsewhere.
-        return Imported(target, fresh || from != null)
+        return Imported(target, fresh || from != null, duplicate = !fresh)
+    }
+
+    /** The file handed over is not as big as the other app said it was. */
+    private class SizeMismatch : IOException()
+
+    /**
+     * [import] for a file whose size is known: it is read once, straight onto the shelf. Only when
+     * a book of the same size is already there is the file read through first, to see if it is the
+     * same book. [SizeMismatch] if what was copied is not as big as it was said to be.
+     */
+    private fun importDirect(ctx: Context, uri: Uri, mime: String?, dir: File, name: String, size: Long, from: File?): Imported? {
+        val ext = kindOf(headOf(ctx.contentResolver.openInputStream(uri) ?: return null), name, mime) ?: return null
+        val base = (cleanName(name.substringBeforeLast('.', name)) ?: "Book").take(120)
+        twin(size, ext) { digest(ctx.contentResolver.openInputStream(uri) ?: throw IOException("Cannot read $uri")) }?.let {
+            return Imported(it, from != null, duplicate = true)
+        }
+        var target = File(dir, "$base.$ext")
+        var n = 2
+        while (Store.exists(target) && Store.length(target) != size) target = File(dir, "$base (${n++}).$ext")
+        val fresh = !Store.exists(target)
+        if (fresh) {
+            try {
+                val copied = (ctx.contentResolver.openInputStream(uri) ?: return null).use { ins ->
+                    Store.outputStream(target).use { ins.copyTo(it) }
+                }
+                // Only a whole copy lets the file it came from go.
+                if (copied != size || Store.length(target) != size) throw SizeMismatch()
+            } catch (e: SizeMismatch) {
+                Store.delete(target)
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Cannot keep the book $name", e)
+                Store.delete(target)
+                return null
+            }
+        }
+        touched(target)
+        return Imported(target, fresh || from != null, duplicate = !fresh)
+    }
+
+    /** The first bytes of [ins], which it is closed after. */
+    private fun headOf(ins: InputStream): ByteArray = ins.use {
+        val head = ByteArray(68)
+        var n = 0
+        while (n < head.size) {
+            val r = it.read(head, n, head.size - n)
+            if (r < 0) break
+            n += r
+        }
+        head.copyOf(n)
+    }
+
+    /** What kind of book a file is, by what it starts with and, where that is not enough, by its [name] and the [mime] the other app gave it; null if it is none. */
+    private fun kindOf(head: ByteArray, name: String, mime: String?): String? {
+        val start = String(head, Charsets.ISO_8859_1)
+        val zipped = start.startsWith("PK")
+        return when {
+            start.startsWith("%PDF") -> "pdf"
+            zipped && (name.endsWith(".cbz", true) || mime?.contains("cbz") == true || mime?.contains("comicbook") == true) -> "cbz"
+            zipped && (name.endsWith(".epub", true) || mime == "application/epub+zip" || mime == "application/octet-stream" || mime == null) -> "epub"
+            start.startsWith("BOOKMOBI", 60) -> "mobi"
+            name.endsWith(".txt", true) || mime == "text/plain" -> "txt"
+            else -> null
+        }
+    }
+
+    /**
+     * A book of the library that has exactly the content of a file of [size] bytes, whatever it is
+     * called, if there is one; [mine] reads that file through, which only happens if a book of the
+     * same size is there, so that this is quick.
+     */
+    private fun twin(size: Long, ext: String, mine: () -> ByteArray): File? {
+        val sameSize = books(fresh = false).filter { it.extension.equals(ext, true) && Store.length(it) == size }.toList()
+        if (sameSize.isEmpty()) return null
+        val wanted = mine()
+        return sameSize.firstOrNull { f ->
+            try {
+                digest(Store.inputStream(f)).contentEquals(wanted)
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+
+    private fun digest(ins: InputStream): ByteArray = ins.use {
+        val sha = MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val n = it.read(buffer)
+            if (n < 0) break
+            sha.update(buffer, 0, n)
+        }
+        sha.digest()
     }
 
     /** The books that are [f] or inside it, each with its date: what their covers are filed under. */
@@ -869,6 +996,8 @@ object Library {
     /** Says that the book [f] is by [author], whatever is written in the file. */
     fun setAuthor(ctx: Context, f: File, author: String) {
         libraryPrefs(ctx).edit { putString(AUTHOR + f.path, author.trim()) }
+        // A cover made for the book has the author on it.
+        bitmaps.remove(coverKey(f))
         touched(f)
     }
 
@@ -906,16 +1035,88 @@ object Library {
      */
     private fun coversDir() = File(root(), ".covers")
 
+    /**
+     * The picture that ends the book [f], the cover as if it had been closed, [width] wide: the one
+     * the reader gave it, or else [own], the cover the book itself has, or else one made for it.
+     * Blocking.
+     */
+    fun endCover(ctx: Context, f: File, width: Int, own: () -> Bitmap?): Bitmap {
+        try {
+            customCover(ctx, f)?.let { c -> Store.inputStream(c).use { BitmapFactory.decodeStream(it) } }?.let { return it }
+        } catch (e: Exception) {
+            Log.w(TAG, "Cannot read the cover given to ${f.path}", e)
+        }
+        if (coverMode(ctx, f) == CoverMode.MADE) return madeCover(ctx, f, width)
+        try {
+            own()?.let { return it }
+        } catch (e: Exception) {
+            Log.w(TAG, "Cannot read the cover of ${f.path}", e)
+        }
+        val m = meta(ctx, f)
+        return placeholder(m.title, m.author, width)
+    }
+
     /** The cover the reader gave the book [f]; null while it has its own. */
     private fun customCover(ctx: Context, f: File): File? =
         libraryPrefs(ctx).getString(COVER + f.path, null)?.let { File(coversDir(), it) }?.takeIf { it.isDoc }
 
     fun hasCustomCover(ctx: Context, f: File) = customCover(ctx, f) != null
 
+    /**
+     * What the cover is of a book that was given no picture: the one it has itself, its first page
+     * (which the book then reads on from, as it is the cover), or one made for it.
+     */
+    enum class CoverMode { OWN, FIRST_PAGE, MADE }
+
+    fun coverMode(ctx: Context, f: File): CoverMode = when (libraryPrefs(ctx).getString(MODE + f.path, null)) {
+        "first" -> CoverMode.FIRST_PAGE
+        "made" -> CoverMode.MADE
+        else -> CoverMode.OWN
+    }
+
+    /**
+     * The leathers a cover made for a book can be of, by the name they go by and their colour. A book
+     * that is not told which gets one of the first five by its title.
+     */
+    val TONES = listOf(
+        R.string.tone_red to 0xFF5B1A1A.toInt(), R.string.tone_blue to 0xFF1F3A5F.toInt(), R.string.tone_green to 0xFF234D32.toInt(),
+        R.string.tone_purple to 0xFF4A2C5A.toInt(), R.string.tone_brown to 0xFF5A3A1A.toInt(),
+        R.string.tone_black to 0xFF1E1E22.toInt(), R.string.tone_teal to 0xFF1F4F52.toInt(), R.string.tone_grey to 0xFF4A4A50.toInt(),
+    )
+    private const val AUTO_TONES = 5
+
+    /** The leather of the cover made for [f], an index of [TONES]: the one the reader chose, or else the one its title gives it. */
+    fun tone(ctx: Context, f: File): Int =
+        libraryPrefs(ctx).getString(TONE + f.path, null)?.toIntOrNull()?.takeIf { it in TONES.indices }
+            ?: (((cachedMeta(ctx, f)?.title ?: f.nameWithoutExtension).hashCode() and 0x7fffffff) % AUTO_TONES)
+
+    /**
+     * Says what the cover of [f] is, see [CoverMode], and for one made for it, of which leather
+     * ([tone], an index of [TONES]). A picture the reader gave it is given up. Blocking.
+     */
+    fun setCoverMode(ctx: Context, f: File, mode: CoverMode, tone: Int? = null) {
+        libraryPrefs(ctx).edit {
+            when (mode) {
+                CoverMode.OWN -> remove(MODE + f.path)
+                CoverMode.FIRST_PAGE -> putString(MODE + f.path, "first")
+                CoverMode.MADE -> putString(MODE + f.path, "made")
+            }
+            if (mode == CoverMode.MADE && tone != null) putString(TONE + f.path, tone.toString())
+            else if (mode != CoverMode.MADE) remove(TONE + f.path)
+        }
+        setCover(ctx, f, null)
+    }
+
+    /** The cover made for [f], [width] wide, of the leather it has. Blocking. */
+    private fun madeCover(ctx: Context, f: File, width: Int = COVER_W): Bitmap {
+        val m = cachedMeta(ctx, f) ?: meta(ctx, f)
+        return placeholder(m.title, m.author, width, tone(ctx, f))
+    }
+
     /** Decodes the picture the book [f] is shown with. Unless it was given one, it is written by [meta]. Blocking. */
     fun decodeCover(ctx: Context, f: File, opts: BitmapFactory.Options? = null): Bitmap? = try {
         customCover(ctx, f)?.let { c -> Store.inputStream(c).use { BitmapFactory.decodeStream(it, null, opts) } }
-            ?: BitmapFactory.decodeFile(coverFile(ctx, f).path, opts)
+            ?: if (coverMode(ctx, f) == CoverMode.MADE) madeCover(ctx, f) else BitmapFactory.decodeFile(coverFile(ctx, f).path, opts)
     } catch (e: Exception) {
         null
     }
@@ -998,6 +1199,62 @@ object Library {
 
     fun cachedFolderPreview(dir: File, spec: ShelfSpec): Bitmap? = bitmaps.get(folderKey(dir, spec))
 
+    /** A miniature of the shelf [dir] that shows its books but not yet what stands on the shelves in it, if one was drawn. */
+    fun cachedFolderDraft(dir: File, spec: ShelfSpec): Bitmap? = bitmaps.get(folderKey(dir, spec) + BOOKS_ONLY)
+
+    /**
+     * The case of [dir] with nothing in it, which is drawn in a moment, for its miniature to show
+     * the wood at once while the books are being drawn. Null while the grain of the wood is not
+     * ready: it is decoded in the background as the app starts.
+     */
+    fun cachedEmptyCase(ctx: Context, dir: File, spec: ShelfSpec): Bitmap? =
+        if (spec.width <= 0 || !ShelfDecoration.isReady()) null else folderPreview(ctx, dir, spec, 0, DETAIL_CASE)
+
+    private const val BOOKS_ONLY = ":books"
+
+    // ---- miniatures kept between two uses of the app ----
+
+    private fun savedFile(ctx: Context, dir: File, spec: ShelfSpec): File {
+        val name = "${dir.path}|${spec.width}|${spec.columns}|${wood(ctx, dir).name}"
+        val id = MessageDigest.getInstance("SHA-1").digest(name.toByteArray()).joinToString("") { "%02x".format(it) }
+        return File(File(ctx.cacheDir, "minis"), "$id.webp")
+    }
+
+    /**
+     * The miniature of [dir] as it was drawn when the app was last used, if the phone kept it. It
+     * may be out of date, so it is only shown until the miniature is drawn anew. Blocking.
+     */
+    fun savedFolderPreview(ctx: Context, dir: File, spec: ShelfSpec): Bitmap? = try {
+        savedFile(ctx, dir, spec).takeIf { it.isFile }?.let { BitmapFactory.decodeFile(it.path) }
+    } catch (e: Exception) {
+        null
+    }
+
+    /**
+     * Keeps the miniature [bmp] of [dir] for the next use of the app, behind all else that is asked
+     * of the shelves. What is carried or chosen is not what the shelf looks like the next time.
+     */
+    fun keepFolderPreview(ctx: Context, dir: File, spec: ShelfSpec, bmp: Bitmap) = ahead {
+        if (carried.isEmpty() && within(dir, chosen).isEmpty()) saveFolderPreview(ctx, dir, spec, bmp)
+    }
+
+    private fun saveFolderPreview(ctx: Context, dir: File, spec: ShelfSpec, bmp: Bitmap) {
+        try {
+            val file = savedFile(ctx, dir, spec)
+            file.parentFile?.mkdirs()
+            @Suppress("DEPRECATION")
+            val format = if (Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
+            FileOutputStream(file).use { bmp.compress(format, 85, it) }
+        } catch (e: Exception) {
+            Log.w(TAG, "Cannot keep the miniature of $dir", e)
+        }
+    }
+
+    /** How much a miniature shows: only the case, its books, or everything that stands in it. */
+    const val DETAIL_CASE = 0
+    const val DETAIL_BOOKS = 1
+    const val DETAIL_FULL = 2
+
     /**
      * A picture of the case that [dir] opens into, drawn with the same geometry as the real one
      * ([spec]) and scaled down, so that opening the folder is a pure enlargement: its first
@@ -1005,9 +1262,16 @@ object Library {
      * of them, whose plank is the one the miniature stands on.
      * Blocking.
      */
-    fun folderPreview(ctx: Context, dir: File, spec: ShelfSpec, depth: Int = 0): Bitmap {
-        if (depth == 0) cachedFolderPreview(dir, spec)?.let { return it }
-        val key = folderKey(dir, spec)
+    fun folderPreview(ctx: Context, dir: File, spec: ShelfSpec, depth: Int = 0, wanted: Int = DETAIL_FULL): Bitmap {
+        // A shelf with no shelves in it has nothing more to show than its books.
+        val detail = if (wanted == DETAIL_BOOKS && depth == 0 && shelf(ctx, dir).none { it.isFolder }) DETAIL_FULL else wanted
+        if (depth == 0 && detail == DETAIL_FULL) cachedFolderPreview(dir, spec)?.let { return it }
+        val key = when (detail) {
+            DETAIL_CASE -> "case:${wood(ctx, dir).name}:${spec.width}:${spec.columns}:${ShelfDecoration.isReady()}"
+            DETAIL_BOOKS -> folderKey(dir, spec) + BOOKS_ONLY
+            else -> folderKey(dir, spec)
+        }
+        if (detail != DETAIL_FULL) bitmaps.get(key)?.let { return it }
         val held = carried
         val picked = within(dir, chosen).toSet()
         ShelfDecoration.prepare(ctx)
@@ -1040,7 +1304,7 @@ object Library {
             typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
         }
         // Cases nested deeper than this are too small to show what stands in them.
-        val items = if (depth > 1) emptyList() else shelf(ctx, dir).filter { it !in held }.take(spec.columns * spec.miniRows)
+        val items = if (depth > 1 || detail == DETAIL_CASE) emptyList() else shelf(ctx, dir).filter { it !in held }.take(spec.columns * spec.miniRows)
         items.forEachIndexed { i, f ->
             val left = spec.side + (i % spec.columns) * spec.itemW + spec.gap.toFloat()
             val top = (i / spec.columns) * rowH + spec.miniRise.toFloat()
@@ -1052,7 +1316,7 @@ object Library {
             if (f.isFolder) {
                 name = f.name
                 // A case is a little wider than a book and stands taller, up to the shelf above.
-                val inner = folderPreview(ctx, f, spec, depth + 1)
+                val inner = folderPreview(ctx, f, spec, depth + 1, if (detail == DETAIL_FULL) DETAIL_FULL else DETAIL_CASE)
                 val half = spec.miniW / 2f
                 c.drawBitmap(
                     inner, null,
@@ -1093,7 +1357,7 @@ object Library {
         ShelfDecoration.drawCase(c, w, h, spec, paint)
         paint.shader = null
         paint.colorFilter = null
-        if (depth == 0) {
+        if (depth == 0 || detail == DETAIL_CASE) {
             bmp.prepareToDraw()
             bitmaps.put(key, bmp)
         }
@@ -1112,16 +1376,19 @@ object Library {
         c.drawBitmap(b, src, dst, paint)
     }
 
-    private fun placeholder(title: String, author: String): Bitmap {
+    /**
+     * The cover made for a book that has none: dark leather with a gold frame, its [title] and its
+     * [author]. It is drawn for a picture [width] wide, as large as the screen when it ends the book.
+     */
+    private fun placeholder(title: String, author: String, width: Int = COVER_W, tone: Int? = null): Bitmap {
         val w = COVER_W
         val h = w * 3 / 2
-        val bmp = createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val bmp = createBitmap(width, width * 3 / 2, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
-        val leather = intArrayOf(
-            0xFF5B1A1A.toInt(), 0xFF1F3A5F.toInt(), 0xFF234D32.toInt(), 0xFF4A2C5A.toInt(), 0xFF5A3A1A.toInt(),
-        )
+        // Drawn as for the size of a cover on the shelf, and enlarged to the one asked for.
+        c.scale(width / w.toFloat(), width / w.toFloat())
         val gold = 0xFFD4AF37.toInt()
-        c.drawColor(leather[(title.hashCode() and 0x7fffffff) % leather.size])
+        c.drawColor(TONES[tone ?: ((title.hashCode() and 0x7fffffff) % AUTO_TONES)].second)
         val frame = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = gold
             style = Paint.Style.STROKE

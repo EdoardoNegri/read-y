@@ -2,7 +2,11 @@ package io.github.edoardonegri.ready
 
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Matrix
 import android.os.Build
 import android.os.Bundle
@@ -28,6 +32,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.doOnLayout
 import androidx.core.view.isVisible
 import java.io.File
 import kotlin.math.abs
@@ -169,20 +174,27 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
                 // it is, and the figures under the line say where it would open.
                 val e = engine ?: return
                 if (!fromUser) return
-                val at = progress / 1000f
+                // The line is let go on a page, never between two: the figures and the knob change as the page does.
+                val at = showPlace(e, progress / 1000f)
+                dragAt = at
+                val snapped = (at * 1000).roundToInt()
+                if (snapped != progress) bar.progress = snapped
                 val mark = chapters.marks.indexOfLast { it <= at + 0.0005f }
                 if (mark >= 0) name(chapterName(e, mark), other = true)
                 chapters.seeking = at
-                showPlace(e, at)
             }
             override fun onStartTrackingTouch(bar: SeekBar) {
                 seeking = true
+                dragAt = -1f
             }
 
             override fun onStopTrackingTouch(bar: SeekBar) {
                 seeking = false
                 // The line stays as it was left until the book has been taken there, see onPosition.
-                seekTarget = bar.progress / 1000f
+                seekTarget = if (dragAt >= 0) dragAt else bar.progress / 1000f
+                dragAt = -1f
+                // The menu stays if it was the knob that took the book from its cover.
+                keepMenu = onCover
                 content.removeCallbacks(seekSettled)
                 content.postDelayed(seekSettled, SEEK_WAIT_MS)
                 engine?.seekTo(seekTarget)
@@ -190,7 +202,8 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         })
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (menu.isVisible) menu.visibility = View.GONE else leave()
+                // The menu stays over the cover that ends the book, which Back then leaves.
+                if (menu.isVisible && !onCover) menu.visibility = View.GONE else leave()
             }
         })
 
@@ -200,6 +213,8 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         // it (see shown), and the reader shows itself when the book is open; not later than this
         // all the same, should the page never be set out.
         if (handoff != null) root.postDelayed({ pictured(null) }, SHOW_WAIT_MS)
+        // Opening on its cover, a book has the menu picture ready for the cover that grows on the shelf.
+        if (handoff != null && finished && opened.hasCover) pictureEndMenu(handoff, opened)
         if (!s.hintShown) {
             s.hintShown = true
             Toast.makeText(this, R.string.reader_hint, Toast.LENGTH_LONG).show()
@@ -230,6 +245,8 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             applyBrightness()
             applyLayout()
         }
+        // Whatever was done meanwhile, the menu is shown over the cover that ends the book.
+        if (onCover) menu.visibility = View.VISIBLE
     }
 
     /** The lines of the contents of the book that have a mark of their own on the seek line. */
@@ -248,6 +265,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         // The line runs through the middle of the seek bar.
         chapters.lineBelow = seek.layoutParams.height / 2f
         chapters.marks = marked.map { places[it] }
+        chapters.hasEnd = e.hasCover
         chapters.onPick = { mark -> e.openContent(marked[mark]) }
         // The name of the chapter a finger is on takes the place of the one being read until it is let go.
         chapters.onPreview = { mark -> if (mark < 0) name(reading, other = false) else name(chapterName(e, mark), other = true) }
@@ -257,13 +275,134 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
      * Shows how much of the book lies before the place [at], 0..1, and the pages it is on, while
      * the knob of the seek bar is dragged there; [onPosition] shows the place reached once it is let go.
      */
-    private fun showPlace(e: ReaderEngine, at: Float) {
+    private fun showPlace(e: ReaderEngine, at: Float): Float {
         val (ofChapter, ofBook) = e.pagesAt(at)
-        if (ofChapter != null) chapterPage.text = getString(R.string.page_of, ofChapter.first, ofChapter.second)
-        val book = ofBook ?: bookPages.takeIf { it > 0 }?.let { (1 + (at * (it - 1)).roundToInt()).coerceIn(1, it) to it }
-        if (book != null) bookPage.text = getString(R.string.page_of, book.first, book.second)
-        percentRead.text = getString(R.string.percent_read, (at * 100).roundToInt())
+        val placed: Float
+        if (e.hasCover) {
+            // The place of the page nearest, which is told as the pages before it make of all of them; after the last it is the cover.
+            placed = e.snap(at)
+            if (placed >= 1f) {
+                chapterPage.text = ""
+                bookPage.text = getString(R.string.the_end)
+            } else {
+                if (ofChapter != null) chapterPage.text = getString(R.string.page_of, ofChapter.first, ofChapter.second)
+                if (ofBook != null) bookPage.text = getString(R.string.page_of, ofBook.first, ofBook.second)
+            }
+        } else {
+            if (ofChapter != null) chapterPage.text = getString(R.string.page_of, ofChapter.first, ofChapter.second)
+            val book = ofBook ?: bookPages.takeIf { it > 0 }?.let { (1 + (at * (it - 1)).roundToInt()).coerceIn(1, it) to it }
+            if (book != null) bookPage.text = getString(R.string.page_of, book.first, book.second)
+            // Scrolled, where the page begins, as the first page is 0 and the last 100.
+            placed = book?.takeIf { it.second > 1 }?.let { (it.first - 1f) / (it.second - 1) } ?: at
+        }
+        percentRead.text = getString(R.string.percent_read, (placed * 100).roundToInt())
+        return placed
     }
+
+    /** The place of the page the knob of the seek bar is on while it is dragged, 0..1; else -1. */
+    private var dragAt = -1f
+
+    /**
+     * Whether the cover that ends the book is shown: the menu is over the foot of the screen then,
+     * and cannot be taken away, and the cover is in the room above it. Whether the menu was shown
+     * before, which it goes back to once the cover is left; and whether it was the knob of the seek bar that left it.
+     */
+    private var onCover = false
+    private var menuBeforeCover = false
+    private var keepMenu = false
+
+    /** The menu coming up from the foot of the screen, or going down, with the cover that is made room for. */
+    private var menuSlide: ValueAnimator? = null
+
+    /** How much room the panel of the menu takes at the foot of the screen: the menu is as large as the screen, with an empty place above its panel. */
+    private fun menuRoom(m: View) = m.height - (m as ViewGroup).getChildAt(0).height
+
+    private fun coverChanged(on: Boolean) {
+        onCover = on
+        val e = engine ?: return
+        menuSlide?.cancel()
+        menu.translationY = 0f
+        if (on) {
+            menuBeforeCover = menu.isVisible
+            behindMenu = null
+            // Seen, the menu comes up from the foot of the screen as the cover is made room for. Unseen, as
+            // when the book opens on its cover, it is only set out, to be pictured for the opening, see pictureEndMenu.
+            val lift = !hidden && !menuBeforeCover
+            if (lift) menu.translationY = resources.displayMetrics.heightPixels.toFloat()
+            menu.visibility = View.VISIBLE
+            menu.doOnLayout { m ->
+                if (!onCover) return@doOnLayout
+                if (lift) slideMenu(menuRoom(m), true, e) else e.coverInset(menuRoom(m))
+            }
+        } else {
+            val hide = !menuBeforeCover && !keepMenu
+            if (hide && !hidden && menu.isVisible) {
+                slideMenu(menuRoom(menu), false, e)
+            } else {
+                e.coverInset(0)
+                if (hide) menu.visibility = View.GONE
+            }
+        }
+        keepMenu = false
+    }
+
+    /** Raises the menu from the foot of the screen to its place, or lowers it, [room] pixels, while the cover over it is made as large as is left. */
+    private fun slideMenu(room: Int, up: Boolean, e: ReaderEngine) {
+        menuSlide?.cancel()
+        val from = if (up) 0f else 1f
+        val slide = ValueAnimator.ofFloat(from, 1f - from).apply {
+            duration = MENU_SLIDE_MS
+            interpolator = android.view.animation.DecelerateInterpolator()
+            addUpdateListener {
+                val by = it.animatedValue as Float
+                menu.translationY = (1 - by) * room
+                e.coverInset((by * room).toInt())
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                private var cancelled = false
+                override fun onAnimationCancel(animation: Animator) {
+                    cancelled = true
+                }
+
+                override fun onAnimationEnd(animation: Animator) {
+                    if (cancelled) return
+                    menu.translationY = 0f
+                    if (!up) menu.visibility = View.GONE
+                    menuSlide = null
+                }
+            })
+        }
+        menuSlide = slide
+        slide.start()
+    }
+
+    /**
+     * A book that opens on its cover has its menu set out at once, as it is over the cover, 100% read
+     * and at the end, and pictured for the book opening on the shelf, which raises it as the cover grows.
+     */
+    private fun pictureEndMenu(h: BookOpening.Handoff, e: ReaderEngine) {
+        showPosition(state.chapter, 1f, e is PageEngine, null, null)
+        menu.doOnLayout { m ->
+            val room = menuRoom(m)
+            val picture = if (m.width > 0 && room > 0) {
+                try {
+                    createBitmap(m.width, room).also { bmp ->
+                        val canvas = Canvas(bmp)
+                        canvas.translate(0f, -(m.height - room).toFloat())
+                        m.draw(canvas)
+                    }
+                } catch (x: OutOfMemoryError) {
+                    null
+                }
+            } else {
+                null
+            }
+            h.menuPictured(picture)
+        }
+    }
+
+    /** Which [ReaderEngine.positionsVersion] the marks of the chapters along the seek bar were made for. */
+    private var positionsSeen = -1
 
     /** Shows [text] as the name of a chapter, brighter if it is [other] than the one being read. */
     private fun name(text: String, other: Boolean) {
@@ -400,6 +539,10 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             preferredDisplayModeId = ReaderSettings.fastestMode(this@ReaderActivity)
             preferredRefreshRate = 0f
         }
+        // The cover that ends the book is seen whole, as the shelf closes the book from it.
+        menuSlide?.cancel()
+        menu.translationY = 0f
+        if (onCover) engine?.coverInset(0)
         if (!menu.isVisible) return capture(::upright)
         menu.visibility = View.GONE
         twoFramesOn { capture(::upright) }
@@ -531,11 +674,12 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     // ---- input ----
 
     override fun onTap(x: Float, y: Float) {
-        if (menu.isVisible) {
+        if (menu.isVisible && !onCover) {
             menu.visibility = View.GONE
             return
         }
-        turner.tap(x, y, ::openMenu)
+        // On the cover that ends the book the menu is shown already, and cannot be taken away.
+        turner.tap(x, y) { if (!onCover) openMenu() }
     }
 
     override fun canZoom() = engine?.zoomable == true && !menu.isVisible
@@ -554,7 +698,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     }
 
     override fun onSwipe(direction: Int) {
-        if (menu.isVisible) return
+        if (menu.isVisible && !onCover) return
         turner.swipe(direction)
     }
 
@@ -626,13 +770,23 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
 
     /** Shows the place told by [onPosition] in the menu and at the foot of the page; [paged] for a book of fixed pages. */
     private fun showPosition(chapter: Int, percent: Float, paged: Boolean, pageOfChapter: Pair<Int, Int>?, pageOfBook: Pair<Int, Int>?) {
+        // The chapters stand along the line where their first pages are, which moves as the pages of the chapters are counted.
+        engine?.let { e ->
+            if (e.positionsVersion != positionsSeen) {
+                positionsSeen = e.positionsVersion
+                setUpChapters(e)
+            }
+        }
         // The chapter is counted as on the line below, by the book's contents, where it has any:
         // the files a book is made of, which the engine counts, also hold its cover and the like.
         val mark = marked.indexOfLast { it <= (engine?.currentContent ?: -1) }
         // The pages of the book as the engine counts them, with the text as large as it is. A
         // PDF is at the page it shows; an EPUB that scrolls as far into the pages a printed
         // one would have as into its text.
-        val book = pageOfBook ?: bookPages.takeIf { it > 0 }?.let {
+        // On the cover that ends the book, there is no page.
+        val ended = engine?.hasCover == true && percent >= 1f
+        if (ended != onCover) coverChanged(ended)
+        val book = if (ended) null else pageOfBook ?: bookPages.takeIf { it > 0 }?.let {
             (if (paged) chapter + 1 else 1 + (percent * (it - 1)).roundToInt()).coerceIn(1, it) to it
         }
         reading = engine?.let { if (mark >= 0) chapterName(it, mark) else "" }.orEmpty()
@@ -651,8 +805,9 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         // What is not known, or does not apply, leaves its place empty, so that the rest stays put.
         inChapter.visibility = if (pageOfChapter == null) View.INVISIBLE else View.VISIBLE
         if (pageOfChapter != null) chapterPage.text = getString(R.string.page_of, pageOfChapter.first, pageOfChapter.second)
-        inBook.visibility = if (book == null) View.INVISIBLE else View.VISIBLE
+        inBook.visibility = if (book == null && !ended) View.INVISIBLE else View.VISIBLE
         if (book != null) bookPage.text = getString(R.string.page_of, book.first, book.second)
+        if (ended) bookPage.text = getString(R.string.the_end)
         percentRead.text = getString(R.string.percent_read, (percent * 100).roundToInt())
         name(reading, other = false)
         if (!seeking) seek.progress = (percent * 1000).roundToInt()
@@ -692,6 +847,9 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         const val EXTRA_FROM_WIDGET = "fromWidget"
 
         private const val SAVE_EVERY_MS = 30_000L
+
+        /** How long the menu takes to come up over the cover that ends the book, or to go down. */
+        private const val MENU_SLIDE_MS = 320L
 
         /** The longest the book opening on the shelf waits for the reader's page, see [pictured]. */
         private const val SHOW_WAIT_MS = 2500L

@@ -43,7 +43,15 @@ class PageEngine(
     private val pending = HashSet<Int>()
     private val ratios = FloatArray(count) { source.firstRatio }
     private var generation = 0
-    private var page = start.chapter.coerceIn(0, count - 1)
+    /**
+     * A book whose cover is its first page is read from the second: the first is the cover, which
+     * is seen at the end, so the pages that are read are one fewer. Only where pages turn.
+     */
+    private val coverFirst = Library.coverMode(act.applicationContext, file) == Library.CoverMode.FIRST_PAGE && count > 1
+    private val skip get() = if (coverFirst && !s.vertical) 1 else 0
+
+    // A book read to its end opens on its cover, where the pages that turn end: the page after the last one.
+    private var page = if (!s.vertical && start.percent >= Library.FINISHED_AT) count else start.chapter.coerceIn(if (coverFirst && !s.vertical) 1 else 0, count - 1)
 
     /** A book of one page has been taken to its end, by the seek bar or by being marked as read. */
     private var atEnd = start.percent >= Library.FINISHED_AT
@@ -113,14 +121,22 @@ class PageEngine(
         }
     }
 
-    /** The first page is none of the book read and the last all of it; a book of one page is read once at its end. */
+    /**
+     * Turning pages, the first page is none of the book read, and each one after it is as much of it
+     * as the pages before it, up to the cover that ends the book, which is all of it. Scrolling, the
+     * first page is none and the last all of it; a book of one page is read once at its end.
+     */
     private fun report() {
-        val read = if (count > 1) page.toFloat() / (count - 1) else if (atEnd) 1f else 0f
-        host.onPosition(page, 0f, read)
+        when {
+            s.vertical -> host.onPosition(page, 0f, if (count > 1) page.toFloat() / (count - 1) else if (atEnd) 1f else 0f)
+            page >= count -> host.onPosition(count - 1, 0f, 1f)
+            else -> host.onPosition(page, 0f, (page - skip).toFloat() / (count - skip), null, page - skip + 1 to count - skip)
+        }
     }
 
     /** Draws page [i] for the current view size in the background and delivers it when done. */
     private fun request(i: Int) {
+        if (i == count && !s.vertical) return requestCover()
         if (i !in 0 until count || cache.get(i) != null) return
         val w = if (s.vertical) list.width.takeIf { it > 0 } ?: frame.width else frame.width
         val h = if (s.vertical) 0 else frame.height
@@ -160,8 +176,41 @@ class PageEngine(
         null
     }
 
+    /** Draws the cover that ends the book, to the size of the screen, in the background, and delivers it when done. */
+    private fun requestCover() {
+        if (cache.get(count) != null) return
+        val w = frame.width
+        val h = frame.height
+        if (w == 0 || h == 0 || !pending.add(count)) return
+        val gen = generation
+        val app = frame.context.applicationContext
+        exec.execute {
+            val bmp = try {
+                Library.endCover(app, file, w) { source.render(0, w, h, false) }
+            } catch (e: Throwable) {
+                null
+            }
+            main.post {
+                if (closed || gen != generation) return@post
+                pending.remove(count)
+                val result = bmp ?: return@post
+                cache.put(count, result)
+                if (!s.vertical && page == count && zoom == 1f) single.setImageBitmap(result)
+                if (!told && !s.vertical && page == count) {
+                    told = true
+                    host.shown()
+                }
+            }
+        }
+    }
+
     private fun showSingle() {
         resetZoom()
+        // The cover is a picture of its own, whose colours are not turned round with those of print,
+        // and it lies on the dark wood of the shelf the book was taken from, not on paper.
+        val onCover = page >= count
+        frame.setBackgroundColor(if (onCover) frame.context.getColor(R.color.wood_dark) else s.litPalette.bg)
+        single.colorFilter = if (onCover) light(false, s.lamp) else filter
         single.setImageBitmap(cache.get(page))
         request(page)
         request(page + 1)
@@ -180,6 +229,8 @@ class PageEngine(
         // lies in the warm light.
         filter = light(s.darkMode && source.print, s.lamp)
         if (s.vertical) {
+            // The column of pages has no cover after its last page.
+            page = page.coerceAtMost(count - 1)
             single.visibility = View.GONE
             single.setImageBitmap(null)
             list.visibility = View.VISIBLE
@@ -190,6 +241,8 @@ class PageEngine(
             list.visibility = View.GONE
             single.visibility = View.VISIBLE
             single.colorFilter = filter
+            // Coming from scrolling, where the first page is read too, and where the cover is not.
+            page = page.coerceIn(skip, count)
             showSingle()
         }
     }
@@ -198,7 +251,7 @@ class PageEngine(
         if (s.vertical) {
             val by = direction * (frame.height * 0.88f).toInt()
             if (s.slidePages) list.smoothScrollBy(0, by) else list.scrollBy(0, by)
-        } else if (page + direction in 0 until count) {
+        } else if (page + direction in skip..count) {
             page += direction
             showSingle()
         }
@@ -209,14 +262,35 @@ class PageEngine(
     override fun applySettings() = configure()
 
     override fun seekTo(fraction: Float) {
-        atEnd = fraction >= 1f
-        page = (fraction.coerceIn(0f, 1f) * (count - 1)).roundToInt()
         if (s.vertical) {
+            atEnd = fraction >= 1f
+            page = (fraction.coerceIn(0f, 1f) * (count - 1)).roundToInt()
             lm.scrollToPositionWithOffset(page, 0)
             report()
         } else {
+            page = skip + (fraction.coerceIn(0f, 1f) * (count - skip)).roundToInt().coerceIn(0, count - skip)
             showSingle()
         }
+    }
+
+    override val hasCover get() = !s.vertical
+
+    override fun coverInset(bottom: Int) {
+        // The picture is fitted into what is left of the page, as it is in the whole of it.
+        single.setPadding(0, 0, 0, bottom)
+    }
+
+    override fun snap(fraction: Float): Float {
+        if (s.vertical) return fraction
+        val n = count - skip
+        return (fraction.coerceIn(0f, 1f) * n).roundToInt().coerceIn(0, n).toFloat() / n
+    }
+
+    override fun pagesAt(fraction: Float): Pair<Pair<Int, Int>?, Pair<Int, Int>?> {
+        if (s.vertical) return null to null
+        val n = count - skip
+        val place = (fraction.coerceIn(0f, 1f) * n).roundToInt().coerceIn(0, n)
+        return if (place >= n) null to null else null to (place + 1 to n)
     }
 
     // ---- enlarging the page by pinching ----
@@ -300,6 +374,8 @@ class PageEngine(
             commit()
             return
         }
+        // The cover that ends the book is drawn once, for the size of the screen.
+        if (page >= count) return
         val w = (frame.width * zoom).toInt()
         val h = (frame.height * zoom).toInt()
         val shown = page

@@ -54,6 +54,20 @@ class FlowEngine(
     private var closed = false
 
     /**
+     * Whether the cover that ends the book is shown over its last page, as if the book were
+     * closed; whether the book is to open on it once its last page is laid out; and the page last
+     * told, which the cover goes over, and which is where the book goes back to from it.
+     */
+    private var atCover = false
+    private var coverWanted = false
+    private var lastPage = 0
+    private var lastPages = 1
+    private var lastFraction = 0f
+
+    /** The cover as a picture to serve to the page, made once it is asked for. */
+    private var coverJpeg: ByteArray? = null
+
+    /**
      * The settings, or the size of the page, changed while the chapter was being laid out by the
      * ones before: it is laid out again before it is shown, see Bridge.onLayout.
      */
@@ -67,6 +81,8 @@ class FlowEngine(
         total = book.weights.sum().coerceAtLeast(1)
         chapter = start.chapter.coerceIn(0, book.spine.lastIndex)
         pendingFraction = start.fraction
+        // A book read to its end opens on its cover, which is where the pages that turn end.
+        coverWanted = hasCover && start.percent >= Library.FINISHED_AT
 
         with(web.settings) {
             javaScriptEnabled = true
@@ -95,6 +111,10 @@ class FlowEngine(
             if (url.host == HOST && path != null && path.startsWith(FONTS_PATH)) {
                 val font = s.customFont?.takeIf { it.name == path.removePrefix(FONTS_PATH) }
                 if (font != null) return WebResourceResponse("font/${font.extension}", null, font.inputStream())
+            }
+            if (url.host == HOST && path == COVER_PATH) {
+                val bytes = coverJpeg ?: coverBytes().also { coverJpeg = it }
+                return WebResourceResponse("image/jpeg", null, ByteArrayInputStream(bytes))
             }
             val stream = if (url.host == HOST && path != null) book.stream(path) else null
             if (stream == null || path == null) {
@@ -143,6 +163,8 @@ class FlowEngine(
                     relayout()
                     return@runOnUiThread
                 }
+                // A book that opens on its cover has it over the last page before the page is seen at all.
+                if (coverWanted && hasCover && chapter == book.spine.lastIndex) web.evaluateJavascript(coverScript(true), null)
                 reveal()
                 // How much is read is where the page being shown begins, so the first page is
                 // none of the book. In the last chapter the pages are spread up to the very end of
@@ -157,8 +179,20 @@ class FlowEngine(
                     else -> page.toFloat() / (pages - 1)
                 }
                 if (!s.vertical) measure(pages)
+                lastPage = page
+                lastPages = pages
+                lastFraction = fraction.toFloat()
+                if (hasCover && chapter == book.spine.lastIndex) {
+                    // The cover goes over the last page, and stays there however the page behind it is laid out again.
+                    if (atCover || coverWanted) {
+                        coverWanted = false
+                        return@runOnUiThread showCover(true)
+                    }
+                    // Otherwise it is made ready, unseen, for the page after the last to be the cover at once.
+                    web.evaluateJavascript(coverScript(false), null)
+                }
                 host.onPosition(
-                    chapter, fraction.toFloat(), bookPercent(shown),
+                    chapter, fraction.toFloat(), (if (s.vertical) null else pagePercent(page)) ?: bookPercent(shown),
                     if (s.vertical) null else page + 1 to pages,
                     if (s.vertical) null else inBook(page),
                 )
@@ -204,6 +238,8 @@ class FlowEngine(
 
     private fun show() {
         resetZoom()
+        // Another chapter is shown without the cover over it, unless it is the last one, to be opened on its cover.
+        if (!coverWanted) atCover = false
         ready = false
         injected = false
         stale = false
@@ -263,7 +299,97 @@ class FlowEngine(
     /** How much of the book lies before the chapter [index], in [FlowBook.weights]. */
     private fun before(index: Int) = (0 until index).sumOf { book.weights[it] }
 
-    override val chapterEnd get() = (before(chapter + 1).toFloat() / total).coerceIn(0f, 1f)
+    /**
+     * Whether places in the book are counted in pages, as the pages of the book are numbered: not
+     * while it scrolls, and not before the pages of any chapter have been counted.
+     */
+    private val byPages get() = !s.vertical && counted.isNotEmpty()
+
+    override val chapterEnd: Float
+        get() {
+            if (!byPages) return (before(chapter + 1).toFloat() / total).coerceIn(0f, 1f)
+            val pages = chapterPages()
+            val n = pages.sum()
+            return (pages.take(chapter + 1).sum().toFloat() / n.coerceAtLeast(1)).coerceIn(0f, 1f)
+        }
+
+    override var positionsVersion = 0
+        private set
+
+    /**
+     * How much of the book lies before page [page] of the chapter being shown, counted in pages: the
+     * first page of the book is none of it, each page after it is as much as the pages before it
+     * make of all of them, and the cover that ends the book is all of it.
+     */
+    private fun pagePercent(page: Int): Float? {
+        val pages = chapterPages()
+        val n = pages.sum()
+        if (n < 1) return null
+        return ((pages.take(chapter).sum() + page).toFloat() / n).coerceIn(0f, 1f)
+    }
+
+    /** Where in the whole book, 0..1, the chapter [index] begins. */
+    private fun position(index: Int): Float {
+        if (!byPages) return before(index.coerceAtLeast(0)).toFloat() / total
+        val pages = chapterPages()
+        val n = pages.sum()
+        return (pages.take(index.coerceAtLeast(0)).sum().toFloat() / n.coerceAtLeast(1)).coerceIn(0f, 1f)
+    }
+
+    // ---- the cover that ends the book ----
+
+    /** Whether the book ends on its cover, shown over the last page: not while it scrolls, and not for the sample of the settings. */
+    override val hasCover get() = given == null && !s.vertical
+
+    /** The cover, as a picture to serve to the page: the screen's width, and no wider than a phone's. */
+    private fun coverBytes(): ByteArray {
+        val width = minOf(act.resources.displayMetrics.widthPixels, 1080)
+        val cover = Library.endCover(act.applicationContext, file, width) { book.coverBitmap(width) }
+        return ByteArrayOutputStream().also { cover.compress(Bitmap.CompressFormat.JPEG, 90, it) }.toByteArray()
+    }
+
+    /** How much room is left at the foot of the screen for the menu, in pixels, see [coverInset]. */
+    private var coverBottom = 0
+
+    override fun coverInset(bottom: Int) {
+        coverBottom = bottom
+        if (atCover) web.evaluateJavascript(coverScript(true), null)
+    }
+
+    /**
+     * What the page is told to show or hide the cover: round it is the dark wood of the shelf, which
+     * the book was taken from, and it is as high as the room above the menu leaves it.
+     */
+    private fun coverScript(on: Boolean): String {
+        val wood = String.format("#%06X", act.getColor(R.color.wood_dark) and 0xFFFFFF)
+        val room = (coverBottom / act.resources.displayMetrics.density).roundToInt()
+        return "window.__r&&__r.cover($on,'$wood',$room)"
+    }
+
+    /** Shows the cover over the last page, as the book closed, or takes it away again to show the page it was over. */
+    private fun showCover(on: Boolean) {
+        atCover = on
+        web.evaluateJavascript(coverScript(on), null)
+        if (on) host.onPosition(chapter, lastFraction, 1f, null, null) else reportPage()
+    }
+
+    /** Tells the host the page last laid out, as it is when the cover is not over it. */
+    private fun reportPage() = host.onPosition(
+        chapter, lastFraction, pagePercent(lastPage) ?: bookPercent(0f), lastPage + 1 to lastPages, inBook(lastPage),
+    )
+
+    /** Whether the place [fraction] of the whole book, 0..1, is that of the cover, which comes after the last page. */
+    private fun isCover(fraction: Float): Boolean {
+        if (!byPages) return false
+        val n = chapterPages().sum()
+        return (fraction.coerceIn(0f, 1f) * n).roundToInt() >= n
+    }
+
+    override fun snap(fraction: Float): Float {
+        if (!byPages) return fraction
+        val n = chapterPages().sum().coerceAtLeast(1)
+        return ((fraction.coerceIn(0f, 1f) * n).roundToInt().coerceIn(0, n)).toFloat() / n
+    }
 
     private fun bookPercent(progress: Float) = ((before(chapter) + progress * book.weights[chapter]) / total).coerceIn(0f, 1f)
 
@@ -288,13 +414,22 @@ class FlowEngine(
 
     private fun step(direction: Int) {
         if (!ready) return
+        // The cover is the last of the pages: back from it is the last page of the text, and nothing is after it.
+        if (atCover) {
+            if (direction < 0) showCover(false)
+            return
+        }
         resetZoom()
         web.evaluateJavascript("window.__r?__r.step($direction,${s.slidePages && s.vertical}):null") { moved ->
             val target = chapter + direction
-            if (moved == "false" && !closed && target in book.spine.indices) {
-                chapter = target
-                pendingFraction = if (direction < 0) 1f else 0f
-                load()
+            if (moved == "false" && !closed) {
+                if (target in book.spine.indices) {
+                    chapter = target
+                    pendingFraction = if (direction < 0) 1f else 0f
+                    load()
+                } else if (direction > 0 && hasCover) {
+                    showCover(true)
+                }
             }
         }
     }
@@ -315,7 +450,10 @@ class FlowEngine(
         val layout = "${config()}:${s.fontSize}:${web.width}x${web.height}"
         if (layout != laidOut) counted.clear()
         laidOut = layout
-        counted[chapter] = pages
+        if (counted[chapter] != pages) {
+            counted[chapter] = pages
+            positionsVersion++
+        }
     }
 
     /**
@@ -337,6 +475,8 @@ class FlowEngine(
     override fun pagesAt(fraction: Float): Pair<Pair<Int, Int>?, Pair<Int, Int>?> {
         // Scrolled, the book has no pages but those of the printed book the host counts itself.
         if (s.vertical || counted.isEmpty()) return null to null
+        // The cover is no page of the text.
+        if (isCover(fraction)) return null to null
         val (index, into) = place(fraction)
         val pages = chapterPages()[index]
         val page = (into * pages).toInt().coerceIn(0, pages - 1)
@@ -345,6 +485,19 @@ class FlowEngine(
 
     /** The chapter that the place [fraction] of the whole book, 0..1, lies in, and how far into it, 0..1. */
     private fun place(fraction: Float): Pair<Int, Float> {
+        if (byPages) {
+            // Counted in pages, the place is the page the fraction is nearest, and lands in the middle of its first part.
+            val pages = chapterPages()
+            val n = pages.sum()
+            if (n >= 1) {
+                val page = (fraction.coerceIn(0f, 1f) * n).roundToInt().coerceIn(0, n - 1)
+                var first = 0
+                for (i in pages.indices) {
+                    if (page < first + pages[i]) return i to ((page - first + 0.25f) / pages[i]).coerceIn(0f, 0.999f)
+                    first += pages[i]
+                }
+            }
+        }
         val target = fraction.coerceIn(0f, 1f) * total
         var before = 0L
         var index = book.spine.lastIndex
@@ -364,7 +517,7 @@ class FlowEngine(
     /** A book that is all one page has been taken to its end, by the seek bar or by being marked as read. */
     private var atEnd = start.percent >= Library.FINISHED_AT
 
-    override val contentPositions get() = book.toc.map { before(book.spine.indexOf(it.path)).toFloat() / total }
+    override val contentPositions get() = book.toc.map { position(book.spine.indexOf(it.path)) }
 
     override val currentContent get() = book.toc.indexOfLast { book.spine.indexOf(it.path) <= chapter }
 
@@ -486,6 +639,25 @@ class FlowEngine(
 
     override fun seekTo(fraction: Float) {
         resetZoom()
+        if (hasCover && isCover(fraction)) {
+            // The cover goes over the last page, which is laid out first unless it is shown already.
+            val last = book.spine.lastIndex
+            if (chapter == last && ready) {
+                if (!atCover) showCover(true)
+            } else {
+                coverWanted = true
+                chapter = last
+                pendingFraction = 1f
+                load()
+            }
+            return
+        }
+        // From the cover to another page: the cover is taken away, and the page is gone to.
+        if (atCover) {
+            atCover = false
+            web.evaluateJavascript(coverScript(false), null)
+        }
+        coverWanted = false
         atEnd = fraction >= 1f
         val (index, inChapter) = place(fraction)
         if (index == chapter && ready) {
@@ -615,6 +787,9 @@ class FlowEngine(
 
         /** Where on [HOST] the font imported from the phone is served, and the name it goes by there (as in SCRIPT). */
         private const val FONTS_PATH = ".fonts/"
+
+        /** Where on [HOST] the cover that ends the book is served (as in SCRIPT). */
+        private const val COVER_PATH = "__cover.jpg"
         private const val CUSTOM_FONT = "ReadyFont"
 
         // Injected into every chapter. All sizes are whole CSS pixels so that pages never drift.
@@ -853,6 +1028,29 @@ class FlowEngine(
     if (p < 0 || p >= R.pages) return false;
     R.go(p, slide);
     return true;
+  };
+
+  // The end of the book: its cover, as if it were closed, over the last page. It lies outside the
+  // text, which moves by the page, and is made once, unseen, for the picture to be there when it is shown.
+  var shut = null, shutImg = null;
+  R.cover = function (on, color, room) {
+    if (!shut) {
+      shut = document.createElement('div');
+      shut.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;z-index:2147483647;display:none;';
+      shutImg = document.createElement('img');
+      shutImg.src = '/__cover.jpg';
+      shutImg.setAttribute('style', 'position:absolute;left:0;top:0;width:100%;height:100%;');
+      shutImg.style.setProperty('object-fit', 'contain', 'important');
+      shutImg.style.setProperty('max-width', 'none', 'important');
+      shutImg.style.setProperty('max-height', 'none', 'important');
+      shut.appendChild(shutImg);
+      document.documentElement.appendChild(shut);
+    }
+    // The cover is as high as the room above the menu, which stays over the foot of the screen.
+    shutImg.style.setProperty('height', 'calc(100% - ' + (room || 0) + 'px)', 'important');
+    // Set so as to win over the page's own rule that a box holding nothing but a picture shows the page through it.
+    shut.style.setProperty('background-color', color || (R.cfg ? R.cfg.bg : '#000'), 'important');
+    shut.style.display = on ? 'block' : 'none';
   };
 
   R.linked = function (x, y) {

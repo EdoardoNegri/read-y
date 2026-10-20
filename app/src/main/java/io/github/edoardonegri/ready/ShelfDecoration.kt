@@ -153,6 +153,9 @@ class ShelfDecoration(ctx: Context, private val columns: Int) : RecyclerView.Ite
             if (grain == null) grain = Grain(ctx.applicationContext)
         }
 
+        /** Whether the grain of the wood is ready, see [prepare]. */
+        fun isReady() = grain != null
+
         /** The grain of the boards of the back wall, [w] by [h], which stand upright (shelf_back.xml). */
         fun drawWallGrain(c: Canvas, w: Float, h: Float, paint: Paint) {
             paint.alpha = 255

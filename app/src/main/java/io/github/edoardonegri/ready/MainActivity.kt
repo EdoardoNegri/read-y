@@ -249,7 +249,7 @@ class MainActivity : AppCompatActivity() {
         picked = null
         if (searching) closeSearch()
         current = book.parentFile ?: Library.root()
-        refresh()
+        refresh(quick = false)
         adapter.indexOf(book).let { if (it >= 0) shelf.scrollToPosition(it) }
         return true
     }
@@ -260,6 +260,28 @@ class MainActivity : AppCompatActivity() {
         detached.clear()
         super.onStop()
     }
+
+    private var reported = false
+
+    /**
+     * Tells Android once every place in view shows its cover or miniature, which is when the app is
+     * ready to use, for the startup times it keeps. Gives up waiting after a few seconds.
+     */
+    private fun reportWhenDrawn() {
+        if (reported) return
+        reported = true
+        val until = SystemClock.uptimeMillis() + 10_000
+        fun check() {
+            if (isDestroyed) return
+            val drawn = adapter.itemCount == 0 || (shelf.childCount > 0 && adapter.allShown(shelf))
+            if (drawn || SystemClock.uptimeMillis() >= until) reportFullyDrawn() else shelf.postOnAnimation { check() }
+        }
+        shelf.post { check() }
+    }
+
+    /** The shelf that is being listed in the background for the first time, and whether any shelf has been shown yet. */
+    private var listing: File? = null
+    private var shown = false
 
     /** Whether the folder has been asked for since the app opened, so that a turned-down question is not asked again at once. */
     private var askedForFolder = false
@@ -297,7 +319,7 @@ class MainActivity : AppCompatActivity() {
      * before is shown as it was found then, at once, and listed anew in the background, unless
      * [relist] is false: it is shown again if anything on it changed.
      */
-    private fun refresh(relist: Boolean = true) {
+    private fun refresh(relist: Boolean = true, quick: Boolean = true) {
         val root = Library.root()
         if (!Library.hasAccess()) {
             showRail()
@@ -323,6 +345,19 @@ class MainActivity : AppCompatActivity() {
         showWood()
         val results = found
         val known = if (results == null) Library.knownShelf(this, current) else null
+        // The very first shelf is listed in the background: asking the documents provider is slow, and the
+        // window would wait for it before showing anything. [quick] is false where the caller needs the
+        // shelf at once, see showShelfOf.
+        if (!shown && quick && results == null && known == null && listing != current) {
+            listing = current
+            val dir = current
+            val app = applicationContext
+            Library.io.execute {
+                Library.shelf(app, dir)
+                onShelf { refresh(relist = false) }
+            }
+            return
+        }
         val books = when {
             results != null -> Library.arrange(this, null, results)
             known != null -> known
@@ -342,6 +377,8 @@ class MainActivity : AppCompatActivity() {
         // their plaques tell where they are to whoever asks.
         adapter.showPlaces = results != null && !starred
         adapter.submit(items)
+        shown = true
+        reportWhenDrawn()
         grant.visibility = View.GONE
         // The keyboard covers the middle of the screen while searching, where the answer would be.
         (empty.layoutParams as FrameLayout.LayoutParams).gravity =
@@ -433,6 +470,8 @@ class MainActivity : AppCompatActivity() {
         reader.putExtra(ReaderActivity.EXTRA_FROM_SHELF, true).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
         val settings = ReaderSettings(this)
         val paper = settings.lit(settings.palette.bg)
+        // A book read to its end opens on its cover, so it is only enlarged out of its place: that cover is its last page.
+        val grown = !bare && !settings.vertical && Library.isFinished(this, f)
         if (Build.VERSION.SDK_INT >= 30) {
             // The reader starts at once, unseen over the shelf, and sets out the page while the
             // book opens; see BookOpening.Handoff.
@@ -441,10 +480,10 @@ class MainActivity : AppCompatActivity() {
             whileOpening.isEnabled = true
             startActivity(reader.setClass(this, OpeningReaderActivity::class.java))
             // It opens in a window of its own, which the reader starting meanwhile does not hold up.
-            detached.open(cover, paper, f, settings.look, handoff, bare)
+            detached.open(cover, paper, f, settings.look, handoff, bare, grown)
             return
         }
-        opening.open(cover, paper, BookOpening.kept(f, settings.look), bare) { startActivity(reader) }
+        opening.open(cover, paper, if (grown) null else BookOpening.kept(f, settings.look), bare, grown) { startActivity(reader) }
     }
 
     /**
@@ -467,13 +506,17 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Gets ready, while nothing else happens on the shelf, the web view that lays out the next
-     * book of flowing text to be opened (FlowEngine.prepare), which is slow to make.
+     * book of flowing text to be opened (FlowEngine.prepare), which is slow to make. It waits a few
+     * seconds first, so as not to take the phone's time from the covers as the shelf appears.
      */
     private fun warmUpReader() {
-        Looper.myQueue().addIdleHandler {
-            if (!isFinishing && !isDestroyed) FlowEngine.prepare(this)
-            false
-        }
+        shelf.postDelayed({
+            if (isFinishing || isDestroyed) return@postDelayed
+            Looper.myQueue().addIdleHandler {
+                if (!isFinishing && !isDestroyed) FlowEngine.prepare(this)
+                false
+            }
+        }, WARM_READER_MS)
     }
 
     /** Opens a book on the shelf before the reader shows it, and closes it again afterwards. */
@@ -499,7 +542,8 @@ class MainActivity : AppCompatActivity() {
         val at = adapter.indexOf(left.file)
         if (at < 0) showShelfOf(left.file) else shelf.scrollToPosition(at)
         val settings = ReaderSettings(this)
-        opening.close(left.page, settings.lit(settings.palette.bg)) {
+        // Left on its cover, at its end, a book only shrinks back into its place.
+        opening.close(left.page, settings.lit(settings.palette.bg), grown = !settings.vertical && Library.isFinished(this, left.file)) {
             shelf.findViewHolderForAdapterPosition(adapter.indexOf(left.file))?.itemView?.findViewById(R.id.cover)
         }
     }
@@ -610,18 +654,25 @@ class MainActivity : AppCompatActivity() {
         Library.io.execute {
             var unreadable = 0
             var kept = 0
+            var duplicates = 0
             for (uri in uris) {
                 val imported = try {
                     Library.import(app, uri, app.contentResolver.getType(uri), dir)
                 } catch (e: Exception) {
                     null
                 }
-                if (imported == null) unreadable++ else if (imported.moved && !Store.removeOriginal(uri)) kept++
+                if (imported == null) unreadable++ else {
+                    if (imported.duplicate) duplicates++
+                    if (imported.moved && !Store.removeOriginal(uri)) kept++
+                }
             }
             onShelf {
                 refresh()
                 if (unreadable > 0) toast(R.string.cannot_import)
                 else if (kept > 0) toast(R.string.cannot_delete)
+                else if (duplicates > 0) {
+                    Toast.makeText(this, resources.getQuantityString(R.plurals.already_here, duplicates, duplicates), Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
@@ -1289,17 +1340,25 @@ class MainActivity : AppCompatActivity() {
         val dialog = ShelfDialog(this).uncrossed().title(m.title)
         val name = dialog.field(R.string.field_name, m.title)
         val author = dialog.field(R.string.field_author, m.author)
+        // What the cover can be, as the menu offers it: the first page only for a book of pages, the
+        // picture the reader gave only once there is one, and a new one always last.
+        var kinds = listOf<CoverKind>()
         lateinit var aspect: BrassDropdown
-        aspect = dialog.choice(R.string.field_aspect) {
-            when (it) {
-                0 -> setCover(f, null)
-                // The last is always a new picture; one the book has already stays as it is.
-                aspect.count - 1 -> {
+        aspect = dialog.choice(R.string.field_aspect) { index ->
+            when (kinds.getOrNull(index)) {
+                CoverKind.BOOK -> setCoverMode(f, Library.CoverMode.OWN)
+                CoverKind.FIRST -> setCoverMode(f, Library.CoverMode.FIRST_PAGE)
+                CoverKind.MADE -> setCoverMode(f, Library.CoverMode.MADE, Library.tone(this, f))
+                CoverKind.NEW -> {
                     coverFor = f
                     pickPicture.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 }
+                // The picture the book has already stays as it is.
+                else -> Unit
             }
         }
+        // Which leather, shown only for a cover made for the book.
+        val (toneName, toneMenu) = dialog.namedChoice(R.string.field_tone) { setCoverMode(f, Library.CoverMode.MADE, it) }
         dialog.picture.apply {
             binding = true
             ratio = ShelfSpec.BOOK
@@ -1308,8 +1367,25 @@ class MainActivity : AppCompatActivity() {
         }
         editing = f to { cover, custom ->
             dialog.picture.setImageBitmap(cover)
-            val labels = listOfNotNull(R.string.cover_first, if (custom) R.string.cover_own else null, R.string.cover_new)
-            aspect.show(labels.map(::getString), if (custom) 1 else 0)
+            val mode = Library.coverMode(this, f)
+            kinds = buildList {
+                add(CoverKind.BOOK)
+                if (!Library.isFlowing(f)) add(CoverKind.FIRST)
+                add(CoverKind.MADE)
+                if (custom) add(CoverKind.PICTURE)
+                add(CoverKind.NEW)
+            }
+            val now = when {
+                custom -> CoverKind.PICTURE
+                mode == Library.CoverMode.FIRST_PAGE -> CoverKind.FIRST
+                mode == Library.CoverMode.MADE -> CoverKind.MADE
+                else -> CoverKind.BOOK
+            }
+            aspect.show(kinds.map { getString(it.label) }, kinds.indexOf(now))
+            val made = now == CoverKind.MADE
+            toneName.visibility = if (made) View.VISIBLE else View.GONE
+            toneMenu.visibility = toneName.visibility
+            toneMenu.show(Library.TONES.map { getString(it.first) }, Library.tone(this, f))
         }
         showCover(f)
         dialog.onClose {
@@ -1349,6 +1425,25 @@ class MainActivity : AppCompatActivity() {
             val cover = Library.cover(app, f)
             val custom = Library.hasCustomCover(app, f)
             runOnUiThread { editing?.takeIf { it.first == f }?.second?.invoke(cover, custom) }
+        }
+    }
+
+    /** What the cover of a book can be, by the name the menu of the editor gives it. */
+    private enum class CoverKind(val label: Int) {
+        BOOK(R.string.cover_book), FIRST(R.string.cover_first), MADE(R.string.cover_made),
+        PICTURE(R.string.cover_own), NEW(R.string.cover_new),
+    }
+
+    /** Says what the cover of [f] is, see [Library.setCoverMode], and shows it in the editor and on the shelf. */
+    private fun setCoverMode(f: File, mode: Library.CoverMode, tone: Int? = null) {
+        val app = applicationContext
+        Library.io.execute {
+            Library.setCoverMode(app, f, mode, tone)
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                showCover(f)
+                refresh()
+            }
         }
     }
 
@@ -1459,6 +1554,9 @@ class MainActivity : AppCompatActivity() {
         /** The longest a change of shelf waits for the covers of the one coming to be shown, see whenShown. */
         private const val SHOWN_WAIT_MS = 400L
         private const val MOVE_MS = 180L
+
+        /** How long the web view of the reader is left alone after the shelf is shown, see warmUpReader. */
+        private const val WARM_READER_MS = 2500L
         private const val OPEN_MS = 700L
 
         /** How much of what is carried shows over what lies under it, of 255. */
