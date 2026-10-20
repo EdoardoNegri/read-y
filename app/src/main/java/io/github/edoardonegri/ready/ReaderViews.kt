@@ -1,5 +1,6 @@
 package io.github.edoardonegri.ready
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -15,6 +16,7 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import androidx.appcompat.widget.AppCompatImageButton
 import androidx.appcompat.widget.AppCompatImageView
@@ -107,9 +109,10 @@ class RatioImageView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet
 /**
  * The chapters of a book as marks across the line of the seek bar that lies under this view, each
  * where its chapter begins: like a ruler's, long and numbered every so many chapters and short
- * and faint between, the one being read brighter and numbered too. Sliding a finger along the
+ * and faint between. The number of the chapter being read stands on a plate over the knob of the
+ * seek bar, the place being read, in front of the numbers of the ruler it passes. Sliding a finger along the
  * numbers shows the name of the chapter under it first, and lifting it opens that chapter.
- * Meanwhile, and while the knob of the seek bar is dragged, a lens lies over the numbers and the
+ * Meanwhile, and while the knob of the seek bar is dragged, the plate grows into a lens over the numbers and the
  * line where the finger or the knob is, and shows that stretch of the line enlarged: its marks as
  * far apart as on the line, only more, the place itself as a needle that moves on between them,
  * and the number of the chapter it is in, level with the numbers outside. The marks and the lens
@@ -128,11 +131,15 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     /** The mark of the chapter being read, or -1. */
     var current by changes(-1, ::invalidate)
 
+    /** Where the place being read is, 0..1 along the line, or NaN: the number of its chapter stands over it. */
+    var place by changes(Float.NaN, ::invalidate)
+
     /** Where the knob of the seek bar is being dragged, 0..1 along the line, or NaN: the lens shows it meanwhile. */
     var seeking = Float.NaN
         set(value) {
             if (field.isNaN() && value.isNaN() || field == value) return
             field = value
+            followLens()
             invalidate()
         }
 
@@ -151,7 +158,27 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
     private val shape = RectF()
     private val lens = RectF()
+    private val plate = RectF()
+    private val frame = RectF()
     private val glass = Path()
+
+    /** How far the plate of the chapter being read has grown into the lens, 0..1. */
+    private var open = 0f
+
+    /** Whether the lens is to be open, which [opening] takes [open] towards. */
+    private var lensWanted = false
+
+    private val opening = ValueAnimator().apply {
+        duration = LENS_MS
+        interpolator = DecelerateInterpolator()
+        addUpdateListener {
+            open = it.animatedValue as Float
+            invalidate()
+        }
+    }
+
+    /** Where the lens was last over, 0..1 along the line, which it closes from; NaN until it has opened. */
+    private var lensAt = Float.NaN
 
     /** Every which chapter is numbered along the line; 0 until that is worked out for the marks and the width there are. */
     private var step = 0
@@ -201,8 +228,9 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     /** The mark of the chapter [i] at [x], across the line at [line], [scale] times its size; brighter if [here]. */
     private fun mark(canvas: Canvas, i: Int, x: Float, line: Float, scale: Float, here: Boolean) {
         val numbered = (i + 1) % step() == 0
-        val half = (if (here) 1.75f else if (numbered) 1.25f else 0.6f) * d * scale
-        val reach = (if (here) 7f else if (numbered) 5f else 3f) * d * scale
+        val long = here || numbered
+        val half = (if (long) 1.25f else 0.6f) * d * scale
+        val reach = (if (long) 5f else 3f) * d * scale
         paint.color = if (here) BRIGHT else if (numbered) BRASS else FAINT_BRASS
         shape.set(x - half, line - reach, x + half, line + reach)
         canvas.drawRoundRect(shape, half, half, paint)
@@ -213,78 +241,139 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         val line = height + lineBelow
         val every = step()
         val at = if (!finger.isNaN()) along(finger) else seeking
+        if (!at.isNaN()) lensAt = at
         paint.textSize = sp(NUMBER_SP)
-        // The chapter being read is numbered too, whichever it is; a number of the ruler that
-        // would run into it gives way.
-        paint.typeface = BOLD
-        val reading = marks.getOrNull(current)?.let { x(it) } ?: Float.NaN
-        val readingHalf = if (current >= 0) paint.measureText((current + 1).toString()) / 2 else 0f
         marks.forEachIndexed { i, mark ->
-            val here = i == current
             val x = x(mark)
-            mark(canvas, i, x, line, 1f, here)
-            // Its number above it. The lens is laid over whatever it covers of them.
-            if ((i + 1) % every != 0 && !here) return@forEachIndexed
-            if (!here && abs(x - reading) < readingHalf + paint.measureText((i + 1).toString()) / 2 + 4 * d) {
-                return@forEachIndexed
-            }
-            paint.typeface = if (here) BOLD else PLAIN
+            mark(canvas, i, x, line, 1f, false)
+            // Its number above it. The plate and the lens are laid over whatever they cover of them.
+            if ((i + 1) % every != 0) return@forEachIndexed
+            paint.typeface = PLAIN
             // The numbers are lighter than their marks, to be read against the dark wood.
-            paint.color = if (here) BRIGHT else CREAM
+            paint.color = CREAM
             canvas.drawText((i + 1).toString(), x, baseline, paint)
         }
-        if (every > 1 && !at.isNaN()) drawLens(canvas, at)
+        drawGlass(canvas)
     }
 
-    /** The lens over the place [at], 0..1 along the line; see the class. */
+    /**
+     * Opens the lens while a finger is on the numbers or the knob of the seek bar is dragged, and
+     * closes it after, growing it out of the plate of the chapter being read and back into it.
+     */
+    private fun followLens() {
+        val at = if (!finger.isNaN()) along(finger) else seeking
+        val wanted = marks.isNotEmpty() && width > 0 && step() > 1 && !at.isNaN()
+        if (wanted == lensWanted) return
+        lensWanted = wanted
+        opening.setFloatValues(open, if (wanted) 1f else 0f)
+        opening.start()
+    }
+
+    override fun onDetachedFromWindow() {
+        opening.cancel()
+        super.onDetachedFromWindow()
+    }
+
+    /**
+     * The number of the chapter being read on a plate over the knob of the seek bar, or of the
+     * one the knob is dragged over meanwhile, in front of the numbers of the ruler it passes; and
+     * the lens it grows into, see the class.
+     */
+    private fun drawGlass(canvas: Canvas) {
+        val chapter = if (!seeking.isNaN()) chapterAt(seeking) else current
+        val where = if (!seeking.isNaN()) seeking else place
+        val plated = chapter in marks.indices
+        val number = (chapter + 1).toString()
+        paint.typeface = BOLD
+        paint.textSize = sp(NUMBER_SP)
+        if (plated) {
+            val x = if (where.isNaN()) x(marks[chapter]) else x(where)
+            val half = paint.measureText(number) / 2 + 4 * d
+            val middle = x.coerceIn(half, (width - half).coerceAtLeast(half))
+            plate.set(middle - half, baseline + paint.ascent() - 1 * d, middle + half, baseline + paint.descent() + 1 * d)
+        }
+        val lensed = open > 0f && !lensAt.isNaN()
+        if (lensed) placeLens(lensAt)
+        if (!plated && !lensed) return
+        // The plate, the lens, or as far between them as the one has grown into the other.
+        when {
+            !lensed -> frame.set(plate)
+            !plated -> frame.set(lens)
+            else -> frame.set(
+                lerp(plate.left, lens.left, open), lerp(plate.top, lens.top, open),
+                lerp(plate.right, lens.right, open), lerp(plate.bottom, lens.bottom, open),
+            )
+        }
+        val grown = if (lensed) open else 0f
+        val round = frame.height() / 2
+        glass.rewind()
+        glass.addRoundRect(frame, round, round, Path.Direction.CW)
+
+        paint.style = Paint.Style.FILL
+        paint.color = GLASS
+        paint.setShadowLayer(lerp(3f, 5f, grown) * d, 0f, lerp(1f, 1.5f, grown) * d, 0x99000000.toInt())
+        canvas.drawPath(glass, paint)
+        paint.clearShadowLayer()
+        // What the lens shows comes into sight as it grows, and the number of the plate fades.
+        if (lensed) canvas.withClip(glass) {
+            if (open < 1f) saveLayerAlpha(frame, (open * 255).toInt())
+            drawLens(this, lensAt)
+            if (open < 1f) restore()
+        }
+        if (plated && grown < 1f) {
+            paint.textSize = sp(NUMBER_SP)
+            paint.color = NEEDLE_YELLOW
+            paint.alpha = ((1 - grown) * 255).toInt()
+            canvas.drawText(number, frame.centerX(), baseline, paint)
+            paint.alpha = 255
+        }
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = lerp(1f, 1.25f, grown) * d
+        paint.color = BRASS
+        canvas.drawPath(glass, paint)
+        paint.style = Paint.Style.FILL
+    }
+
+    private fun lerp(from: Float, to: Float, by: Float) = from + (to - from) * by
+
+    /** Sets out [lens] over the place [at], 0..1 along the line. */
+    private fun placeLens(at: Float) {
+        val wide = (LENS_DP * d).coerceAtMost(width.toFloat())
+        val left = (x(at) - wide / 2).coerceIn(0f, (width - wide).coerceAtLeast(0f))
+        paint.textSize = sp(LENS_NUMBER_SP)
+        lens.set(left, baseline + paint.ascent() - 1.5f * d, left + wide, baseline + 11 * d)
+    }
+
+    /** What the lens set out by [placeLens] over the place [at] shows; see the class. */
     private fun drawLens(canvas: Canvas, at: Float) {
         val needle = x(at)
-        val wide = (LENS_DP * d).coerceAtMost(width.toFloat())
-        val left = (needle - wide / 2).coerceIn(0f, (width - wide).coerceAtLeast(0f))
         paint.textSize = sp(LENS_NUMBER_SP)
         paint.typeface = BOLD
-        lens.set(left, baseline + paint.ascent() - 1.5f * d, left + wide, baseline + 11 * d)
         // As many times larger as lets the chapters be told apart where they lie as close as on average.
         val apart = (x(marks.last()) - x(marks.first())) / (marks.size - 1).coerceAtLeast(1)
         val zoom = (MIN_APART_DP * d / apart.coerceAtLeast(0.1f)).coerceIn(1.5f, MAX_ZOOM)
         fun inLens(x: Float) = lens.centerX() + (x - needle) * zoom
-        val round = lens.height() / 2
-        glass.rewind()
-        glass.addRoundRect(lens, round, round, Path.Direction.CW)
-
-        paint.style = Paint.Style.FILL
-        paint.color = GLASS
-        paint.setShadowLayer(5 * d, 0f, 1.5f * d, 0x99000000.toInt())
-        canvas.drawPath(glass, paint)
-        paint.clearShadowLayer()
-        canvas.withClip(glass) {
-            // The line enlarged, as far as the book goes, with its marks across it.
-            val inLine = lens.bottom - 5 * d
-            paint.color = FAINT_BRASS
-            drawRect(
-                inLens(x(0f)).coerceAtLeast(lens.left), inLine - 0.5f * d,
-                inLens(x(1f)).coerceAtMost(lens.right), inLine + 0.5f * d, paint,
-            )
-            val chapter = chapterAt(at)
-            marks.forEachIndexed { i, mark ->
-                val x = inLens(x(mark))
-                if (x in lens.left - 4 * d..lens.right + 4 * d) mark(this, i, x, inLine, 0.6f, i == chapter)
-            }
-            // Only the chapter the place is in is numbered, over its mark, or at the edge of the
-            // glass where its mark lies beyond it.
-            val number = (chapter + 1).toString()
-            val half = paint.measureText(number) / 2 + LENS_PAD_DP * d
-            paint.color = BRIGHT
-            drawText(number, inLens(x(marks[chapter])).coerceIn(lens.left + half, lens.right - half), baseline, paint)
-            // The place itself, which moves on smoothly between the chapters.
-            paint.color = NEEDLE
-            drawRect(lens.centerX() - 0.75f * d, baseline + 2 * d, lens.centerX() + 0.75f * d, lens.bottom - 2 * d, paint)
+        // The line enlarged, as far as the book goes, with its marks across it.
+        val inLine = lens.bottom - 5 * d
+        paint.color = FAINT_BRASS
+        canvas.drawRect(
+            inLens(x(0f)).coerceAtLeast(lens.left), inLine - 0.5f * d,
+            inLens(x(1f)).coerceAtMost(lens.right), inLine + 0.5f * d, paint,
+        )
+        val chapter = chapterAt(at)
+        marks.forEachIndexed { i, mark ->
+            val x = inLens(x(mark))
+            if (x in lens.left - 4 * d..lens.right + 4 * d) mark(canvas, i, x, inLine, 0.6f, i == chapter)
         }
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 1.25f * d
-        paint.color = BRASS
-        canvas.drawPath(glass, paint)
-        paint.style = Paint.Style.FILL
+        // Only the chapter the place is in is numbered, over its mark, or at the edge of the
+        // glass where its mark lies beyond it.
+        val number = (chapter + 1).toString()
+        val half = paint.measureText(number) / 2 + LENS_PAD_DP * d
+        paint.color = BRIGHT
+        canvas.drawText(number, inLens(x(marks[chapter])).coerceIn(lens.left + half, lens.right - half), baseline, paint)
+        // The place itself, which moves on smoothly between the chapters.
+        paint.color = NEEDLE
+        canvas.drawRect(lens.centerX() - 0.75f * d, baseline + 2 * d, lens.centerX() + 0.75f * d, lens.bottom - 2 * d, paint)
     }
 
     /**
@@ -310,6 +399,7 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
                 onPreview?.invoke(-1)
             }
         }
+        followLens()
         invalidate()
         return true
     }
@@ -336,6 +426,12 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         const val CREAM = 0xFFD8C7A0.toInt()
         const val GLASS = 0xFF45301E.toInt()
         const val NEEDLE = 0xFFFFF4C2.toInt()
+
+        /** The knob of the seek bar, seek_needle.xml. */
+        const val NEEDLE_YELLOW = 0xFFFFD60A.toInt()
+
+        /** How long the plate takes to grow into the lens, or back. */
+        const val LENS_MS = 220L
     }
 }
 

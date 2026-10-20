@@ -101,6 +101,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Holds the back key while a book opens and its reader, started over the shelf, has not yet
+     * taken the keys: the shelf would go up a shelf under the opening book, or close altogether.
+     */
+    private val whileOpening = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            if (BookOpening.handoff?.waiting == true) return
+            isEnabled = false
+            onBackPressedDispatcher.onBackPressed()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -183,6 +195,7 @@ class MainActivity : AppCompatActivity() {
             if (it.isNullOrEmpty()) search("") else query.postDelayed(typed, TYPING_MS)
         }
         onBackPressedDispatcher.addCallback(this, back)
+        onBackPressedDispatcher.addCallback(this, whileOpening)
 
         // What was deleted when the app was last closed is gone for good by now.
         if (savedInstanceState == null) applicationContext.let { app -> Library.io.execute { Library.emptyBin(app) } }
@@ -205,6 +218,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        whileOpening.isEnabled = false
         warmUpReader()
         val book = asked
         asked = null
@@ -398,6 +412,7 @@ class MainActivity : AppCompatActivity() {
             // book opens; see BookOpening.Handoff.
             val handoff = BookOpening.Handoff()
             BookOpening.handoff = handoff
+            whileOpening.isEnabled = true
             startActivity(reader.setClass(this, OpeningReaderActivity::class.java))
             // It opens in a window of its own, which the reader starting meanwhile does not hold up.
             detached.open(cover, paper, f, settings.look, handoff, bare)

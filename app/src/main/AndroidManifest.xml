@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Lets the reader have the phone silenced while a book is open (DoNotDisturb), once they
+         have also allowed it in the phone's settings. -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+
     <!-- No storage permission: the library is the one folder the reader grants through the
          system folder picker (see Store), and the app sees nothing else. -->
 

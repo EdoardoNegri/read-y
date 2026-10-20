@@ -41,15 +41,16 @@ object InfoPlace {
 
 /**
  * What can be shown around the text of a page: kept under [key] in the settings, called [label]
- * there, and shown at [default] (an [InfoPlace]) until it is put somewhere else.
+ * there, or [short] where there is little room, and shown at [default] (an [InfoPlace]) until it
+ * is put somewhere else.
  */
-enum class InfoItem(val key: String, val label: Int, val default: Int) {
-    TIME("time", R.string.info_time, InfoPlace.TOP_RIGHT),
-    BOOK_PAGE("bookPage", R.string.info_book_page, InfoPlace.BOTTOM_MIDDLE),
-    CHAPTER_LEFT("chapterLeft", R.string.info_chapter_left, InfoPlace.HIDDEN),
-    BOOK_LEFT("bookLeft", R.string.info_book_left, InfoPlace.HIDDEN),
-    CHAPTER("chapter", R.string.info_chapter, InfoPlace.HIDDEN),
-    CHAPTER_PAGE("chapterPage", R.string.info_chapter_page, InfoPlace.HIDDEN),
+enum class InfoItem(val key: String, val label: Int, val short: Int, val default: Int) {
+    TIME("time", R.string.info_time, R.string.info_time_short, InfoPlace.TOP_RIGHT),
+    BOOK_PAGE("bookPage", R.string.info_book_page, R.string.info_book_page_short, InfoPlace.BOTTOM_MIDDLE),
+    CHAPTER_LEFT("chapterLeft", R.string.info_chapter_left, R.string.info_chapter_left_short, InfoPlace.HIDDEN),
+    BOOK_LEFT("bookLeft", R.string.info_book_left, R.string.info_book_left_short, InfoPlace.HIDDEN),
+    CHAPTER("chapter", R.string.info_chapter, R.string.info_chapter_short, InfoPlace.HIDDEN),
+    CHAPTER_PAGE("chapterPage", R.string.info_chapter_page, R.string.info_chapter_page_short, InfoPlace.HIDDEN),
 }
 
 /**

@@ -215,6 +215,8 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         engine?.pause()
         if (::pace.isInitialized) pace.pause()
         content.removeCallbacks(tick)
+        // The settings opened from the reader keep the phone as quiet as the book did.
+        if (!settingsOpened) DoNotDisturb.stop(this)
         super.onPause()
     }
 
@@ -222,6 +224,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         super.onResume()
         engine?.resume()
         clock()
+        if (s.doNotDisturb) DoNotDisturb.start(this) else DoNotDisturb.stop(this)
         if (settingsOpened) {
             settingsOpened = false
             applyBrightness()
@@ -473,11 +476,20 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         paceScreen()
         // In paged mode page turns are ours; in scroll mode the content scrolls itself.
         content.consumeAll = !s.vertical
-        engine?.applySettings()
+        // The book is laid out anew only if it is to look otherwise: back from the settings with
+        // those as they were, the page stays as it is, rather than being drawn again to the same.
+        val look = "${s.look}:${s.trimMargins}"
+        if (look != laidOutAs) {
+            laidOutAs = look
+            engine?.applySettings()
+        }
         arrangeInfo()
         showInfo()
         clock()
     }
+
+    /** How the book was last laid out, see [applyLayout]. */
+    private var laidOutAs = ""
 
     /** Works out where what is shown around the text goes, and leaves the text the room for it. */
     private fun arrangeInfo() {
@@ -645,6 +657,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         name(reading, other = false)
         if (!seeking) seek.progress = (percent * 1000).roundToInt()
         chapters.current = mark
+        chapters.place = percent
     }
 
     /** The place last told while the menu was closed, which it shows once it opens; see [openMenu]. */

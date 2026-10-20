@@ -133,6 +133,9 @@ class ReaderSettings(ctx: Context) {
 
     /** Keeps the screen from dimming and switching off while a book is open. */
     var keepScreenOn by bool(false)
+
+    /** Silences the phone while a book is open, see DoNotDisturb. */
+    var doNotDisturb by bool(false)
     var hintShown by bool(false)
 
     /** The colours of the page in white light. */

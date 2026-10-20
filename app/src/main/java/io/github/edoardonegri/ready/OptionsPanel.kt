@@ -9,6 +9,7 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.google.android.material.switchmaterial.SwitchMaterial
 import java.io.File
@@ -59,6 +60,14 @@ class OptionsPanel(
             s.keepScreenOn = it
             onBrightness()
         }
+        // The phone lets the app silence it only once the reader has allowed that in its settings.
+        toggle(t(R.string.opt_do_not_disturb), s.doNotDisturb) {
+            s.doNotDisturb = it
+            if (it && !DoNotDisturb.allowed(ctx)) {
+                Toast.makeText(ctx, R.string.do_not_disturb_ask, Toast.LENGTH_LONG).show()
+                DoNotDisturb.ask(ctx)
+            }
+        }
 
         section(t(R.string.opt_page))
         buttons(t(R.string.opt_direction), listOf(t(R.string.opt_direction_pages), t(R.string.opt_direction_scroll)), if (s.vertical) 1 else 0) {
@@ -81,7 +90,11 @@ class OptionsPanel(
         }
         showAround()
         section.addView(around)
-        for (item in InfoItem.entries) place(around, item, onLayout)
+        around.addView(
+            InfoLayoutPicker(ctx, s, onLayout),
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(InfoLayoutPicker.HEIGHT_DP))
+                .apply { setMargins(0, dp(8), 0, dp(8)) },
+        )
         toggle(t(R.string.opt_trim_margins), s.trimMargins) {
             s.trimMargins = it
             onLayout()
@@ -89,23 +102,23 @@ class OptionsPanel(
 
         if (epub) {
             section(t(R.string.opt_text))
-            slider(t(R.string.opt_size), FlowEngine.MIN_TEXT, FlowEngine.MAX_TEXT, FlowEngine.TEXT_STEP, s.fontSize, false, ::percent) {
+            slider(t(R.string.opt_size), FlowEngine.MIN_TEXT, FlowEngine.MAX_TEXT, FlowEngine.TEXT_STEP, s.fontSize, true, ::percent) {
                 s.fontSize = it
                 onLayout()
             }
-            slider(t(R.string.opt_line_spacing), 10, 30, 1, s.lineSpacing, false, { "%.1f".format(it / 10f) }) {
+            slider(t(R.string.opt_line_spacing), 10, 30, 1, s.lineSpacing, true, { "%.1f".format(it / 10f) }) {
                 s.lineSpacing = it
                 onLayout()
             }
-            slider(t(R.string.opt_side_margins), 0, 80, 2, s.marginH, false, { "$it" }) {
+            slider(t(R.string.opt_side_margins), 0, 80, 2, s.marginH, true, { "$it" }) {
                 s.marginH = it
                 onLayout()
             }
-            slider(t(R.string.opt_top_bottom_margins), 0, 80, 2, s.marginV, false, { "$it" }) {
+            slider(t(R.string.opt_top_bottom_margins), 0, 80, 2, s.marginV, true, { "$it" }) {
                 s.marginV = it
                 onLayout()
             }
-            slider(t(R.string.opt_hyphenation), 0, ReaderSettings.HYPHENATION_MAX, 1, s.hyphenation, false, { t(HYPHENATION[it]) }) {
+            slider(t(R.string.opt_hyphenation), 0, ReaderSettings.HYPHENATION_MAX, 1, s.hyphenation, true, { t(HYPHENATION[it]) }) {
                 s.hyphenation = it
                 onLayout()
             }
@@ -134,20 +147,6 @@ class OptionsPanel(
     }
 
     /** A line of [into] for [item], with where on the page it is shown to choose. */
-    private fun place(into: LinearLayout, item: InfoItem, onLayout: () -> Unit) {
-        val row = LinearLayout(ctx)
-        row.gravity = Gravity.CENTER_VERTICAL
-        row.setPadding(0, dp(8), 0, 0)
-        addName(row, t(item.label))
-        val where = BrassDropdown(ctx) {
-            s.setInfoAt(item, it)
-            onLayout()
-        }
-        row.addView(where, LinearLayout.LayoutParams(dp(PLACE_DP), dp(40)).apply { marginStart = dp(10) })
-        where.show(InfoPlace.NAMES.map(::t), s.infoAt(item))
-        into.addView(row)
-    }
-
     /** Adds the name of a setting to [row], taking all the room the rest leaves. */
     private fun addName(row: LinearLayout, name: String) {
         row.addView(
@@ -209,7 +208,10 @@ class OptionsPanel(
         return shown
     }
 
-    /** [live] sliders apply while dragging; the others only when released, since they re-flow the book. */
+    /**
+     * [live] sliders apply while dragging, so the sample page shows each step as it is reached; the
+     * others only when released.
+     */
     private fun slider(
         name: String, min: Int, max: Int, step: Int, value: Int, live: Boolean,
         format: (Int) -> String, onChange: (Int) -> Unit,
@@ -325,8 +327,5 @@ class OptionsPanel(
         val HYPHENATION = intArrayOf(
             R.string.hyphenation_0, R.string.hyphenation_1, R.string.hyphenation_2, R.string.hyphenation_3, R.string.hyphenation_4,
         )
-
-        /** How wide the menu of the place of something shown around the text is, in dp. */
-        const val PLACE_DP = 176
     }
 }

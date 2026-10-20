@@ -131,13 +131,19 @@
                 android:contentDescription="@string/contents"
                 android:visibility="gone" />
 
+            <!-- Its knob is a line, as the marks of the chapters are; the track runs on under it.
+                 Pressing it shows no ripple: the lens opening over it shows that. -->
             <SeekBar
                 android:id="@+id/seek"
                 android:layout_width="match_parent"
+                android:background="@null"
                 android:layout_height="30dp"
                 android:layout_marginEnd="8dp"
                 android:layout_marginStart="8dp"
-                android:max="1000" />
+                android:max="1000"
+                android:splitTrack="false"
+                android:thumb="@drawable/seek_needle"
+                android:thumbTint="#FFFFD60A" />
 
             <!-- Three figures under the line, which they start and end with: the page of the
                  chapter, how much of the book is read, and the page of the book. -->

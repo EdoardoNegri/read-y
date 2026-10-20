@@ -126,7 +126,7 @@ class FlowEngine(
             injected = true
             view.evaluateJavascript(SCRIPT, null)
             val anchor = pendingAnchor?.let { JSONObject.quote(it) } ?: "null"
-            view.evaluateJavascript("__r.apply(${config()},$pendingFraction,$anchor)", null)
+            view.evaluateJavascript("__r.apply(${laidOut()},$pendingFraction,$anchor)", null)
             pendingAnchor = null
             // If the chapter could not be scripted (e.g. malformed XHTML) still show what loaded.
             view.postDelayed({ if (!closed && !ready) reveal() }, 1500)
@@ -207,6 +207,7 @@ class FlowEngine(
         ready = false
         injected = false
         stale = false
+        applied = ""
         web.alpha = 0f
         web.setBackgroundColor(s.litPalette.bg)
         web.isVerticalScrollBarEnabled = s.vertical
@@ -237,6 +238,9 @@ class FlowEngine(
             .put("mh", s.marginH)
             .put("mv", s.marginV)
             .put("vertical", s.vertical)
+            // Not read by the script, which the web view's text zoom enlarges the text for: for
+            // the page to be laid out anew when it changes, see applied.
+            .put("zoom", s.fontSize)
             .put("hy", HYPHENATION.getOrElse(s.hyphenation) { "" })
             // The pictures lie in the warm light too: how much of red, green and blue it has.
             .put("lamp", s.lamp.let { if (it == Color.WHITE) "" else "%.4f %.4f %.4f".format(Locale.US, Color.red(it) / 255f, Color.green(it) / 255f, Color.blue(it) / 255f) })
@@ -393,8 +397,7 @@ class FlowEngine(
     override fun prev() = step(-1)
 
     override fun applySettings() {
-        resetZoom()
-        web.settings.textZoom = s.fontSize
+        if (web.settings.textZoom != s.fontSize) web.settings.textZoom = s.fontSize
         preRaster()
         web.setBackgroundColor(s.litPalette.bg)
         web.isVerticalScrollBarEnabled = s.vertical
@@ -403,12 +406,28 @@ class FlowEngine(
             stale = injected
             return
         }
+        // Nothing the page is laid out by has changed, as when the settings were looked at and
+        // left as they were: it stays as it is, rather than being laid out anew to the same.
+        if (config() == applied) return
+        resetZoom()
         relayout()
-        // Text zoom reflows asynchronously; measure once more when it has settled.
-        web.postDelayed({ if (!closed && ready) relayout() }, 350)
     }
 
-    private fun relayout() = web.evaluateJavascript("window.__r&&__r.apply(${config()},null,null)", null)
+    /**
+     * What the chapter shown was last laid out by (see [config]), or nothing while it is still
+     * to be: the page is laid out anew only when that changes, see [applySettings].
+     */
+    private var applied = ""
+
+    /** [config], noted as what the page is laid out by from now on. */
+    private fun laidOut() = config().also { applied = it }
+
+    /**
+     * Lays the chapter out anew as the settings say, keeping to the place in it that is being read.
+     * The script does so in one go, before the page is drawn again; should the text change size
+     * a moment later still, as the web view's text zoom has it do, the script follows that too.
+     */
+    private fun relayout() = web.evaluateJavascript("window.__r&&__r.apply(${laidOut()},null,null)", null)
 
     // ---- enlarging the page by pinching ----
 
@@ -470,7 +489,7 @@ class FlowEngine(
         atEnd = fraction >= 1f
         val (index, inChapter) = place(fraction)
         if (index == chapter && ready) {
-            web.evaluateJavascript("__r.apply(${config()},$inChapter,null)", null)
+            web.evaluateJavascript("__r.apply(${laidOut()},$inChapter,null)", null)
         } else {
             chapter = index
             pendingFraction = inChapter
@@ -609,6 +628,10 @@ class FlowEngine(
   var edge = document.createElement('div');
   edge.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:1px;visibility:hidden;';
   document.body.appendChild(edge);
+  // Where the text ends, which moves as the text is laid out otherwise (see extent).
+  var tail = document.createElement('div');
+  tail.style.cssText = 'height:0;margin:0;padding:0;border:0;';
+  document.body.appendChild(tail);
   var R = window.__r = { page: 0, pages: 1, frac: 0, cfg: null, W: 0, H: 0 };
 
   function css(c, W, H) {
@@ -695,6 +718,50 @@ class FlowEngine(
     return document.getElementById(id) || document.getElementsByName(id)[0] || null;
   }
 
+  // How many pages the chapter takes, as it is laid out now; shown from the first page meanwhile.
+  function count() {
+    edge.style.left = '0';
+    R.page = 0;
+    shift(0);
+    var w = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
+    var pages = Math.max(1, Math.ceil((w - 2) / R.W));
+    edge.style.left = (pages * R.W - 1) + 'px';
+    return pages;
+  }
+
+  // How far the text goes: down the page scrolled, or where on which page it ends.
+  function extent() {
+    if (R.cfg.vertical) return document.documentElement.scrollHeight;
+    var r = tail.getBoundingClientRect();
+    return Math.round(r.left + R.page * R.W) + ':' + Math.round(r.top);
+  }
+
+  // For a while after the page is laid out, the text may still change size by itself: the web
+  // view's text zoom comes into force a moment later, a font or a picture comes in. Each frame
+  // until then the pages are counted again, and the place being read is kept, before it is drawn.
+  var watching = 0;
+  function settle() {
+    var id = ++watching, frames = 0, was = extent();
+    var look = function () {
+      if (id !== watching) return;
+      var now = extent();
+      if (now !== was) {
+        was = now;
+        if (R.cfg.vertical) {
+          window.scrollTo(0, Math.round(R.frac * maxScroll()));
+          report();
+        } else {
+          var frac = R.frac;
+          R.pages = count();
+          R.go(Math.floor(frac * R.pages + 0.001));
+          was = extent();
+        }
+      }
+      if (++frames < 45) requestAnimationFrame(look);
+    };
+    requestAnimationFrame(look);
+  }
+
   function report() {
     if (R.cfg.vertical) {
       var max = maxScroll(), y = window.scrollY;
@@ -736,29 +803,35 @@ class FlowEngine(
     if (c.lang && !root.getAttribute('lang') && !root.getAttribute('xml:lang')) root.setAttribute('lang', c.lang);
     st.textContent = css(c, R.W, R.H);
     lamp(c.lamp);
-    edge.style.left = '0';
-    shift(0);
-    window.scrollTo(0, 0);
     // Drawings that move are stopped too.
     var svgs = document.getElementsByTagName('svg');
     for (var i = 0; i < svgs.length; i++) if (svgs[i].pauseAnimations) svgs[i].pauseAnimations();
     var ran = false;
+    // The text is set out from its start and the page being read is gone to in one go, so that
+    // nothing in between, such as the first page of the chapter, is ever drawn.
     var done = function () {
       if (ran) return;
       ran = true;
       if (c.vertical) {
+        edge.style.left = '0';
+        shift(0);
+        window.scrollTo(0, 0);
         window.scrollTo(0, Math.round(frac * maxScroll()));
         R.page = 0;
         R.pages = 1;
         if (anchor && find(anchor)) R.anchor(anchor); else report();
       } else {
-        var w = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
-        R.pages = Math.max(1, Math.ceil((w - 2) / R.W));
-        edge.style.left = (R.pages * R.W - 1) + 'px';
+        window.scrollTo(0, 0);
+        R.pages = count();
         var p = frac >= 1 ? R.pages - 1 : Math.floor(frac * R.pages + 0.001);
         if (anchor && find(anchor)) R.anchor(anchor); else R.go(p);
       }
+      R.laid = true;
+      settle();
     };
+    // A chapter laid out before is laid out anew at once; a new one once it has been drawn, with
+    // its pictures and fonts in place.
+    if (R.laid) { done(); return; }
     requestAnimationFrame(function () { requestAnimationFrame(done); });
     setTimeout(done, 300);
   }

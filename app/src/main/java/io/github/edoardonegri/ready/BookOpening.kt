@@ -443,6 +443,15 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         private var shown: View? = null
 
         /**
+         * What is to be done once the book shown lies open, until it does; only touched on the
+         * opening thread. An opening taken away before then, as when the shelf goes out of sight
+         * meanwhile, still has it done: the reader waiting unseen for the book to open would
+         * otherwise never show itself.
+         */
+        private var pending: (() -> Unit)? = null
+        private val main = Handler(Looper.getMainLooper())
+
+        /**
          * Opens the book [file], whose cover is shown by [from], at once, while the reader starts
          * behind it ([handoff]): on the page as the book was last left, if that is kept and looks
          * the same ([look]), else on paper that the page the reader sets out meanwhile comes onto
@@ -457,9 +466,9 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         fun open(from: View, paperColor: Int, print: Bitmap?, bare: Boolean, then: () -> Unit) {
             val spot = spot(from) ?: return then()
             val token = act.window.decorView.windowToken ?: return then()
-            val main = Handler(Looper.getMainLooper())
             thread.post {
                 remove()
+                pending = then
                 val params = WindowManager.LayoutParams(
                     WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
@@ -480,11 +489,13 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
                         shown = it
                     }
                     opening = o
-                    o.open(spot, paperColor, print, bare) { main.post(then) }
+                    o.open(spot, paperColor, print, bare) {
+                        pending = null
+                        main.post(then)
+                    }
                 } catch (e: Exception) {
                     // The shelf has no window to put one over any more.
                     remove()
-                    main.post(then)
                 }
             }
         }
@@ -493,6 +504,10 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         fun clear() = thread.post(::remove)
 
         private fun remove() {
+            pending?.let {
+                pending = null
+                main.post(it)
+            }
             opening?.clear()
             opening = null
             shown?.let {

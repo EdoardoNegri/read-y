@@ -97,6 +97,8 @@ Tap below and choose that file: Read-y will remove it, so that the book is kept 
     <string name="opt_warmth">Warmth</string>
     <string name="opt_dark_mode">Dark mode</string>
     <string name="opt_keep_screen_on">Keep the screen on</string>
+    <string name="opt_do_not_disturb">Do not disturb while reading</string>
+    <string name="do_not_disturb_ask">Allow Read-y to use Do Not Disturb</string>
     <string name="opt_page">Page</string>
     <string name="opt_direction">Reading direction</string>
     <string name="opt_direction_pages">Pages</string>
@@ -112,6 +114,12 @@ Tap below and choose that file: Read-y will remove it, so that the book is kept 
     <string name="info_book_left">Time left in the book</string>
     <string name="info_chapter">Chapter</string>
     <string name="info_chapter_page">Page in the chapter</string>
+    <string name="info_time_short">Time</string>
+    <string name="info_book_page_short">Page</string>
+    <string name="info_chapter_left_short">Left in chapter</string>
+    <string name="info_book_left_short">Left in book</string>
+    <string name="info_chapter_short">Chapter</string>
+    <string name="info_chapter_page_short">Page in chapter</string>
     <string name="place_hidden">Hidden</string>
     <string name="place_top_left">Top left</string>
     <string name="place_top_middle">Top middle</string>
