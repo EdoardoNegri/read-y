@@ -31,6 +31,7 @@ import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.toDrawable
 import androidx.core.view.isNotEmpty
+import androidx.core.view.isEmpty
 import androidx.core.view.isVisible
 
 /**
@@ -305,7 +306,7 @@ class ShelfDialog(private val ctx: Context) {
         column.addView(
             words,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                .apply { topMargin = dp(if (column.childCount == 0) 6 else 16) },
+                .apply { topMargin = dp(if (column.isEmpty()) 6 else 16) },
         )
     }
 

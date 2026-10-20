@@ -1,5 +1,6 @@
 package io.github.edoardonegri.ready
 
+import android.content.Context
 import android.graphics.Canvas
 import android.graphics.ColorFilter
 import android.graphics.ColorMatrix
@@ -9,9 +10,11 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.RadialGradient
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.drawable.Drawable
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.withTranslation
 import kotlin.math.cos
 import kotlin.math.sin
@@ -345,9 +348,15 @@ object ShelfArt {
     /** The dark leather a book shows where its cover does not, as while the cover is still being read. */
     const val LEATHER = 0xFF24160D.toInt()
 
-    /** Gives a flat cover the look of a bound book: a shaded hinge along the spine and a lit edge. */
-    fun drawBinding(c: Canvas, cover: RectF, d: Float, paint: Paint) {
-        val hinge = 5 * d
+    /**
+     * Gives a flat cover the look of a bound book: a shaded hinge along the spine, the crease, and
+     * a lit edge beside it. All of it is as wide as the cover makes it ([HINGE]), so that a cover
+     * looks the same however large it is drawn: on the shelf, as it grows off it, and as the cover
+     * that ends a book.
+     */
+    fun drawBinding(c: Canvas, cover: RectF, paint: Paint) {
+        val hinge = HINGE * cover.width()
+        val d = hinge / 5
         paint.style = Paint.Style.FILL
         paint.alpha = 255
         paint.shader = LinearGradient(
@@ -427,6 +436,51 @@ object ShelfArt {
         paint.shader = null
     }
 
+    /** How wide the crease of a cover is, a part of its width: about 5dp on the shelf. */
+    const val HINGE = 0.045f
+
     /** Width of the posts [drawDepth] gives a case. */
     private const val POST_DP = 5
+
+    /**
+     * Sets [out] to the room the cover that ends a book has on a screen [w] by [h], [d] the density:
+     * it stands on the plank of the menu, [menu] high at the foot of the screen, as a book stands on
+     * its shelf, with the wall of the case beside it and [top] free over it, as under the shelf above.
+     */
+    fun endCoverRoom(w: Int, h: Int, top: Int, menu: Int, d: Float, out: Rect) {
+        val side = (END_SIDE_DP * d).toInt()
+        out.set(side, top + (END_TOP_DP * d).toInt(), w - side, h - menu)
+    }
+
+    /** Sets [out] to a cover [shape] wide for every 1 high, as large as fits in [room], standing on its foot in the middle. */
+    fun standIn(room: Rect, shape: Float, out: Rect) {
+        var coverW = room.width().toFloat()
+        var coverH = coverW / shape
+        if (coverH > room.height()) {
+            coverH = room.height().toFloat()
+            coverW = coverH * shape
+        }
+        val left = room.left + (room.width() - coverW) / 2f
+        out.set(left.toInt(), (room.bottom - coverH).toInt(), (left + coverW).toInt(), room.bottom)
+    }
+
+    /**
+     * Sets [out] to where the cover that ends a book stands on a screen [w] by [h], see
+     * [endCoverRoom]: in the shape it has on the shelf (ShelfSpec.BOOK), as large as fits.
+     */
+    fun endCover(w: Int, h: Int, top: Int, menu: Int, d: Float, out: Rect) {
+        endCoverRoom(w, h, top, menu, d, out)
+        standIn(out, 1f / ShelfSpec.BOOK, out)
+    }
+
+    /** The wall left beside the cover that ends a book, and over it; see [endCoverRoom]. */
+    private const val END_SIDE_DP = 20
+    private const val END_TOP_DP = 14
+
+    /**
+     * The back wall of the case of the [wood] given, as the shelves show it (shelf_back.xml): a new
+     * one each time, as each is drawn at its own size.
+     */
+    fun wall(ctx: Context, wood: Wood): Drawable =
+        ContextCompat.getDrawable(ctx, R.drawable.shelf_back)!!.mutate().apply { colorFilter = wood.filter }
 }

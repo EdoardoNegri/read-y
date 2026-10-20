@@ -14,7 +14,6 @@ Notes for later, in no strict order. Tick a box when it is done. The file has tw
 
 ## Bookshelf
 
-- [ ] **Launcher shortcut "Continue reading".** Long-pressing the app icon would open the last book directly. There are no shortcuts yet. The widget and the continue button on the shelf already do something similar.
 - [ ] **A "Currently reading" widget.** The only widget shows favorites. A single large book that opens where you left off would be a second, simpler widget.
 - [ ] **Share a book out of the app** from the long-press menu.
 - [ ] **Something for tapping the brass title plaque.** The first idea (details of the shelf being shown) was built and then taken out again. The plaque does nothing for now. Ideas: the reading stats above, or a summary of the whole library.
@@ -29,14 +28,12 @@ Notes for later, in no strict order. Tick a box when it is done. The file has tw
 - [ ] **Backup file: little to gain.** Checked: `Library.saveBackup` builds the backup text each time a screen is left, but only writes the file when the text changed since the last write. After reading, it always changed, so one write per book read. The only waste is the first write after the app starts, which repeats what is already on disk. A short delay before writing (so leaving the reader and the shelf in a row writes once) is the most that could be saved.
 - [ ] **Thread count.** Library work runs on a small fixed pool, and each reader engine adds its own single thread. Probably fine, but look at what runs at the same time while scrolling a big shelf, in case something stalls.
 - [ ] **Smaller app size.** Checked: the release APK is already about 2.0 MB (code about 0.6 MB, `resources.arsc` about 0.6 MB, the two wood textures about 0.25 MB). Little to gain. Only the 91 KB `widget_preview_image.png` could become a smaller WebP, and on Google Play the language files are split off anyway.
-- [ ] **Try large files before release.** A shelf of 300 small books was tried on the emulator, but not a big PDF or a big EPUB. Open a few of those with the release build and see where it gets slow or runs out of memory.
 
 # Code and general
 
 - [ ] **Improve the app in general.** Small polish, anything that feels rough when using it.
 - [ ] **Refactor.** The biggest files are `MainActivity.kt` (about 1,450 lines) and `Library.kt` (about 1,350 lines). Splitting what they do into smaller pieces would make later changes easier.
 - [ ] **Split `MainActivity.kt` first.** The dialogs, the About screen and the folder-access code are self-contained and could each move to their own file with little risk.
-- [ ] **Fix the lint and compiler warnings.** A quick pass now makes the refactoring safer later.
 
 # Open ends
 

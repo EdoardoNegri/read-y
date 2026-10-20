@@ -130,7 +130,8 @@ class ShelfDecoration(ctx: Context, private val columns: Int) : RecyclerView.Ite
     }
 
     companion object {
-        private const val PLANK = 44
+        /** How high the front face of a plank is, in dp: what of a row lies under its covers. */
+        const val PLANK = 44
         private const val LIP = 5
         private const val SHADE = 10
 

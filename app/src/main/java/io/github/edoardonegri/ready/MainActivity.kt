@@ -31,6 +31,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.doOnPreDraw
 import androidx.core.view.isVisible
+import androidx.core.net.toUri
+import androidx.core.view.isNotEmpty
 import androidx.core.widget.doAfterTextChanged
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -204,6 +206,7 @@ class MainActivity : AppCompatActivity() {
         // the open book of the top rail goes on with that. Only a book the widget opened leads
         // to the shelf it stands on.
         if (savedInstanceState == null) asked = asked(intent)
+        if (savedInstanceState == null) goOn = intent.action == ContinueShortcut.ACTION
     }
 
     // While a book opens and its reader gets ready unseen over the shelf, the shelf is not tapped:
@@ -214,6 +217,7 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         asked(intent)?.let { asked = it }
+        if (intent.action == ContinueShortcut.ACTION) goOn = true
     }
 
     override fun onResume() {
@@ -228,7 +232,17 @@ class MainActivity : AppCompatActivity() {
         BookOpening.left = null
         if (left != null && SystemClock.uptimeMillis() - left.at < BookOpening.LEFT_MS) closeBook(left) else opening.clear()
         detached.clear()
+        // Asked by the shortcut on the app's icon, it goes on with the book read last, once the shelf is laid out.
+        if (goOn) {
+            goOn = false
+            shelf.post { if (!isFinishing) resume() }
+        }
+        val app = applicationContext
+        Library.io.execute { ContinueShortcut.refresh(app) }
     }
+
+    /** Whether the shortcut on the app's icon asked to go on with the book read last (ContinueShortcut). */
+    private var goOn = false
 
     /**
      * A book that was opened on the home-screen widget, which the reader is now left from: the
@@ -273,7 +287,7 @@ class MainActivity : AppCompatActivity() {
         val until = SystemClock.uptimeMillis() + 10_000
         fun check() {
             if (isDestroyed) return
-            val drawn = adapter.itemCount == 0 || (shelf.childCount > 0 && adapter.allShown(shelf))
+            val drawn = adapter.itemCount == 0 || (shelf.isNotEmpty() && adapter.allShown(shelf))
             if (drawn || SystemClock.uptimeMillis() >= until) reportFullyDrawn() else shelf.postOnAnimation { check() }
         }
         shelf.post { check() }
@@ -472,6 +486,8 @@ class MainActivity : AppCompatActivity() {
         val paper = settings.lit(settings.palette.bg)
         // A book read to its end opens on its cover, so it is only enlarged out of its place: that cover is its last page.
         val grown = !bare && !settings.vertical && Library.isFinished(this, f)
+        // That cover stands against the wall of the case the book stands in.
+        val wood = f.parentFile?.let { Library.wood(this, it) } ?: Wood.WALNUT
         if (Build.VERSION.SDK_INT >= 30) {
             // The reader starts at once, unseen over the shelf, and sets out the page while the
             // book opens; see BookOpening.Handoff.
@@ -480,10 +496,31 @@ class MainActivity : AppCompatActivity() {
             whileOpening.isEnabled = true
             startActivity(reader.setClass(this, OpeningReaderActivity::class.java))
             // It opens in a window of its own, which the reader starting meanwhile does not hold up.
-            detached.open(cover, paper, f, settings.look, handoff, bare, grown)
+            // Where the menu stands over the cover is known from the last time the book was shown there.
+            detached.open(cover, paper, f, settings.look, handoff, bare, grown, wood, if (grown) Library.endMenu(this, f) else null)
+            if (grown) sharpen(f, detached::sharpen)
             return
         }
-        opening.open(cover, paper, if (grown) null else BookOpening.kept(f, settings.look), bare, grown) { startActivity(reader) }
+        opening.open(cover, paper, if (grown) null else BookOpening.kept(f, settings.look), bare, grown, wood = wood) { startActivity(reader) }
+        if (grown) sharpen(f) { runOnUiThread { opening.sharpen(it) } }
+    }
+
+    /**
+     * Reads the cover of [f] as large as it grows when it is only enlarged out of the shelf, in the
+     * background, and gives it to [then]: the one the shelf keeps is only as large as the shelf shows it.
+     */
+    private fun sharpen(f: File, then: (Bitmap) -> Unit) {
+        val app = applicationContext
+        val width = resources.displayMetrics.widthPixels
+        Library.io.execute {
+            val sharp = try {
+                Library.bigCover(app, f, width).uploaded()
+            } catch (e: Throwable) {
+                // Not even the cover the shelf keeps can be read, or not as large: the book grows with that one.
+                return@execute
+            }
+            then(sharp)
+        }
     }
 
     /**
@@ -543,7 +580,8 @@ class MainActivity : AppCompatActivity() {
         if (at < 0) showShelfOf(left.file) else shelf.scrollToPosition(at)
         val settings = ReaderSettings(this)
         // Left on its cover, at its end, a book only shrinks back into its place.
-        opening.close(left.page, settings.lit(settings.palette.bg), grown = !settings.vertical && Library.isFinished(this, left.file)) {
+        val wood = left.file.parentFile?.let { Library.wood(this, it) } ?: Wood.WALNUT
+        opening.close(left.page, settings.lit(settings.palette.bg), grown = !settings.vertical && Library.isFinished(this, left.file), wood, left.menu) {
             shelf.findViewHolderForAdapterPosition(adapter.indexOf(left.file))?.itemView?.findViewById(R.id.cover)
         }
     }
@@ -576,6 +614,7 @@ class MainActivity : AppCompatActivity() {
         val choices = ArrayList<Pair<String, () -> Unit>>()
         if (Library.hasAccess()) {
             choices += getString(R.string.add_books) to ::addBooks
+            choices += getString(R.string.add_folder) to ::addFolder
             choices += getString(R.string.new_shelf) to ::askNewShelf
         }
         choices += getString(R.string.sort_by) to ::askSort
@@ -608,7 +647,7 @@ class MainActivity : AppCompatActivity() {
 
     /** A mail to the author, which says by itself which app, which version and which phone it comes from. */
     private fun writeMail(version: String) {
-        val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")).apply {
+        val intent = Intent(Intent.ACTION_SENDTO, "mailto:".toUri()).apply {
             putExtra(Intent.EXTRA_EMAIL, arrayOf(CONTACT))
             putExtra(Intent.EXTRA_SUBJECT, getString(R.string.mail_subject, version))
             putExtra(
@@ -627,7 +666,7 @@ class MainActivity : AppCompatActivity() {
     /** Opens the app's page in the Play Store, where it is rated; in the browser if the phone has no Play Store. */
     private fun rateApp() {
         try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$packageName")))
+            startActivity(Intent(Intent.ACTION_VIEW, "market://details?id=$packageName".toUri()))
         } catch (e: Exception) {
             openLink("https://play.google.com/store/apps/details?id=$packageName")
         }
@@ -635,7 +674,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun openLink(url: String) {
         try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
         } catch (e: Exception) {
             toast(R.string.about_no_browser)
         }
@@ -682,6 +721,44 @@ class MainActivity : AppCompatActivity() {
             pickBooks.launch(Store.pickIntent(several = true))
         } catch (e: Exception) {
             toast(R.string.cannot_import)
+        }
+    }
+
+    /**
+     * Adds every book in a folder the reader picks, onto a shelf named after it on the shelf shown,
+     * and those in its folders onto shelves inside that one (Library.importFolder). The files stay
+     * where they are: a whole folder is copied, not moved, as books picked one by one are.
+     */
+    private fun addFolder() {
+        try {
+            pickBooksFolder.launch(null)
+        } catch (e: Exception) {
+            toast(R.string.cannot_read_folder)
+        }
+    }
+
+    private val pickBooksFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        tree ?: return@registerForActivityResult
+        val app = applicationContext
+        val dir = current
+        val name = Store.describe(tree).first ?: tree.lastPathSegment?.substringAfterLast(':')?.substringAfterLast('/').orEmpty()
+        Toast.makeText(this, getString(R.string.adding_folder, name), Toast.LENGTH_SHORT).show()
+        Library.io.execute {
+            val done = Library.importFolder(app, tree, dir)
+            onShelf {
+                refresh()
+                when {
+                    done == null -> toast(R.string.cannot_read_folder)
+                    done.inLibrary -> toast(R.string.folder_in_library)
+                    done.added == 0 && done.unreadable > 0 -> toast(R.string.cannot_import)
+                    done.added == 0 && done.duplicates > 0 ->
+                        Toast.makeText(this, resources.getQuantityString(R.plurals.already_here, done.duplicates, done.duplicates), Toast.LENGTH_LONG).show()
+                    done.added == 0 -> toast(R.string.folder_empty)
+                    else -> Toast.makeText(
+                        this, resources.getQuantityString(R.plurals.folder_added, done.added, done.added, done.shelf?.name.orEmpty()), Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
         }
     }
 

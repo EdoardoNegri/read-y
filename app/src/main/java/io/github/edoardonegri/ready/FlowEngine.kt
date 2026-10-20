@@ -8,6 +8,7 @@ import android.content.MutableContextWrapper
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.Rect
 import android.net.Uri
 import android.view.View
 import android.webkit.JavascriptInterface
@@ -164,7 +165,7 @@ class FlowEngine(
                     return@runOnUiThread
                 }
                 // A book that opens on its cover has it over the last page before the page is seen at all.
-                if (coverWanted && hasCover && chapter == book.spine.lastIndex) web.evaluateJavascript(coverScript(true), null)
+                if (coverWanted && hasCover && chapter == book.spine.lastIndex) cover(true)
                 reveal()
                 // How much is read is where the page being shown begins, so the first page is
                 // none of the book. In the last chapter the pages are spread up to the very end of
@@ -189,7 +190,7 @@ class FlowEngine(
                         return@runOnUiThread showCover(true)
                     }
                     // Otherwise it is made ready, unseen, for the page after the last to be the cover at once.
-                    web.evaluateJavascript(coverScript(false), null)
+                    cover(false)
                 }
                 host.onPosition(
                     chapter, fraction.toFloat(), (if (s.vertical) null else pagePercent(page)) ?: bookPercent(shown),
@@ -203,26 +204,44 @@ class FlowEngine(
         fun onLink(url: String) {
             act.runOnUiThread { if (!closed) openLink(url) }
         }
+
+        /** The picture of the cover has come into the page, or cannot. */
+        @JavascriptInterface
+        fun onCover() {
+            act.runOnUiThread {
+                if (closed) return@runOnUiThread
+                coverLoaded = true
+                if (ready) tellShown()
+            }
+        }
     }
 
     /** Whether the host was told the first page is shown (ReaderHost.shown). */
     private var told = false
 
+    /** Whether the picture of the cover has come into the page, which is told as shown, if it opens on its cover, only once it has. */
+    private var coverLoaded = false
+
     private fun reveal() {
         if (ready) return
         ready = true
         web.alpha = 1f
-        // The first page, once all of it is there to be drawn.
-        if (!told) {
-            told = true
-            web.postVisualStateCallback(0, object : WebView.VisualStateCallback() {
-                override fun onComplete(requestId: Long) {
-                    if (!closed) host.shown()
-                }
-            })
-        }
+        // The first page, once all of it is there to be drawn: a book that opens on its cover once
+        // the picture of it is there too, which the page fetches only once it shows it.
+        if (!(atCover || coverWanted) || coverLoaded) tellShown()
         // The page left, which stood in front while this one was laid out (see load), can go.
         host.release()
+    }
+
+    /** Tells the host the first page is shown, once all of it is there to be drawn (ReaderHost.shown). */
+    private fun tellShown() {
+        if (told) return
+        told = true
+        web.postVisualStateCallback(0, object : WebView.VisualStateCallback() {
+            override fun onComplete(requestId: Long) {
+                if (!closed) host.shown()
+            }
+        })
     }
 
     /**
@@ -348,28 +367,30 @@ class FlowEngine(
         return ByteArrayOutputStream().also { cover.compress(Bitmap.CompressFormat.JPEG, 90, it) }.toByteArray()
     }
 
-    /** How much room is left at the foot of the screen for the menu, in pixels, see [coverInset]. */
-    private var coverBottom = 0
+    /** Where the cover stands, in pixels, see [coverAt]; empty for the whole page. */
+    private val coverBox = Rect()
 
-    override fun coverInset(bottom: Int) {
-        coverBottom = bottom
-        if (atCover) web.evaluateJavascript(coverScript(true), null)
+    override fun coverAt(box: Rect) {
+        coverBox.set(box)
+        if (atCover) cover(true)
     }
 
     /**
-     * What the page is told to show or hide the cover: round it is the dark wood of the shelf, which
-     * the book was taken from, and it is as high as the room above the menu leaves it.
+     * Tells the page to show the cover over the last page, or to hide it again: it fills its box,
+     * and round it the page shows nothing, for the wall of the case behind the web view to be seen.
      */
-    private fun coverScript(on: Boolean): String {
-        val wood = String.format("#%06X", act.getColor(R.color.wood_dark) and 0xFFFFFF)
-        val room = (coverBottom / act.resources.displayMetrics.density).roundToInt()
-        return "window.__r&&__r.cover($on,'$wood',$room)"
+    private fun cover(on: Boolean) {
+        web.setBackgroundColor(if (on) Color.TRANSPARENT else s.litPalette.bg)
+        val d = act.resources.displayMetrics.density
+        val r = coverBox
+        val room = if (r.isEmpty) "null" else "[${r.left / d},${r.top / d},${r.width() / d},${r.height() / d}]"
+        web.evaluateJavascript("window.__r&&__r.cover($on,$room)", null)
     }
 
     /** Shows the cover over the last page, as the book closed, or takes it away again to show the page it was over. */
     private fun showCover(on: Boolean) {
         atCover = on
-        web.evaluateJavascript(coverScript(on), null)
+        cover(on)
         if (on) host.onPosition(chapter, lastFraction, 1f, null, null) else reportPage()
     }
 
@@ -552,7 +573,7 @@ class FlowEngine(
     override fun applySettings() {
         if (web.settings.textZoom != s.fontSize) web.settings.textZoom = s.fontSize
         preRaster()
-        web.setBackgroundColor(s.litPalette.bg)
+        if (!atCover) web.setBackgroundColor(s.litPalette.bg)
         web.isVerticalScrollBarEnabled = s.vertical
         if (!ready) {
             // A chapter still loading is laid out by the settings it finds then.
@@ -655,7 +676,7 @@ class FlowEngine(
         // From the cover to another page: the cover is taken away, and the page is gone to.
         if (atCover) {
             atCover = false
-            web.evaluateJavascript(coverScript(false), null)
+            cover(false)
         }
         coverWanted = false
         atEnd = fraction >= 1f
@@ -1033,23 +1054,46 @@ class FlowEngine(
   // The end of the book: its cover, as if it were closed, over the last page. It lies outside the
   // text, which moves by the page, and is made once, unseen, for the picture to be there when it is shown.
   var shut = null, shutImg = null;
-  R.cover = function (on, color, room) {
+  R.cover = function (on, room) {
     if (!shut) {
       shut = document.createElement('div');
       shut.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;z-index:2147483647;display:none;';
       shutImg = document.createElement('img');
+      // The page that opens on the cover is told shown once the picture is there to be seen.
+      shutImg.onload = shutImg.onerror = function () { Android.onCover(); };
       shutImg.src = '/__cover.jpg';
       shutImg.setAttribute('style', 'position:absolute;left:0;top:0;width:100%;height:100%;');
-      shutImg.style.setProperty('object-fit', 'contain', 'important');
+      // Cut to the shape of its box about its middle, as the shelf shows a cover.
+      shutImg.style.setProperty('object-fit', 'cover', 'important');
+      shutImg.style.setProperty('object-position', '50% 50%', 'important');
       shutImg.style.setProperty('max-width', 'none', 'important');
       shutImg.style.setProperty('max-height', 'none', 'important');
       shut.appendChild(shutImg);
       document.documentElement.appendChild(shut);
     }
-    // The cover is as high as the room above the menu, which stays over the foot of the screen.
-    shutImg.style.setProperty('height', 'calc(100% - ' + (room || 0) + 'px)', 'important');
-    // Set so as to win over the page's own rule that a box holding nothing but a picture shows the page through it.
-    shut.style.setProperty('background-color', color || (R.cfg ? R.cfg.bg : '#000'), 'important');
+    // The cover fills its box, standing on the menu while that is over the foot of the screen.
+    var at = room || [0, 0, window.innerWidth, window.innerHeight];
+    shutImg.style.setProperty('left', at[0] + 'px', 'important');
+    shutImg.style.setProperty('top', at[1] + 'px', 'important');
+    shutImg.style.setProperty('width', at[2] + 'px', 'important');
+    shutImg.style.setProperty('height', at[3] + 'px', 'important');
+    // Round it the page is hidden and shows nothing, for the wall of the case behind it to be seen.
+    // Set so as to win over the page's own rules, which give the page its paper.
+    shut.style.setProperty('background-color', 'transparent', 'important');
+    var html = document.documentElement.style, body = document.body ? document.body.style : null;
+    if (on) {
+      html.setProperty('background', 'transparent', 'important');
+      if (body) {
+        body.setProperty('background', 'transparent', 'important');
+        body.setProperty('visibility', 'hidden', 'important');
+      }
+    } else {
+      html.removeProperty('background');
+      if (body) {
+        body.removeProperty('background');
+        body.removeProperty('visibility');
+      }
+    }
     shut.style.display = on ? 'block' : 'none';
   };
 

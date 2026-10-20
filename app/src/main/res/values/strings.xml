@@ -63,6 +63,8 @@ Tap your book again.</string>
     <string name="close">Close</string>
     <string name="favorite">Favorite</string>
     <string name="resume">Continue reading</string>
+    <!-- The launcher shortcut that goes on with the book read last (ContinueShortcut). -->
+    <string name="continue_book">Continue %1$s</string>
     <string name="nothing_read">No book has been read yet</string>
     <string name="finished">Finished</string>
     <string name="delete">Delete</string>
@@ -75,6 +77,16 @@ Tap your book again.</string>
     </plurals>
     <string name="cannot_import">That file is not a book Read-y can open (EPUB, PDF, MOBI, CBZ or TXT), or it could not be read.</string>
     <string name="add_books">Add books</string>
+    <!-- Adding every book in a folder, onto a shelf named after it (Library.importFolder). -->
+    <string name="add_folder">Add a folder</string>
+    <string name="adding_folder">Adding the books in %1$s…</string>
+    <plurals name="folder_added">
+        <item quantity="one">1 book was added to the shelf %2$s.</item>
+        <item quantity="other">%1$d books were added to the shelf %2$s.</item>
+    </plurals>
+    <string name="folder_empty">There are no new books in that folder.</string>
+    <string name="folder_in_library">That folder is already part of your library.</string>
+    <string name="cannot_read_folder">That folder could not be read.</string>
     <string name="original_title">Remove the original?</string>
     <string name="original_ask">%1$s is on your shelf now. The app it came from did not let Read-y remove the original file, %2$s, so the book is still there too.
 
@@ -90,7 +102,7 @@ Tap below and choose that file: Read-y will remove it, so that the book is kept 
     <string name="in_book">Book Page</string>
     <string name="read">read</string>
     <string name="back">Back</string>
-    <string name="the_end">The end</string>
+    <string name="the_end">The End</string>
     <string name="the_end_short">End</string>
     <string name="book_missing">This book is no longer in the library.</string>
     <string name="book_unreadable">Cannot open %1$s</string>

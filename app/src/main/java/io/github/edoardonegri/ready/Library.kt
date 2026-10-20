@@ -18,6 +18,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.provider.DocumentsContract
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
@@ -130,7 +131,43 @@ class ShelfSpec(val width: Int, val columns: Int, val density: Float) {
 /** The library: the "Read_y" folder the reader let the app have (see [Store]), plus cached metadata and reading state. */
 object Library {
     private const val TAG = "Library"
+
+    /** How wide covers are drawn, at the least, and what the made ones are drawn for (placeholder). */
     private const val COVER_W = 360
+
+    /**
+     * How wide the covers kept for the shelf are made: as wide as a cover stands on the shelf of this
+     * phone, held upright or turned, so that none is shown larger than it was made. Never narrower
+     * than [COVER_W]. Worked out once, from the size of the screen.
+     */
+    @Volatile
+    private var coverWidth = 0
+
+    private fun coverWidth(ctx: Context): Int {
+        coverWidth.takeIf { it > 0 }?.let { return it }
+        val m = ctx.resources.displayMetrics
+        val widest = intArrayOf(m.widthPixels, m.heightPixels).maxOf { w ->
+            ShelfSpec(w, (w / m.density / 118).toInt().coerceAtLeast(3), m.density).coverW
+        }
+        return maxOf(COVER_W, widest).also { coverWidth = it }
+    }
+
+    /**
+     * Which way the covers kept in files were made, in their names, with how wide ([coverWidth]):
+     * covers made before the made covers took the shape of a book on the shelf, or narrower, are
+     * made anew, and the old files let go.
+     */
+    private const val COVERS_MADE = 4
+
+    /**
+     * How far in from the edge the gold frame of a made cover runs (placeholder): on it, all but a
+     * hair; on the spine side, just beside the crease the shelf draws there (ShelfArt.HINGE). The
+     * frame is [FRAME_W] wide, and what is written stands [TEXT_IN] inside it.
+     */
+    private const val FRAME_W = 4f
+    private const val FRAME_IN = 4f
+    private const val FRAME_SPINE = COVER_W * ShelfArt.HINGE + FRAME_W / 2
+    private const val TEXT_IN = 32f
 
     /** How much shows of what stands beside the chosen things in a miniature, of 255; as on the shelf (ShelfAdapter). */
     private const val FAINT_ALPHA = 102
@@ -646,6 +683,75 @@ object Library {
         return Imported(target, fresh || from != null, duplicate = !fresh)
     }
 
+    /**
+     * What [importFolder] did: the shelf the books went onto, how many it added, how many were in
+     * the library already, and how many it could not read; or [inLibrary], that the folder is part
+     * of the library already, and nothing was done.
+     */
+    class FolderImport(val shelf: File?, val added: Int, val duplicates: Int, val unreadable: Int, val inLibrary: Boolean = false)
+
+    /**
+     * Copies the books in the folder [tree], which the reader picked in the system's folder picker,
+     * onto a shelf named after it on the shelf [dir], one it has already if there is one, and the
+     * books in the folders inside it onto shelves inside that one, named after them: a shelf only
+     * for a folder that has books. The files themselves stay where they are. Null if the folder
+     * cannot be read. Blocking.
+     */
+    fun importFolder(ctx: Context, tree: Uri, dir: File): FolderImport? = try {
+        val rootId = DocumentsContract.getTreeDocumentId(tree)
+        val rootDoc = DocumentsContract.buildDocumentUriUsingTree(tree, rootId)
+        val from = Store.locate(rootDoc)
+        if (from != null && (from == root() || from.path.startsWith(root().path + File.separator))) {
+            FolderImport(null, 0, 0, 0, inLibrary = true)
+        } else {
+            val name = Store.describe(rootDoc).first
+            val shelf = File(dir, name?.let(::cleanName)?.take(120) ?: "Books")
+            val counts = IntArray(3)
+            importInto(ctx, tree, rootId, shelf, counts, 0)
+            FolderImport(shelf, counts[0], counts[1], counts[2])
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "Cannot read the folder $tree", e)
+        null
+    }
+
+    /**
+     * Copies the books in the folder [id] of [tree] onto the shelf [shelf], which is made once
+     * there is a book for it, and those in the folders in it onto shelves in it, [depth] down,
+     * counting into [counts] the books added, those in the library already and those that cannot be read.
+     */
+    private fun importInto(ctx: Context, tree: Uri, id: String, shelf: File, counts: IntArray, depth: Int) {
+        val listed = DocumentsContract.buildChildDocumentsUriUsingTree(tree, id)
+        val columns = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE)
+        val children = ctx.contentResolver.query(listed, columns, null, null, null)?.use { c ->
+            List(c.count) { c.moveToPosition(it); Triple(c.getString(0), c.getString(1).orEmpty(), c.getString(2)) }
+        }.orEmpty()
+        for ((child, name, mime) in children) {
+            if (name.startsWith(".")) continue
+            if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                val inner = cleanName(name)?.take(120) ?: continue
+                if (depth < MAX_FOLDER_DEPTH) importInto(ctx, tree, child, File(shelf, inner), counts, depth + 1)
+                continue
+            }
+            // Only what is named as a book is read: anything else in the folder would be copied first to be looked at.
+            val ext = name.substringAfterLast('.', "").lowercase()
+            if (ext !in FlowBook.EXTENSIONS && ext !in PageSource.EXTENSIONS) continue
+            val imported = try {
+                import(ctx, DocumentsContract.buildDocumentUriUsingTree(tree, child), mime, shelf)
+            } catch (e: Exception) {
+                null
+            }
+            when {
+                imported == null -> counts[2]++
+                imported.duplicate -> counts[1]++
+                else -> counts[0]++
+            }
+        }
+    }
+
+    /** How many folders down, inside one being added, books are looked for. */
+    private const val MAX_FOLDER_DEPTH = 8
+
     /** The file handed over is not as big as the other app said it was. */
     private class SizeMismatch : IOException()
 
@@ -873,7 +979,7 @@ object Library {
     fun coverFile(ctx: Context, f: File): File = coverFile(ctx, f.path, Store.lastModified(f))
 
     private fun coverFile(ctx: Context, path: String, modified: Long): File =
-        File(File(ctx.filesDir, "covers"), "${Integer.toHexString(path.hashCode())}_$modified.jpg")
+        File(File(ctx.filesDir, "covers"), "${Integer.toHexString(path.hashCode())}_${modified}_${COVERS_MADE}_${coverWidth(ctx)}.jpg")
 
     /**
      * What the books say about themselves, as [meta] read it, by path: with the size and date of
@@ -944,7 +1050,7 @@ object Library {
                     author = b.author
                     published = date(b.published)
                     pages = (b.weights.sum() / b.pageWeight).toInt().coerceAtLeast(1)
-                    bmp = b.coverBitmap(COVER_W)
+                    bmp = b.coverBitmap(coverWidth(ctx))
                 }
             } else {
                 if (f.extension.equals("pdf", true)) PdfInfo.read(f)?.let { (named, by, made) ->
@@ -954,7 +1060,7 @@ object Library {
                 }
                 PageSource.open(f).use { p ->
                     pages = p.count
-                    bmp = p.render(0, COVER_W, 0)
+                    bmp = p.render(0, coverWidth(ctx), 0)
                 }
             }
         } catch (e: Throwable) {
@@ -967,7 +1073,7 @@ object Library {
             // Written in full before it is put in its place: a cover half written as the app was
             // ended would otherwise stand for the book until its file changed.
             val part = File(cover.path + ".part")
-            FileOutputStream(part).use { (bmp ?: placeholder(title, author)).compress(Bitmap.CompressFormat.JPEG, 85, it) }
+            FileOutputStream(part).use { (bmp ?: placeholder(title, author, coverWidth(ctx))).compress(Bitmap.CompressFormat.JPEG, 85, it) }
             if (!part.renameTo(cover)) part.delete()
             // A book read before has changed since: the cover made of it then is not shown again.
             if (metaPrefs(ctx).contains(f.path)) {
@@ -1034,6 +1140,15 @@ object Library {
      * library folder, so that they go along with it, and its backup, to another phone.
      */
     private fun coversDir() = File(root(), ".covers")
+
+    /**
+     * The cover of [f] as large as the cover that ends it, [width] wide, read from the book itself as
+     * the reader reads it (see [endCover]): for a book that only grows out of the shelf to show, sharper
+     * than the one the shelf keeps. Blocking.
+     */
+    fun bigCover(ctx: Context, f: File, width: Int): Bitmap = endCover(ctx, f, width) {
+        if (isFlowing(f)) FlowBook.open(f).use { it.coverBitmap(width) } else PageSource.open(f).use { it.render(0, width, 0) }
+    }
 
     /**
      * The picture that ends the book [f], the cover as if it had been closed, [width] wide: the one
@@ -1108,7 +1223,7 @@ object Library {
     }
 
     /** The cover made for [f], [width] wide, of the leather it has. Blocking. */
-    private fun madeCover(ctx: Context, f: File, width: Int = COVER_W): Bitmap {
+    private fun madeCover(ctx: Context, f: File, width: Int = coverWidth(ctx)): Bitmap {
         val m = cachedMeta(ctx, f) ?: meta(ctx, f)
         return placeholder(m.title, m.author, width, tone(ctx, f))
     }
@@ -1130,7 +1245,7 @@ object Library {
         if (uri == null) {
             libraryPrefs(ctx).edit { remove(COVER + f.path) }
         } else {
-            val bmp = readPicture(ctx, uri, COVER_W * 2) ?: return false
+            val bmp = readPicture(ctx, uri, coverWidth(ctx) * 2) ?: return false
             val name = "${UUID.randomUUID()}.jpg"
             try {
                 Store.mkdirs(coversDir())
@@ -1180,6 +1295,31 @@ object Library {
         libraryPrefs(ctx).edit { if (wood == Wood.WALNUT) remove(WOOD + dir.path) else putString(WOOD + dir.path, wood.name) }
         touched(dir)
     }
+
+    /**
+     * Where the menu of the reader stood over the cover that ends the book [f], the last time it was
+     * pictured there (BookOpening.EndMenu, without its pictures); null if it never was. Kept only on
+     * this phone, as it is for the size of its screen.
+     */
+    fun endMenu(ctx: Context, f: File): BookOpening.EndMenu? = try {
+        endMenuPrefs(ctx).getString(f.path, null)?.split(',')?.let { v ->
+            BookOpening.EndMenu(
+                v[0].toInt(), v[1].toInt(), v[2].toInt(), RectF(v[3].toFloat(), v[4].toFloat(), v[5].toFloat(), v[6].toFloat()),
+                v[7].toFloat(), v[8].toFloat(),
+            )
+        }
+    } catch (e: Exception) {
+        null
+    }
+
+    fun setEndMenu(ctx: Context, f: File, m: BookOpening.EndMenu) {
+        val t = m.title
+        endMenuPrefs(ctx).edit {
+            putString(f.path, listOf(m.screenW, m.screenH, m.height, t.left, t.top, t.right, t.bottom, m.titleText, m.titleInset).joinToString(","))
+        }
+    }
+
+    private fun endMenuPrefs(ctx: Context) = ctx.applicationContext.getSharedPreferences("endmenu", Context.MODE_PRIVATE)
 
     /**
      * What is chosen on the shelves, to be carried or marked together. The miniature of a shelf
@@ -1327,7 +1467,7 @@ object Library {
                 paint.color = ShelfArt.LEATHER
                 c.drawRect(cover, paint)
                 coverToDraw(ctx, f)?.let { drawCropped(c, it, cover, paint) }
-                ShelfArt.drawBinding(c, cover, spec.density, paint)
+                ShelfArt.drawBinding(c, cover, paint)
             }
 
             val plaque = Rect(
@@ -1377,13 +1517,15 @@ object Library {
     }
 
     /**
-     * The cover made for a book that has none: dark leather with a gold frame, its [title] and its
-     * [author]. It is drawn for a picture [width] wide, as large as the screen when it ends the book.
+     * The cover made for a book that has none: dark leather with a gold frame round its edge, its
+     * [title] and its [author]. It has the shape of a book on the shelf (ShelfSpec.BOOK), which
+     * shows all of it, frame and all. It is drawn for a picture [width] wide, as large as the
+     * screen when it ends the book.
      */
     private fun placeholder(title: String, author: String, width: Int = COVER_W, tone: Int? = null): Bitmap {
         val w = COVER_W
-        val h = w * 3 / 2
-        val bmp = createBitmap(width, width * 3 / 2, Bitmap.Config.ARGB_8888)
+        val h = (w * ShelfSpec.BOOK).toInt()
+        val bmp = createBitmap(width, (width * ShelfSpec.BOOK).toInt(), Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         // Drawn as for the size of a cover on the shelf, and enlarged to the one asked for.
         c.scale(width / w.toFloat(), width / w.toFloat())
@@ -1392,9 +1534,11 @@ object Library {
         val frame = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = gold
             style = Paint.Style.STROKE
-            strokeWidth = 4f
+            strokeWidth = FRAME_W
         }
-        c.drawRect(16f, 16f, w - 16f, h - 16f, frame)
+        c.drawRect(FRAME_SPINE, FRAME_IN, w - FRAME_IN, h - FRAME_IN, frame)
+        // What is written stands in the middle of the frame, as far inside it on either side, the crease left out.
+        val textLeft = FRAME_SPINE + TEXT_IN
 
         fun text(s: String, size: Float, style: Int, lines: Int): StaticLayout {
             val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -1402,7 +1546,7 @@ object Library {
                 textSize = size
                 typeface = Typeface.create(Typeface.SERIF, style)
             }
-            return StaticLayout.Builder.obtain(s, 0, s.length, tp, w - 72)
+            return StaticLayout.Builder.obtain(s, 0, s.length, tp, (w - FRAME_IN - TEXT_IN - textLeft).toInt())
                 .setAlignment(Layout.Alignment.ALIGN_CENTER)
                 .setMaxLines(lines)
                 .setEllipsize(TextUtils.TruncateAt.END)
@@ -1410,10 +1554,10 @@ object Library {
         }
 
         val t = text(title, 36f, Typeface.BOLD, 6)
-        c.withTranslation(36f, (h - t.height) / 2f - 24f) { t.draw(c) }
+        c.withTranslation(textLeft, (h - t.height) / 2f - 24f) { t.draw(c) }
         if (author.isNotBlank()) {
             val a = text(author, 24f, Typeface.ITALIC, 2)
-            c.withTranslation(36f, h - 44f - a.height) { a.draw(c) }
+            c.withTranslation(textLeft, h - 44f - a.height) { a.draw(c) }
         }
         return bmp
     }

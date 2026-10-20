@@ -55,7 +55,8 @@
     </style>
 
     <style name="Theme.Ready.Settings">
-        <item name="android:windowBackground">@color/panel</item>
+        <!-- The back wall of the case, grain and all. -->
+        <item name="android:windowBackground">@drawable/shelf_back</item>
     </style>
 
     <!-- Nothing but what is drawn in it: the home screen shows through (WidgetOpenActivity). -->

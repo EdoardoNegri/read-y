@@ -8,6 +8,9 @@ import android.animation.ValueAnimator
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Matrix
+import android.graphics.Rect
+import android.graphics.RectF
+import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -48,6 +51,15 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     private lateinit var root: View
     private lateinit var content: GestureFrame
     private lateinit var menu: View
+
+    /** The crease along the spine of the cover that ends the book, see [coverRoom]. */
+    private lateinit var crease: CoverCrease
+
+    /** The name of the book, on the menu. */
+    private lateinit var title: TextView
+
+    /** The back wall of the case the book stands in, which the cover that ends the book stands against. */
+    private lateinit var wall: Drawable
     private lateinit var pageTurn: PageTurnView
     private lateinit var info: PageInfoView
     private lateinit var turner: PageTurner
@@ -74,6 +86,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val tdbg = android.os.SystemClock.uptimeMillis()
         super.onCreate(savedInstanceState)
         s = ReaderSettings(this)
         setContentView(R.layout.activity_reader)
@@ -82,6 +95,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         root = findViewById(R.id.root)
         content = findViewById(R.id.content)
         menu = findViewById(R.id.menu)
+        crease = findViewById(R.id.crease)
         pageTurn = findViewById(R.id.pageTurn)
         info = findViewById(R.id.pageInfo)
         turner = PageTurner(window, s, content, pageTurn, info) { engine }
@@ -135,9 +149,14 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             leave()
             return
         }
+        // The menu is a plank of the shelf the book stands on, in its wood.
+        val wood = file.parentFile?.let { Library.wood(this, it) } ?: Wood.WALNUT
+        findViewById<View>(R.id.menuPlank).background.mutate().colorFilter = wood.filter
+        wall = ShelfArt.wall(this, wood)
         state = Library.state(this, file)
         finished = state.percent >= Library.FINISHED_AT
         pace = ReadingPace(this, ReadingPace.kindOf(file))
+        android.util.Log.d("TDBG", "before-engine " + (android.os.SystemClock.uptimeMillis() - tdbg))
         val opened = try {
             if (Library.isFlowing(file)) FlowEngine(this, file, s, state, this)
             else PageEngine(this, file, s, state, this)
@@ -145,11 +164,17 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             unreadable()
             return
         }
+        android.util.Log.d("TDBG", "after-engine " + (android.os.SystemClock.uptimeMillis() - tdbg))
         engine = opened
         content.addView(opened.view, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         content.listener = this
 
-        val title = findViewById<TextView>(R.id.bookTitle)
+        title = findViewById(R.id.bookTitle)
+        // On a plaque as the book has it on the shelf: of bronze once it is read to the end, with stars for a favorite.
+        title.background = PlaqueDrawable(resources.displayMetrics.density).apply {
+            favorite = Library.isFavorite(this@ReaderActivity, file)
+            finished = this@ReaderActivity.finished
+        }
         val known = Library.cachedMeta(this, file)
         title.text = known?.title ?: file.nameWithoutExtension
         bookPages = known?.pages ?: 0
@@ -162,6 +187,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             }
         }
         findViewById<ImageButton>(R.id.back).setOnClickListener { leave() }
+        android.util.Log.d("TDBG", "before-chapters " + (android.os.SystemClock.uptimeMillis() - tdbg))
         setUpChapters(opened)
         findViewById<ImageButton>(R.id.settings).setOnClickListener {
             settingsOpened = true
@@ -208,12 +234,14 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         })
 
         applyBrightness()
+        android.util.Log.d("TDBG", "before-layout " + (android.os.SystemClock.uptimeMillis() - tdbg))
         applyLayout()
         // Once the page is set out and drawn, unseen, the book opens on the shelf onto a picture of
         // it (see shown), and the reader shows itself when the book is open; not later than this
         // all the same, should the page never be set out.
         if (handoff != null) root.postDelayed({ pictured(null) }, SHOW_WAIT_MS)
         // Opening on its cover, a book has the menu picture ready for the cover that grows on the shelf.
+        android.util.Log.d("TDBG", "end " + (android.os.SystemClock.uptimeMillis() - tdbg))
         if (handoff != null && finished && opened.hasCover) pictureEndMenu(handoff, opened)
         if (!s.hintShown) {
             s.hintShown = true
@@ -222,8 +250,11 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     }
 
     override fun onPause() {
-        // The place in the book is written down when the reader leaves, however briefly.
+        // The place in the book is written down when the reader leaves, however briefly, and the
+        // shortcut on the app's icon goes on with this book from then on.
         savePosition()
+        val app = applicationContext
+        Library.io.execute { ContinueShortcut.refresh(app) }
         Library.backUp(this)
         turner.stop()
         pageTurn.release()
@@ -314,11 +345,17 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     /** The menu coming up from the foot of the screen, or going down, with the cover that is made room for. */
     private var menuSlide: ValueAnimator? = null
 
-    /** How much room the panel of the menu takes at the foot of the screen: the menu is as large as the screen, with an empty place above its panel. */
-    private fun menuRoom(m: View) = m.height - (m as ViewGroup).getChildAt(0).height
+    /**
+     * How much room the plank of the menu takes at the foot of the screen: the menu is as large as
+     * the screen, with an empty place above its plank, and the room of the camera over that.
+     */
+    private fun menuRoom(m: View) = m.height - m.findViewById<View>(R.id.menuPlank).top
 
     private fun coverChanged(on: Boolean) {
         onCover = on
+        // The cover stands against the wall of the case, which shows round it; a page lies on its paper.
+        if (on) root.background = wall else root.setBackgroundColor(s.litPalette.bg)
+        if (!on) crease.box = null
         val e = engine ?: return
         menuSlide?.cancel()
         menu.translationY = 0f
@@ -332,19 +369,34 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             menu.visibility = View.VISIBLE
             menu.doOnLayout { m ->
                 if (!onCover) return@doOnLayout
-                if (lift) slideMenu(menuRoom(m), true, e) else e.coverInset(menuRoom(m))
+                if (lift) slideMenu(menuRoom(m), true, e) else coverRoom(e, menuRoom(m))
             }
         } else {
             val hide = !menuBeforeCover && !keepMenu
             if (hide && !hidden && menu.isVisible) {
                 slideMenu(menuRoom(menu), false, e)
             } else {
-                e.coverInset(0)
+                coverRoom(e, 0)
                 if (hide) menu.visibility = View.GONE
             }
         }
         keepMenu = false
     }
+
+    /**
+     * Puts the cover that ends the book where it stands with [menu] pixels of the menu over the
+     * foot of the screen (ShelfArt.endCover), where the book opening on the shelf puts it too.
+     */
+    private fun coverRoom(e: ReaderEngine, menu: Int) {
+        ShelfArt.endCover(root.width, root.height, cutout.insets.top, menu, resources.displayMetrics.density, room)
+        // With the crease along its spine, as on the shelf.
+        crease.box = if (onCover) room else null
+        // In the engine's own view, which lies inside the margins of the page.
+        room.offset(-content.paddingLeft, -content.paddingTop)
+        e.coverAt(room)
+    }
+
+    private val room = Rect()
 
     /** Raises the menu from the foot of the screen to its place, or lowers it, [room] pixels, while the cover over it is made as large as is left. */
     private fun slideMenu(room: Int, up: Boolean, e: ReaderEngine) {
@@ -356,7 +408,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             addUpdateListener {
                 val by = it.animatedValue as Float
                 menu.translationY = (1 - by) * room
-                e.coverInset((by * room).toInt())
+                coverRoom(e, (by * room).toInt())
             }
             addListener(object : AnimatorListenerAdapter() {
                 private var cancelled = false
@@ -382,22 +434,55 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
      */
     private fun pictureEndMenu(h: BookOpening.Handoff, e: ReaderEngine) {
         showPosition(state.chapter, 1f, e is PageEngine, null, null)
-        menu.doOnLayout { m ->
-            val room = menuRoom(m)
-            val picture = if (m.width > 0 && room > 0) {
-                try {
-                    createBitmap(m.width, room).also { bmp ->
-                        val canvas = Canvas(bmp)
-                        canvas.translate(0f, -(m.height - room).toFloat())
-                        m.draw(canvas)
-                    }
-                } catch (x: OutOfMemoryError) {
-                    null
-                }
-            } else {
-                null
+        menu.doOnLayout { h.menuPictured(pictureMenu()?.let(::endMenu)) }
+    }
+
+    /**
+     * The menu as it stands over the cover that ends the book, from [picture] of its plank, for the
+     * book opening on its cover on the shelf or closing from it: with where the plaque with the name
+     * of the book is on the plank, which the plaque of the book on the shelf becomes.
+     */
+    private fun endMenu(picture: Bitmap): BookOpening.EndMenu {
+        // Where it is in the window, as its own place would tell it less the way its single line is scrolled.
+        val at = IntArray(2)
+        title.getLocationInWindow(at)
+        val plank = IntArray(2)
+        menu.findViewById<View>(R.id.menuPlank).getLocationInWindow(plank)
+        val left = (at[0] - plank[0]).toFloat()
+        val top = (at[1] - plank[1]).toFloat()
+        // The plaque pictured as it is drawn, name and all.
+        val plaque = try {
+            createBitmap(title.width.coerceAtLeast(1), title.height.coerceAtLeast(1)).also { title.draw(Canvas(it)) }
+        } catch (e: OutOfMemoryError) {
+            null
+        }
+        val plate = RectF(left, top, left + title.width, top + title.height)
+        val known = BookOpening.EndMenu(root.width, root.height, picture.height, plate, title.textSize, title.paddingStart.toFloat())
+        // Where it stands is kept, for the book to open on its cover at once the next time (BookOpening.Detached).
+        Library.setEndMenu(this, file, known)
+        return BookOpening.EndMenu(
+            known.screenW, known.screenH, known.height, known.title, known.titleText, known.titleInset, picture.uploaded(), plaque?.uploaded(),
+        )
+    }
+
+    /**
+     * The plank of the menu, pictured as it is, without the plaque with the name of the book: on the
+     * shelf the plaque of the book stands for it, which becomes it. Null if it cannot be pictured.
+     */
+    private fun pictureMenu(): Bitmap? {
+        val room = menuRoom(menu)
+        if (menu.width == 0 || room <= 0) return null
+        return try {
+            createBitmap(menu.width, room).also { bmp ->
+                val canvas = Canvas(bmp)
+                canvas.translate(0f, -(menu.height - room).toFloat())
+                title.alpha = 0f
+                menu.draw(canvas)
+                title.alpha = 1f
             }
-            h.menuPictured(picture)
+        } catch (x: OutOfMemoryError) {
+            title.alpha = 1f
+            null
         }
     }
 
@@ -452,7 +537,19 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     private fun pictured(print: Bitmap?) {
         val h = handoff ?: return
         handoff = null
-        h.pictured(print)
+        // On the cover that ends the book, the cover alone is wanted: the book that only grows
+        // becomes it as it ends (BookOpening.print), and a smaller picture is sooner made ready.
+        val box = crease.box
+        val cut = if (print != null && box != null && Rect(0, 0, print.width, print.height).contains(box)) {
+            try {
+                Bitmap.createBitmap(print, box.left, box.top, box.width(), box.height())
+            } catch (e: OutOfMemoryError) {
+                print
+            }
+        } else {
+            print
+        }
+        h.pictured(cut?.uploaded())
         h.ready(::reveal)
     }
 
@@ -539,10 +636,13 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             preferredDisplayModeId = ReaderSettings.fastestMode(this@ReaderActivity)
             preferredRefreshRate = 0f
         }
-        // The cover that ends the book is seen whole, as the shelf closes the book from it.
+        // On the cover that ends the book the shelf closes the book as it opened it, from the menu
+        // under the cover, which goes back into the row of the shelf: the screen is pictured as it is.
+        if (onCover && menu.isVisible && menuSlide == null && root.width < root.height) return capture(::closeOnMenu)
+        // Otherwise the cover is seen whole.
         menuSlide?.cancel()
         menu.translationY = 0f
-        if (onCover) engine?.coverInset(0)
+        engine?.let { if (onCover) coverRoom(it, 0) }
         if (!menu.isVisible) return capture(::upright)
         menu.visibility = View.GONE
         twoFramesOn { capture(::upright) }
@@ -566,13 +666,20 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         goBack(turned, keep = false)
     }
 
+    /** Goes back to the shelf with [page], the cover that ends the book standing on the menu, and the menu pictured. */
+    private fun closeOnMenu(page: Bitmap?) {
+        val picture = pictureMenu() ?: return goBack(page)
+        // It is not opened on again: a book read to its end opens on its cover anyway.
+        goBack(page, keep = false, endMenu(picture))
+    }
+
     /** The reader is on its way back to the shelf, see [leave]. */
     private var leaving = false
 
     /** Goes back to the shelf, which closes the book from [page], the page it was left at as it was seen, if there is one. */
-    private fun goBack(page: Bitmap?, keep: Boolean = true) {
+    private fun goBack(page: Bitmap?, keep: Boolean = true, menu: BookOpening.EndMenu? = null) {
         if (page != null) {
-            BookOpening.left = BookOpening.Left(file, page)
+            BookOpening.left = BookOpening.Left(file, page.uploaded(), menu = menu)
             // Opened again next, the book opens on it at once.
             if (keep) BookOpening.keep(file, s.look, page)
         }
@@ -610,7 +717,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
         // The page is shown in the warm light, see ReaderSettings.litPalette.
-        root.setBackgroundColor(s.litPalette.bg)
+        if (onCover) root.background = wall else root.setBackgroundColor(s.litPalette.bg)
         turner.stop()
         // The back of the sheet lies in the warm light like the page, which it is drawn over.
         pageTurn.paper = s.lit(s.palette.bg)
@@ -641,6 +748,8 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         val (top, bottom) = info.arrange(root.width, root.height, cutout, s.infoUsed(), infoSide(s, e is FlowEngine, resources), e?.innerMargin ?: 0)
         val c = cutout.insets
         content.setPadding(c.left, c.top + top, c.right, c.bottom + bottom)
+        // The cover that ends the book keeps its place on the screen however the margins of the page change.
+        if (onCover && menuSlide == null && e != null) coverRoom(e, if (menu.isVisible) menuRoom(menu) else 0)
     }
 
     /** Where the page shown is, as what is shown around the text tells it; see [showPosition]. */
@@ -735,6 +844,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         // from what is saved, so a change is written down at once.
         if ((percent >= Library.FINISHED_AT) != finished) {
             finished = !finished
+            (title.background as PlaqueDrawable).finished = finished
             savePosition()
         }
         // The page left behind may tell its place once more before the one the knob was taken
@@ -779,12 +889,13 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         }
         // The chapter is counted as on the line below, by the book's contents, where it has any:
         // the files a book is made of, which the engine counts, also hold its cover and the like.
-        val mark = marked.indexOfLast { it <= (engine?.currentContent ?: -1) }
+        // On the cover that ends the book, there is no page, and the book is in its last chapter,
+        // even before the engine has told it has gone there, as when the book opens on its cover.
+        val ended = engine?.hasCover == true && percent >= 1f
+        val mark = marked.indexOfLast { it <= (engine?.currentContent ?: -1) }.let { if (it < 0 && ended) marked.lastIndex else it }
         // The pages of the book as the engine counts them, with the text as large as it is. A
         // PDF is at the page it shows; an EPUB that scrolls as far into the pages a printed
         // one would have as into its text.
-        // On the cover that ends the book, there is no page.
-        val ended = engine?.hasCover == true && percent >= 1f
         if (ended != onCover) coverChanged(ended)
         val book = if (ended) null else pageOfBook ?: bookPages.takeIf { it > 0 }?.let {
             (if (paged) chapter + 1 else 1 + (percent * (it - 1)).roundToInt()).coerceIn(1, it) to it

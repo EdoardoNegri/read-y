@@ -1,5 +1,6 @@
 package io.github.edoardonegri.ready
 
+import android.graphics.Rect
 import android.view.View
 import java.io.Closeable
 import java.io.File
@@ -71,11 +72,11 @@ interface ReaderEngine {
     val hasCover: Boolean get() = false
 
     /**
-     * Keeps [bottom] pixels at the foot of the screen free of the cover that ends the book, which
-     * is then shown in the room above them, for the menu that stays over them while it is shown; 0
-     * gives the room back.
+     * Shows the cover that ends the book filling [box], in the engine's own view, cut to the shape
+     * of the box about its middle, as the shelf shows a cover (ShelfArt.endCover). Round it the
+     * engine shows nothing, for the wall of the case behind it to be seen.
      */
-    fun coverInset(bottom: Int) {}
+    fun coverAt(box: Rect) {}
 
     /** The book's table of contents: each line's title and how deep it is nested. Empty if it has none. */
     val contents: List<Pair<String, Int>> get() = emptyList()

@@ -18,6 +18,13 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- The crease along the spine of the cover that ends the book, while that is shown, as the
+         shelf draws it on the cover; under a page turning over it. -->
+    <io.github.edoardonegri.ready.CoverCrease
+        android:id="@+id/crease"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
     <!-- Shows a page being turned, over the one the reader has changed to underneath: a picture
          of the page as it is seen, with what is around the text, which the sheet carries with it
          as it turns. -->
@@ -40,22 +47,14 @@
             android:layout_height="0dp"
             android:layout_weight="1" />
 
-        <!-- The shadow the panel casts on the page, which sets it apart from a dark page too. -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="12dp"
-            android:background="@drawable/panel_shade" />
-
-        <!-- Its brass upper edge. -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="2dp"
-            android:background="@color/gold_dark" />
-
+        <!-- A plank of the shelf the book stands on, in its wood (ReaderActivity), with the lit
+             front edge that sets it apart from the page. The cover that ends the book stands on
+             it as the book stood on its shelf. -->
         <LinearLayout
+            android:id="@+id/menuPlank"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@color/panel"
+            android:background="@drawable/shelf_plank"
             android:clickable="true"
             android:clipChildren="false"
             android:focusable="true"
@@ -64,7 +63,7 @@
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="56dp"
+                android:layout_height="62dp"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingEnd="4dp"
@@ -78,20 +77,37 @@
                     android:contentDescription="@string/back"
                     android:src="@drawable/ic_back" />
 
-                <TextView
-                    android:id="@+id/bookTitle"
+                <!-- The name of the book on its plaque, as on the shelf: as wide as the name, and
+                     no wider than the room between the buttons. Its background is a
+                     PlaqueDrawable set in code; its paddings keep the name clear of the screws.
+                     One line, which is laid out as wide as it is rather than scrolled into view,
+                     so that it can be pictured before it is first shown (ReaderActivity.endMenu). -->
+                <FrameLayout
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
+                    android:layout_height="match_parent"
                     android:layout_weight="1"
-                    android:ellipsize="end"
-                    android:fontFamily="serif"
-                    android:gravity="center"
-                    android:paddingEnd="8dp"
-                    android:paddingStart="8dp"
-                    android:singleLine="true"
-                    android:textColor="@color/gold_light"
-                    android:textSize="18sp"
-                    android:textStyle="bold" />
+                    android:paddingEnd="4dp"
+                    android:paddingStart="4dp">
+
+                    <TextView
+                        android:id="@+id/bookTitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="46dp"
+                        android:layout_gravity="center"
+                        android:ellipsize="end"
+                        android:fontFamily="serif"
+                        android:gravity="center"
+                        android:paddingBottom="2dp"
+                        android:paddingEnd="22dp"
+                        android:paddingStart="22dp"
+                        android:shadowColor="#99FFF6C8"
+                        android:shadowDy="1"
+                        android:shadowRadius="1"
+                        android:maxLines="1"
+                        android:textColor="@color/plaque_text"
+                        android:textSize="19sp"
+                        android:textStyle="bold" />
+                </FrameLayout>
 
                 <ImageButton
                     android:id="@+id/settings"
@@ -103,7 +119,8 @@
             </LinearLayout>
 
             <!-- The chapter being read by its name; that of another one while a finger is on its
-                 number or drags the knob over it. -->
+                 number or drags the knob over it. One line, laid out as wide as it is rather than
+                 scrolled into view, so that it can be pictured before it is first shown. -->
             <TextView
                 android:id="@+id/chapterName"
                 android:layout_width="match_parent"
@@ -113,7 +130,7 @@
                 android:gravity="center"
                 android:paddingEnd="24dp"
                 android:paddingStart="24dp"
-                android:singleLine="true"
+                android:maxLines="1"
                 android:textColor="@color/cream"
                 android:textSize="16sp"
                 android:visibility="gone" />

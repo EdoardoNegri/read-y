@@ -1,9 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A text field let into the wood: dark inside, with a brass rim. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <corners android:radius="6dp" />
-    <solid android:color="@color/shelf_back" />
-    <stroke
-        android:width="1.5dp"
-        android:color="@color/gold_dark" />
-</shape>
+<!-- A text field let into the wood: the dark wood of the back of the case, grain and all, with a
+     brass rim. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <corners android:radius="6dp" />
+            <solid android:color="@color/shelf_back" />
+        </shape>
+    </item>
+    <!-- The grain runs along the field, as along a board; the rim hides where it meets the edge. -->
+    <item android:width="1dp" android:height="1dp" android:gravity="fill" android:bottom="1dp" android:left="1dp" android:right="1dp" android:top="1dp">
+        <bitmap android:src="@drawable/wood_grain" android:tileMode="repeat" />
+    </item>
+    <item>
+        <shape>
+            <corners android:radius="6dp" />
+            <stroke
+                android:width="1.5dp"
+                android:color="@color/gold_dark" />
+        </shape>
+    </item>
+</layer-list>

@@ -57,6 +57,9 @@ interface PageSource : Closeable {
         /** Print that takes more of the page than this, as a share of its area, is shown with its margins. */
         private const val KEEP = 0.9f
 
+        /** How many pages, spread through a book, its margins are worked out from (PdfPages.bookPrint). */
+        private const val SAMPLES = 16
+
         fun open(file: File): PageSource = if (file.extension.equals("pdf", true)) PdfPages(file) else CbzPages(file)
 
         /** How much a page of [pw] by [ph] is enlarged to fit, see [render]. */
@@ -84,8 +87,46 @@ interface PageSource : Closeable {
         /** The part of each page its print is in, as a share of the page, by page, once it has been looked for (see [print]). */
         private val prints = HashMap<Int, RectF>()
 
-        override fun render(i: Int, w: Int, h: Int, trim: Boolean): Bitmap = renderer.openPage(i).use { p ->
-            val part = if (trim) prints.getOrPut(i) { print(p) } else WHOLE
+        /**
+         * The part of its pages the book has its print in, as a share of a page: the print of
+         * pages spread through the book, all together, see [trimmed]. Null until it is looked for.
+         */
+        private var bookPrint: RectF? = null
+
+        /**
+         * The part of the page [i] shown without its margins: the same for every page whose print
+         * lies within that of the book ([bookPrint]), so that the print does not move or change size
+         * from one page to the next, as it would cut to each page's own; a page that has more, as
+         * much more as it has; one with no margins worth leaving out, all of it.
+         */
+        private fun trimmed(i: Int): RectF {
+            val own = printOf(i)
+            if (own === WHOLE) return WHOLE
+            return RectF(bookPrint()).apply { union(own) }
+        }
+
+        private fun printOf(i: Int) = prints.getOrPut(i) { renderer.openPage(i).use(::print) }
+
+        private fun bookPrint(): RectF = bookPrint ?: run {
+            // Pages spread evenly through the book, past the first, which is often its cover.
+            val box = RectF()
+            val n = min(count, SAMPLES)
+            for (k in 0 until n) {
+                val i = if (count <= SAMPLES || n < 2) k else (1 + k.toLong() * (count - 2) / (n - 1)).toInt()
+                // Pages with no margins worth leaving out have no say in those of the others.
+                val part = printOf(i)
+                if (part !== WHOLE) box.union(part)
+            }
+            (if (box.isEmpty) WHOLE else box).also { bookPrint = it }
+        }
+
+        override fun render(i: Int, w: Int, h: Int, trim: Boolean): Bitmap {
+            // Looked for before the page is opened to be drawn: only one page can be open at a time.
+            val part = if (trim) trimmed(i) else WHOLE
+            return draw(i, w, h, part)
+        }
+
+        private fun draw(i: Int, w: Int, h: Int, part: RectF): Bitmap = renderer.openPage(i).use { p ->
             val pw = (p.width * part.width()).roundToInt().coerceAtLeast(1)
             val ph = (p.height * part.height()).roundToInt().coerceAtLeast(1)
             val scale = scale(pw, ph, w, h)

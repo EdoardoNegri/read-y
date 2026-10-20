@@ -3,6 +3,7 @@ package io.github.edoardonegri.ready
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.ColorMatrixColorFilter
@@ -195,7 +196,10 @@ class PageEngine(
                 pending.remove(count)
                 val result = bmp ?: return@post
                 cache.put(count, result)
-                if (!s.vertical && page == count && zoom == 1f) single.setImageBitmap(result)
+                if (!s.vertical && page == count && zoom == 1f) {
+                    single.setImageBitmap(result)
+                    placeCover()
+                }
                 if (!told && !s.vertical && page == count) {
                     told = true
                     host.shown()
@@ -207,11 +211,12 @@ class PageEngine(
     private fun showSingle() {
         resetZoom()
         // The cover is a picture of its own, whose colours are not turned round with those of print,
-        // and it lies on the dark wood of the shelf the book was taken from, not on paper.
+        // and it stands against the wall of the case the book was taken from, not on paper.
         val onCover = page >= count
-        frame.setBackgroundColor(if (onCover) frame.context.getColor(R.color.wood_dark) else s.litPalette.bg)
+        if (onCover) frame.background = null else frame.setBackgroundColor(s.litPalette.bg)
         single.colorFilter = if (onCover) light(false, s.lamp) else filter
         single.setImageBitmap(cache.get(page))
+        placeCover()
         request(page)
         request(page + 1)
         report()
@@ -275,9 +280,21 @@ class PageEngine(
 
     override val hasCover get() = !s.vertical
 
-    override fun coverInset(bottom: Int) {
-        // The picture is fitted into what is left of the page, as it is in the whole of it.
-        single.setPadding(0, 0, 0, bottom)
+    /** Where the cover that ends the book stands, see [coverAt]; empty for the whole page. */
+    private val coverBox = Rect()
+
+    override fun coverAt(box: Rect) {
+        coverBox.set(box)
+        placeCover()
+    }
+
+    /** Has the picture fill the place of the cover, cut to its shape, if it is the cover; a page is fitted into the whole of the screen. */
+    private fun placeCover() {
+        val onCover = page >= count && cache.get(count) != null && !coverBox.isEmpty
+        single.scaleType = if (onCover) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
+        single.cropToPadding = onCover
+        if (!onCover) return single.setPadding(0, 0, 0, 0)
+        single.setPadding(coverBox.left, coverBox.top, frame.width - coverBox.right, frame.height - coverBox.bottom)
     }
 
     override fun snap(fraction: Float): Float {

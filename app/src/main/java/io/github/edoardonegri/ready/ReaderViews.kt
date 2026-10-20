@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Picture
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.Build
@@ -62,6 +63,14 @@ fun View.snapshot(): Bitmap? {
     }
 }
 
+/**
+ * This picture as the drawing hardware keeps it, made ready to be drawn now rather than the first
+ * time it is drawn, which takes the frame that draws it a moment longer: one shown in the middle of
+ * the book opening would hold it up. Itself where it cannot be.
+ */
+fun Bitmap.uploaded(): Bitmap =
+    if (Build.VERSION.SDK_INT >= 26 && config != Bitmap.Config.HARDWARE) copy(Bitmap.Config.HARDWARE, false) ?: this else this
+
 /** A property that calls [then] whenever it is set to something other than it was, e.g. to draw a view anew. */
 fun <T> changes(initial: T, then: () -> Unit) = Delegates.observable(initial) { _, old, new -> if (old != new) then() }
 
@@ -97,7 +106,7 @@ class RatioImageView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         area.set(0f, 0f, width.toFloat(), height.toFloat())
-        if (binding) ShelfArt.drawBinding(canvas, area, resources.displayMetrics.density, shade)
+        if (binding) ShelfArt.drawBinding(canvas, area, shade)
         if (cased) {
             shade.colorFilter = wood.filter
             ShelfArt.drawDepth(canvas, area, resources.displayMetrics.density, shade)
@@ -587,5 +596,27 @@ class RailButton(ctx: Context, attrs: AttributeSet?) : AppCompatImageButton(ctx,
         val y = (paddingTop + height - paddingBottom) / 2
         val r = height / 2
         background?.setHotspotBounds(x - r, y - r, x + r, y + r)
+    }
+}
+
+/**
+ * The crease the shelf draws along the spine of a cover (ShelfArt.drawBinding), over the cover that
+ * ends a book where the reader shows it, so that it looks as it does on the shelf: [box] is where
+ * the cover is, or null while it is not shown.
+ */
+class CoverCrease @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = null) : View(ctx, attrs) {
+    private val paint = Paint()
+    private val area = RectF()
+
+    var box: Rect? = null
+        set(value) {
+            if (field == value) return
+            field = value?.let(::Rect)
+            invalidate()
+        }
+
+    override fun onDraw(canvas: Canvas) {
+        area.set(box ?: return)
+        ShelfArt.drawBinding(canvas, area, paint)
     }
 }
