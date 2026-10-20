@@ -73,11 +73,41 @@ object Store {
     /** Where the library is looked for when the reader is first asked for it: Documents/Read_y. */
     private fun suggested() = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), FOLDER)
 
+    /**
+     * Where a library folder may already be on the phone: Documents/Read_y of the phone's own
+     * storage and of any card in it. Android lets an app see nothing else without being given
+     * the whole phone, so these are the places looked in.
+     */
+    private fun candidates(): List<File> {
+        val volumes = LinkedHashSet<File>()
+        volumes += storage()
+        try {
+            for (dir in app.getExternalFilesDirs(null)) {
+                // /storage/XXXX-XXXX/Android/data/<package>/files: the volume is what lies before Android.
+                dir?.path?.substringBefore("/Android/data")?.takeIf { it != dir.path }?.let { volumes += File(it) }
+            }
+        } catch (e: Exception) {
+            // The phone's own storage is still looked in.
+        }
+        return volumes.flatMap { listOf(File(File(it, Environment.DIRECTORY_DOCUMENTS), FOLDER), File(it, "Read-y")) }
+    }
+
+    /** A library folder that is already on the phone, if there is one. */
+    private fun existing(): File? = candidates().firstOrNull { it.isDirectory }
+
     /** The library folder, by the path it has on the phone. */
     fun root(): File = tree?.let { pathOf(DocumentsContract.getTreeDocumentId(it)) } ?: suggested()
 
     /** The phone's own storage, which the library folder is in. */
     fun storage(): File = Environment.getExternalStorageDirectory()
+
+    /** The id of the document at [f], which is the volume it is on and its path there: primary:Documents/Read_y. */
+    private fun idOf(f: File?): String {
+        val path = f?.path ?: return "primary:"
+        val primary = storage().path
+        return if (path == primary || path.startsWith(primary + File.separator)) "primary:" + path.removePrefix(primary).trimStart('/')
+        else path.removePrefix("/storage/").let { it.substringBefore('/') + ":" + it.substringAfter('/', "") }
+    }
 
     /** The path of the document [id], which is a volume and a path on it: primary:Documents/Read_y. */
     private fun pathOf(id: String): File {
@@ -92,11 +122,54 @@ object Store {
     }
 
     /**
-     * What asks the reader for the library folder. It opens on Documents/Read_y, which is made
-     * first where the phone lets the app make it; elsewhere the reader can make it in the picker.
+     * Whether the library the reader granted is gone from where it was, because it was moved or
+     * renamed. Only a folder that the phone says is not there is lost: a failure to ask, or a card
+     * that is not in the phone, is not. Blocking.
+     */
+    fun isLost(): Boolean {
+        val t = tree ?: return false
+        if (!hasAccess()) return true
+        val u = DocumentsContract.buildDocumentUriUsingTree(t, DocumentsContract.getTreeDocumentId(t))
+        return try {
+            // The provider answers a folder that is not there with no cursor at all.
+            app.contentResolver.query(u, COLUMNS, null, null, null)?.use { !it.moveToFirst() } ?: volumeIsThere()
+        } catch (e: FileNotFoundException) {
+            true
+        } catch (e: Exception) {
+            // The provider does not say it is gone; a card that was taken out does not count as lost either.
+            false
+        }
+    }
+
+    /** Whether the volume the library folder is on, the phone's storage or a card, is in the phone. */
+    private fun volumeIsThere(): Boolean {
+        val path = root().path
+        val primary = storage().path
+        val volume = if (path.startsWith(primary + File.separator)) primary else path.split('/').take(3).joinToString("/")
+        return File(volume).isDirectory
+    }
+
+    /** Lets go of the library that is lost, so that it is looked for anew; what is remembered of its books is kept. */
+    fun drop() {
+        val t = tree ?: return
+        try {
+            app.contentResolver.releasePersistableUriPermission(t, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        } catch (e: SecurityException) {
+            // It was let go of already.
+        }
+        prefs().edit { remove(TREE) }
+        entries.clear()
+        listings.clear()
+    }
+
+    /**
+     * What asks the reader for the library folder. It opens on the Read_y folder that is already
+     * on the phone, or else on Documents/Read_y, which is made first where the phone lets the app
+     * make it; elsewhere the reader can make it in the picker.
      */
     fun askIntent(): Intent {
-        try {
+        val found = existing()
+        if (found == null) try {
             suggested().mkdirs()
         } catch (e: Exception) {
             // The picker can make it too.
@@ -106,10 +179,9 @@ object Store {
                 Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,
         )
         if (Build.VERSION.SDK_INT >= 26) {
-            val dir = suggested()
+            val dir = found ?: suggested()
             val start = if (dir.isDirectory) dir else dir.parentFile
-            val rel = start?.path?.removePrefix(storage().path)?.trimStart('/').orEmpty()
-            i.putExtra(DocumentsContract.EXTRA_INITIAL_URI, DocumentsContract.buildDocumentUri(AUTHORITY, "primary:$rel"))
+            i.putExtra(DocumentsContract.EXTRA_INITIAL_URI, DocumentsContract.buildDocumentUri(AUTHORITY, idOf(start)))
         }
         return i
     }

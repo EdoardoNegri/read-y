@@ -28,6 +28,17 @@ Tap your book again.</string>
         <item quantity="one">%1$d book or shelf will be deleted from the phone, with everything on it.</item>
         <item quantity="other">%1$d books and shelves will be deleted from the phone, with everything on them.</item>
     </plurals>
+    <string name="about">About</string>
+    <string name="about_hi">Hi, I am Edo, and I made Read-y: a reader that feels like a real bookshelf. No ads, no tracking, no account and no internet access. Your books stay in one folder on your phone.</string>
+    <string name="about_feedback_ask">Is something broken, or do you have an idea?</string>
+    <string name="about_rate_ask">Enjoying it? A rating helps others find it.</string>
+    <string name="about_support_ask">Or, if you would like to say thanks:</string>
+    <string name="about_contact">Send feedback</string>
+    <string name="about_rate">Rate the app</string>
+    <string name="about_support">Buy me a drink</string>
+    <string name="about_no_mail">No mail app was found.</string>
+    <string name="about_no_browser">No browser was found.</string>
+    <string name="mail_subject">Read-y %1$s</string>
     <string name="menu">Menu</string>
     <string name="sort_by">Sort by</string>
     <string name="sort_ascending">Ascending</string>

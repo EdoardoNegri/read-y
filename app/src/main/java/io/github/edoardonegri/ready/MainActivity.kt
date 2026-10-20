@@ -132,7 +132,7 @@ class MainActivity : AppCompatActivity() {
         query = findViewById(R.id.query)
         bar = findViewById(R.id.bar)
         barTitle.background = PlaqueDrawable(resources.displayMetrics.density, ornate = true)
-        pickRow = findViewById(R.id.pickRow)
+        pickRow =findViewById(R.id.pickRow)
         findViewById<View>(R.id.resume).apply {
             visibility = View.VISIBLE
             setOnClickListener { resume() }
@@ -223,6 +223,7 @@ class MainActivity : AppCompatActivity() {
         val book = asked
         asked = null
         if (book == null || !showShelfOf(book)) refresh()
+        checkLibrary()
         val left = BookOpening.left
         BookOpening.left = null
         if (left != null && SystemClock.uptimeMillis() - left.at < BookOpening.LEFT_MS) closeBook(left) else opening.clear()
@@ -260,6 +261,26 @@ class MainActivity : AppCompatActivity() {
         super.onStop()
     }
 
+    /** Whether the folder has been asked for since the app opened, so that a turned-down question is not asked again at once. */
+    private var askedForFolder = false
+
+    /**
+     * The library folder is looked for anew if it was moved or renamed since: the Read_y folder
+     * that is on the phone is offered, or a new one is made, like when the app is first opened.
+     */
+    private fun checkLibrary() {
+        if (!Library.hasAccess()) return
+        Library.io.execute {
+            if (!Store.isLost()) return@execute
+            Store.drop()
+            onShelf {
+                askedForFolder = false
+                current = Library.root()
+                refresh()
+            }
+        }
+    }
+
     override fun onPause() {
         Library.backUp(this)
         super.onPause()
@@ -287,6 +308,11 @@ class MainActivity : AppCompatActivity() {
             empty.visibility = View.VISIBLE
             grant.visibility = View.VISIBLE
             emptyText.text = getString(R.string.need_access, root.path.removePrefix(Store.storage().path).trimStart('/'))
+            // The folder is asked for as the app opens; if the reader turns it down, the button stays.
+            if (!askedForFolder) {
+                askedForFolder = true
+                shelf.post { if (!isFinishing && !Library.hasAccess()) requestAccess() }
+            }
             return
         }
         Store.mkdirs(root)
@@ -510,8 +536,65 @@ class MainActivity : AppCompatActivity() {
         }
         choices += getString(R.string.sort_by) to ::askSort
         choices += getString(R.string.settings) to { settings.launch(Intent(this, SettingsActivity::class.java)) }
+        choices += getString(R.string.about) to ::showAbout
         // It is closed by a tap beside it; the dialogs it leads to have an arrow back to it.
         ShelfDialog(this).title(getString(R.string.menu)).uncrossed().options(choices).show()
+    }
+
+    // ---- about: who made Read-y, and how to reach or thank them ----
+
+    private fun showAbout() {
+        val version = try {
+            packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
+        } catch (e: Exception) {
+            ""
+        }
+        ShelfDialog(this).title(getString(R.string.about)).back(::showMenu)
+            .note(getString(R.string.about_hi))
+            .note(getString(R.string.about_feedback_ask))
+            .button(getString(R.string.about_contact)) { writeMail(version) }
+            .note(getString(R.string.about_rate_ask))
+            .button(getString(R.string.about_rate), ::rateApp)
+            .apply {
+                // Until there is a page to be thanked on, there is no button for it.
+                if (SUPPORT_URL.isNotEmpty()) note(getString(R.string.about_support_ask)).button(getString(R.string.about_support)) { openLink(SUPPORT_URL) }
+            }
+            .show()
+    }
+
+    /** A mail to the author, which says by itself which app, which version and which phone it comes from. */
+    private fun writeMail(version: String) {
+        val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")).apply {
+            putExtra(Intent.EXTRA_EMAIL, arrayOf(CONTACT))
+            putExtra(Intent.EXTRA_SUBJECT, getString(R.string.mail_subject, version))
+            putExtra(
+                Intent.EXTRA_TEXT,
+                "\n\n--\nRead-y $version\n" +
+                    "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}), ${Build.MANUFACTURER} ${Build.MODEL}\n",
+            )
+        }
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            toast(R.string.about_no_mail)
+        }
+    }
+
+    /** Opens the app's page in the Play Store, where it is rated; in the browser if the phone has no Play Store. */
+    private fun rateApp() {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$packageName")))
+        } catch (e: Exception) {
+            openLink("https://play.google.com/store/apps/details?id=$packageName")
+        }
+    }
+
+    private fun openLink(url: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (e: Exception) {
+            toast(R.string.about_no_browser)
+        }
     }
 
     /**
@@ -1133,14 +1216,21 @@ class MainActivity : AppCompatActivity() {
 
     private fun showInfo(f: File) {
         if (f.isFolder) {
-            val kids = Library.shelf(this, f)
-            val folders = kids.count { it.isFolder }
-            // The counts down the left, and where the shelf is on the right, however long that is.
-            val rows = ArrayList<Pair<String, String>>()
-            rows += getString(R.string.info_books) to "${kids.size - folders}"
-            rows += getString(R.string.info_folders) to "$folders"
-            rows += getString(R.string.info_location) to place(f)
-            ShelfDialog(this).details(rows, byColumn = true).uncrossed().title(f.name).show()
+            val app = applicationContext
+            Library.io.execute {
+                val kids = Library.shelf(app, f)
+                val folders = kids.count { it.isFolder }
+                // The books of the shelves inside count too, in the books that are finished.
+                val books = Library.books(f).toList()
+                val finished = books.count { Library.isFinished(app, it) }
+                // The counts down the left, and where the shelf is on the right, however long that is.
+                val rows = ArrayList<Pair<String, String>>()
+                rows += getString(R.string.info_books) to "${kids.size - folders}"
+                rows += getString(R.string.info_folders) to "$folders"
+                rows += getString(R.string.finished) to "$finished"
+                rows += getString(R.string.info_location) to place(f)
+                onShelf { ShelfDialog(this).details(rows, byColumn = true).uncrossed().title(f.name).show() }
+            }
             return
         }
         Library.io.execute {
@@ -1357,6 +1447,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val CONTACT = "edon.negri@gmail.com"
+
+        /** Where the author can be thanked with a drink, e.g. "https://ko-fi.com/<name>"; empty hides the button. */
+        private const val SUPPORT_URL = "https://revolut.me/edo_ne"
         private const val KEY_DIR = "dir"
         private const val KEY_COVER = "cover"
         private const val TYPING_MS = 200L

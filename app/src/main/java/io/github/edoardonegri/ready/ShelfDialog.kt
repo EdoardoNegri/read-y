@@ -283,8 +283,35 @@ class ShelfDialog(private val ctx: Context) {
         }
     }
 
+    /** A few words between the buttons of the column, in the cream of the details. */
+    fun note(text: CharSequence) = apply {
+        showColumn(buttons)
+        val words = TextView(ctx)
+        words.text = text
+        words.typeface = Typeface.SERIF
+        words.textSize = 14f
+        words.setLineSpacing(dp(4).toFloat(), 1f)
+        words.setTextColor(ContextCompat.getColor(ctx, R.color.cream))
+        column.addView(
+            words,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                .apply { topMargin = dp(if (column.childCount == 0) 6 else 16) },
+        )
+    }
+
+    /** A brass button in the column that closes the dialog and runs [action]. */
+    fun button(label: String, action: () -> Unit) = apply {
+        option(label).setOnClickListener {
+            dialog.dismiss()
+            action()
+        }
+    }
+
+    /** How many buttons the column has, which is what makes it scroll; the words between them do not count. */
+    private var buttons = 0
+
     private fun option(label: String): TextView {
-        showColumn(column.childCount + 1)
+        showColumn(++buttons)
         val button = TextView(ContextThemeWrapper(ctx, R.style.BrassButton), null, 0, R.style.BrassButton)
         button.text = label
         button.background = PlaqueDrawable(d)
