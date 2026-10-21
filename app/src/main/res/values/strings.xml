@@ -81,6 +81,9 @@ Tap your book again.</string>
     </plurals>
     <string name="cannot_import">That file is not a book Read-y can open (EPUB, PDF, MOBI, CBZ or TXT), or it could not be read.</string>
     <string name="add_books">Add books</string>
+    <!-- Asked before the books are picked: moved, they are kept only on the shelf; copied, they stay where they were too. -->
+    <string name="add_move">Move the books</string>
+    <string name="add_copy">Copy the books</string>
     <string name="adding_folder">Adding the books in %1$s…</string>
     <plurals name="folder_added">
         <item quantity="one">1 book was added to the shelf %2$s.</item>

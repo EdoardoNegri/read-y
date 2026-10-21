@@ -6,10 +6,10 @@ import androidx.appcompat.app.AppCompatActivity
 import java.io.File
 
 /**
- * Adding to the shelf shown, [shelf]: books picked anywhere on the phone, an empty shelf, or a shelf
- * with the books of a folder of the phone. [added] is told once something was, for the shelf to be
- * shown anew; the dialogs lead [back] to the menu they were opened from. Made with the activity
- * [act], before it starts.
+ * Adding to the shelf shown, [shelf]: books picked anywhere on the phone, moved or copied, an
+ * empty shelf, or a shelf with the books of a folder of the phone. [added] is told once something
+ * was, for the shelf to be shown anew; the dialogs lead [back] to the menu they were opened from.
+ * Made with the activity [act], before it starts.
  */
 class ShelfAdding(
     private val act: AppCompatActivity,
@@ -19,8 +19,9 @@ class ShelfAdding(
 ) {
 
     /**
-     * Books picked anywhere on the phone in Android's picker, which are moved onto the shelf
-     * being shown: Android lets the files picked there be deleted, so they are kept only once.
+     * Books picked anywhere on the phone in Android's picker, which are moved onto the shelf being
+     * shown, or copied there, as the reader chose ([moving]): Android lets the files picked there be
+     * deleted, so that moved ones are kept only once.
      */
     private val pickBooks = act.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val data = result.data ?: return@registerForActivityResult
@@ -28,6 +29,7 @@ class ShelfAdding(
         if (uris.isEmpty()) return@registerForActivityResult
         val app = act.applicationContext
         val dir = shelf()
+        val move = moving
         Library.io.execute {
             var unreadable = 0
             var kept = 0
@@ -40,7 +42,7 @@ class ShelfAdding(
                 }
                 if (imported == null) unreadable++ else {
                     if (imported.duplicate) duplicates++
-                    if (imported.moved && !Store.removeOriginal(uri)) kept++
+                    if (move && imported.moved && !Store.removeOriginal(uri)) kept++
                 }
             }
             onShelf {
@@ -54,7 +56,22 @@ class ShelfAdding(
         }
     }
 
+    /**
+     * Whether the books being picked are to be moved onto the shelf, rather than copied, see
+     * [addBooks]. Should the bookshelf be made anew meanwhile, the choice is forgotten, and the books
+     * are only copied: nothing is deleted that the reader did not say could be.
+     */
+    private var moving = false
+
+    /** Asks whether the books are to be moved onto the shelf or copied there, and then lets them be picked. */
     fun addBooks() {
+        ShelfDialog(act).title(act.getString(R.string.add_books)).back(back)
+            .options(listOf(act.getString(R.string.add_move) to { pickBooks(move = true) }, act.getString(R.string.add_copy) to { pickBooks(move = false) }))
+            .show()
+    }
+
+    private fun pickBooks(move: Boolean) {
+        moving = move
         try {
             pickBooks.launch(Store.pickIntent(several = true))
         } catch (e: Exception) {
