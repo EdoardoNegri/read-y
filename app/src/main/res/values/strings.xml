@@ -19,6 +19,10 @@ Tap your book again.</string>
     <string name="search">Search</string>
     <string name="search_hint">Title, author or file name</string>
     <string name="no_results">No book matches.</string>
+    <!-- Adding a shelf: an empty one, or one with the books of a folder of the phone (Library.importFolder). -->
+    <string name="add_shelf">Add shelf</string>
+    <string name="empty_shelf">Empty shelf</string>
+    <string name="shelf_from_folder">From a folder</string>
     <string name="new_shelf">New shelf</string>
     <string name="shelf_name">Name of the shelf</string>
     <string name="create">Create</string>
@@ -65,7 +69,7 @@ Tap your book again.</string>
     <string name="resume">Continue reading</string>
     <!-- The launcher shortcut that goes on with the book read last (ContinueShortcut). -->
     <string name="continue_book">Continue %1$s</string>
-    <string name="nothing_read">No book has been read yet</string>
+    <string name="nothing_read">No book is being read</string>
     <string name="finished">Finished</string>
     <string name="delete">Delete</string>
     <string name="delete_book">%1$s will be deleted from the phone.</string>
@@ -77,8 +81,6 @@ Tap your book again.</string>
     </plurals>
     <string name="cannot_import">That file is not a book Read-y can open (EPUB, PDF, MOBI, CBZ or TXT), or it could not be read.</string>
     <string name="add_books">Add books</string>
-    <!-- Adding every book in a folder, onto a shelf named after it (Library.importFolder). -->
-    <string name="add_folder">Add a folder</string>
     <string name="adding_folder">Adding the books in %1$s…</string>
     <plurals name="folder_added">
         <item quantity="one">1 book was added to the shelf %2$s.</item>
@@ -213,10 +215,4 @@ Tap below and choose that file: Read-y will remove it, so that the book is kept 
     <string name="font_import">Import a font…</string>
     <string name="cannot_read_font">That file is not a font that can be used (TTF or OTF).</string>
     <string name="cannot_read_picture">That picture could not be read.</string>
-    <string name="wood_walnut">Walnut</string>
-    <string name="wood_oak">Oak</string>
-    <string name="wood_maple">Maple</string>
-    <string name="wood_cherry">Cherry</string>
-    <string name="wood_mahogany">Mahogany</string>
-    <string name="wood_ebony">Ebony</string>
 </resources>

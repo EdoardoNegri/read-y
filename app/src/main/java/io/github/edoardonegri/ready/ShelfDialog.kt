@@ -66,6 +66,17 @@ class ShelfDialog(private val ctx: Context) {
     fun title(text: CharSequence) = apply { view.findViewById<TextView>(R.id.dialogTitle).text = text }
 
     /**
+     * Makes the plate of the title the one of the plaque that was tapped to open the dialog, as
+     * its book has it on the shelf: of bronze for a [finished] book, held by stars for a [favorite].
+     */
+    fun plaque(favorite: Boolean, finished: Boolean) = apply {
+        (view.findViewById<View>(R.id.dialogTitle).background as PlaqueDrawable).let {
+            it.favorite = favorite
+            it.finished = finished
+        }
+    }
+
+    /**
      * What there is to say about a book or a shelf, in two columns: each with its name in gold
      * over its value, which stays in its own column however long it is. They go two to a line,
      * or, [byColumn], down the left column first and then down the right one, so that a long

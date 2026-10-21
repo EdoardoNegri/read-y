@@ -32,6 +32,12 @@ interface FlowBook : Closeable {
     /** The paths of the documents, in reading order. */
     val spine: List<String>
 
+    /**
+     * How many documents the book itself has before the first of the [spine], which are left out
+     * of it: the page that only holds the cover, which the shelf shows, and the end of the book.
+     */
+    val skipped: Int get() = 0
+
     /** The size of each document of the [spine], used to estimate progress through the book. */
     val weights: LongArray
 

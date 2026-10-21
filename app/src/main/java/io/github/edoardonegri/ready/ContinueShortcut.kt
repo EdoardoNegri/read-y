@@ -16,12 +16,13 @@ import kotlin.math.roundToInt
 
 /**
  * The shortcut the launcher offers on a long press on the app's icon: going on with the book read
- * last, by its name and with its cover, which opens it as the button on the top rail of the
- * bookshelf does (MainActivity, [ACTION]). It is kept up to date as books are read, and taken
- * away while there is none to go on with.
+ * last, by its name and with its cover. Its page slides in from the right over the home screen
+ * (WidgetOpenActivity), as it does for the button on the top rail of the bookshelf, and the book
+ * is closed on its shelf. It is kept up to date as books are read, and taken away while there is none
+ * to go on with.
  */
 object ContinueShortcut {
-    /** What the shortcut asks the bookshelf to do. */
+    /** What the shortcut asks for; the bookshelf, which it once opened, goes on with the book read last for it. */
     const val ACTION = "io.github.edoardonegri.ready.CONTINUE"
 
     private const val ID = "continue"
@@ -41,17 +42,15 @@ object ContinueShortcut {
                 return
             }
             val title = Library.meta(app, book).title
-            // The cover stands against the wall of the shelf the book stands on, in its wood.
-            val wood = book.parentFile?.let { Library.wood(app, it) } ?: Wood.WALNUT
-            val key = book.path + "\n" + title + "\n" + wood
+            val key = book.path + "\n" + title
             if (key == shown) return
-            // Back to the bookshelf as it is, rather than another one over it, which goes on with the book.
-            val intent = Intent(app, MainActivity::class.java).setAction(ACTION)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            val intent = Intent(app, WidgetOpenActivity::class.java).setAction(ACTION)
+                .putExtra(ReaderActivity.EXTRA_PATH, book.path).putExtra(WidgetOpenActivity.EXTRA_SLIDE, true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
             val shortcut = ShortcutInfoCompat.Builder(app, ID)
                 .setShortLabel(title)
                 .setLongLabel(app.getString(R.string.continue_book, title))
-                .setIcon(icon(app, book, wood))
+                .setIcon(icon(app, book))
                 .setIntent(intent)
                 .build()
             ShortcutManagerCompat.pushDynamicShortcut(app, shortcut)
@@ -62,14 +61,14 @@ object ContinueShortcut {
     }
 
     /**
-     * The cover of [book] standing against the wall of the case of [wood], as the icon of the
+     * The cover of [book] standing against the wall of a case, as the icon of the
      * shortcut: in the middle of it, where every launcher shows it, whatever shape it cuts the icon to.
      */
-    private fun icon(ctx: Context, book: File, wood: Wood): IconCompat {
+    private fun icon(ctx: Context, book: File): IconCompat {
         val side = (ICON_DP * ctx.resources.displayMetrics.density).roundToInt()
         val bmp = createBitmap(side, side, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
-        ShelfArt.wall(ctx, wood).apply { setBounds(0, 0, side, side) }.draw(c)
+        ShelfArt.wall(ctx).apply { setBounds(0, 0, side, side) }.draw(c)
         val high = side * COVER_PART
         val wide = high / ShelfSpec.BOOK
         val area = RectF((side - wide) / 2, (side - high) / 2, (side + wide) / 2, (side + high) / 2)

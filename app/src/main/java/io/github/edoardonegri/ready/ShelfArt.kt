@@ -2,13 +2,14 @@ package io.github.edoardonegri.ready
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.ColorFilter
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
 import android.graphics.RadialGradient
 import android.graphics.Rect
 import android.graphics.RectF
@@ -173,12 +174,14 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         paint.color = metal.groove
         c.drawPath(path, paint)
 
-        if (ornate) {
+        // An ornate plate is held by screws, or by stars where it names a favorite.
+        if (!favorite) {
             screw(c, left + ORNATE_SCREW_X_DP * d, cy, 0.6f)
             screw(c, right - ORNATE_SCREW_X_DP * d, cy, 2.3f)
         } else {
-            star(c, left + STAR_X_DP * d, cy)
-            star(c, right - STAR_X_DP * d, cy)
+            val x = (if (ornate) ORNATE_SCREW_X_DP else STAR_X_DP) * d
+            star(c, left + x, cy)
+            star(c, right - x, cy)
         }
     }
 
@@ -322,28 +325,6 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
     private class Metal(val rim: Int, val plate: IntArray, val lit: Int, val shade: Int, val lip: Int, val groove: Int)
 }
 
-/**
- * The woods a shelf can be made of. The case is drawn in walnut and given another wood by a
- * [filter] over its colours: they are first made duller, to [saturation] of what they were, and
- * then red, green and blue are each made stronger or weaker. Black stays black, so the shadows
- * on the wall stay as they are.
- */
-enum class Wood(val label: Int, saturation: Float, red: Float, green: Float, blue: Float) {
-    WALNUT(R.string.wood_walnut, 1f, 1f, 1f, 1f),
-    OAK(R.string.wood_oak, 0.8f, 1.5f, 1.45f, 1.2f),
-    MAPLE(R.string.wood_maple, 0.6f, 1.95f, 1.95f, 1.9f),
-    CHERRY(R.string.wood_cherry, 1f, 1.35f, 0.92f, 0.8f),
-    MAHOGANY(R.string.wood_mahogany, 1f, 1.1f, 0.62f, 0.6f),
-    EBONY(R.string.wood_ebony, 0.25f, 0.55f, 0.52f, 0.5f);
-
-    /** What turns walnut into this wood; null for walnut itself. */
-    val filter: ColorFilter? = if (saturation == 1f && red == 1f && green == 1f && blue == 1f) null else
-        ColorMatrixColorFilter(ColorMatrix().apply {
-            setSaturation(saturation)
-            postConcat(ColorMatrix().apply { setScale(red, green, blue, 1f) })
-        })
-}
-
 object ShelfArt {
     /** The dark leather a book shows where its cover does not, as while the cover is still being read. */
     const val LEATHER = 0xFF24160D.toInt()
@@ -478,9 +459,12 @@ object ShelfArt {
     private const val END_TOP_DP = 14
 
     /**
-     * The back wall of the case of the [wood] given, as the shelves show it (shelf_back.xml): a new
-     * one each time, as each is drawn at its own size.
+     * The back wall of a case, as the shelves show it (shelf_back.xml), seen in the light of the
+     * [lamp] (ReaderSettings.lamp), as the page is where it stands behind the cover that ends a
+     * book: a new one each time, as each is drawn at its own size.
      */
-    fun wall(ctx: Context, wood: Wood): Drawable =
-        ContextCompat.getDrawable(ctx, R.drawable.shelf_back)!!.mutate().apply { colorFilter = wood.filter }
+    fun wall(ctx: Context, lamp: Int = Color.WHITE): Drawable =
+        ContextCompat.getDrawable(ctx, R.drawable.shelf_back)!!.mutate().apply {
+            colorFilter = if (lamp == Color.WHITE) null else PorterDuffColorFilter(lamp, PorterDuff.Mode.MULTIPLY)
+        }
 }

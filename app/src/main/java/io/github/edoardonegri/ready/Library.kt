@@ -49,13 +49,22 @@ import kotlin.math.ceil
 /** What a book says about itself. [published] is a day, a month or a year, as 2011-05-17, 2011-05 or 2011; empty if unknown. */
 data class BookMeta(val title: String, val author: String, val pages: Int, val published: String = "")
 
-/** Reading position. For PDFs [chapter] is the page index; for EPUBs it is the spine index. */
+/**
+ * Reading position. For PDFs [chapter] is the page index; for EPUBs it is the spine index. [version]
+ * is how the spine was counted when it was written down: before [VERSION], an EPUB's spine still
+ * began with the page of its cover, which is now left out of it (FlowBook.skipped).
+ */
 data class BookState(
     var chapter: Int = 0,
     var fraction: Float = 0f,
     var percent: Float = 0f,
     var lastRead: Long = 0,
-)
+    val version: Int = VERSION,
+) {
+    companion object {
+        const val VERSION = 2
+    }
+}
 
 /**
  * The ways a shelf can be put in order. A shelf standing on it takes its place among the books:
@@ -178,14 +187,12 @@ object Library {
     private const val TITLE = "title:"
     private const val AUTHOR = "author:"
     private const val COVER = "cover:"
-    private const val WOOD = "wood:"
 
     /** What is remembered of the shelves and the books by their paths, by its prefix, with the name it has in the backup. */
     private const val MODE = "covermode:"
     private const val TONE = "tone:"
     private val BY_PATH = linkedMapOf(
-        ORDER to "orders", TITLE to "titles", AUTHOR to "authors", COVER to "covers", WOOD to "woods",
-        MODE to "covermodes", TONE to "tones",
+        ORDER to "orders", TITLE to "titles", AUTHOR to "authors", COVER to "covers", MODE to "covermodes", TONE to "tones",
     )
     private const val FINISHED = "finished"
 
@@ -379,7 +386,7 @@ object Library {
 
         /** What [of] is for the book [f], or the most it is for any book on the shelf [f] and the shelves inside it. */
         fun <T : Comparable<T>> most(f: File, of: (BookState) -> T): T? =
-            if (f in shelves) mostOf(ctx, f.path + File.separator, of)?.second else of(state(ctx, f))
+            if (f in shelves) mostOf(ctx, f.path + File.separator, of = of)?.second else of(state(ctx, f))
         val down = descending(ctx)
 
         /** By [key], the way round that was chosen; what is the same by it stands by its title. */
@@ -522,8 +529,7 @@ object Library {
 
     /**
      * Writes reading positions, favorites, the books on the widget, finished books, the order of
-     * the shelves, the names, authors and covers given to books, the wood of the shelves and the reader
-     * settings to [backupFile]; the covers themselves are kept in the library folder. Books are
+     * the shelves, the names, authors and covers given to books and the reader settings to [backupFile]; the covers themselves are kept in the library folder. Books are
      * named by where they are in the library, so the backup also fits the same library on
      * another phone. Blocking.
      */
@@ -893,7 +899,7 @@ object Library {
 
     /**
      * Everything remembered under the path [old] or a path inside it (reading positions, details,
-     * favorites, the books on the widget, finished books, orders, names, authors, covers and woods) is
+     * favorites, the books on the widget, finished books, orders, names, authors and covers) is
      * remembered under [new] instead, or forgotten if that is null: a cover given to a book
      * that is gone for good goes with it.
      */
@@ -1286,16 +1292,6 @@ object Library {
         null
     }
 
-    /** The wood the shelf [dir] is made of. */
-    fun wood(ctx: Context, dir: File): Wood =
-        libraryPrefs(ctx).getString(WOOD + dir.path, null)?.let { name -> Wood.entries.firstOrNull { it.name == name } }
-            ?: Wood.WALNUT
-
-    fun setWood(ctx: Context, dir: File, wood: Wood) {
-        libraryPrefs(ctx).edit { if (wood == Wood.WALNUT) remove(WOOD + dir.path) else putString(WOOD + dir.path, wood.name) }
-        touched(dir)
-    }
-
     /**
      * Where the menu of the reader stood over the cover that ends the book [f], the last time it was
      * pictured there (BookOpening.EndMenu, without its pictures); null if it never was. Kept only on
@@ -1355,7 +1351,7 @@ object Library {
     // ---- miniatures kept between two uses of the app ----
 
     private fun savedFile(ctx: Context, dir: File, spec: ShelfSpec): File {
-        val name = "${dir.path}|${spec.width}|${spec.columns}|${wood(ctx, dir).name}"
+        val name = "${dir.path}|${spec.width}|${spec.columns}"
         val id = MessageDigest.getInstance("SHA-1").digest(name.toByteArray()).joinToString("") { "%02x".format(it) }
         return File(File(ctx.cacheDir, "minis"), "$id.webp")
     }
@@ -1407,7 +1403,7 @@ object Library {
         val detail = if (wanted == DETAIL_BOOKS && depth == 0 && shelf(ctx, dir).none { it.isFolder }) DETAIL_FULL else wanted
         if (depth == 0 && detail == DETAIL_FULL) cachedFolderPreview(dir, spec)?.let { return it }
         val key = when (detail) {
-            DETAIL_CASE -> "case:${wood(ctx, dir).name}:${spec.width}:${spec.columns}:${ShelfDecoration.isReady()}"
+            DETAIL_CASE -> "case:${spec.width}:${spec.columns}:${ShelfDecoration.isReady()}"
             DETAIL_BOOKS -> folderKey(dir, spec) + BOOKS_ONLY
             else -> folderKey(dir, spec)
         }
@@ -1422,10 +1418,6 @@ object Library {
         // Draw in real case pixels.
         c.scale(COVER_W / w, COVER_W / w)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        // The case is made of its own wood; what stands in it keeps its colours.
-        val wood = wood(ctx, dir).filter
-        paint.colorFilter = wood
-
         paint.alpha = 255
         paint.shader = LinearGradient(
             0f, 0f, w, 0f, intArrayOf(SHELF_BACK, SHELF_BACK_LIGHT, SHELF_BACK), null, Shader.TileMode.CLAMP,
@@ -1436,7 +1428,6 @@ object Library {
         for (row in 1..spec.miniRows) ShelfDecoration.drawPlank(c, w, (row * rowH).toFloat(), spec.density, paint, row - 1)
         ShelfDecoration.drawShade(c, w, spec.density, paint)
         paint.shader = null
-        paint.colorFilter = null
 
         val title = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFF3B2A05.toInt()
@@ -1493,10 +1484,8 @@ object Library {
             if (layer >= 0) c.restoreToCount(layer)
         }
 
-        paint.colorFilter = wood
         ShelfDecoration.drawCase(c, w, h, spec, paint)
         paint.shader = null
-        paint.colorFilter = null
         if (depth == 0 || detail == DETAIL_CASE) {
             bmp.prepareToDraw()
             bitmaps.put(key, bmp)
@@ -1579,6 +1568,7 @@ object Library {
             o.optDouble("fraction", 0.0).toFloat(),
             o.optDouble("percent", 0.0).toFloat(),
             o.optLong("lastRead"),
+            o.optInt("v", 1),
         )
     } catch (e: Exception) {
         null
@@ -1601,11 +1591,12 @@ object Library {
     fun state(ctx: Context, f: File): BookState = withStates(ctx) { it[f.path]?.copy() } ?: BookState()
 
     fun saveState(ctx: Context, f: File, s: BookState) {
+        // A place is always told as the spine is counted now.
         val o = JSONObject().put("chapter", s.chapter).put("fraction", s.fraction.toDouble())
-            .put("percent", s.percent.toDouble()).put("lastRead", s.lastRead)
+            .put("percent", s.percent.toDouble()).put("lastRead", s.lastRead).put("v", BookState.VERSION)
         synchronized(statesLock) {
             statePrefs(ctx).edit { putString(f.path, o.toString()) }
-            states?.put(f.path, s.copy())
+            states?.put(f.path, s.copy(version = BookState.VERSION))
         }
     }
 
@@ -1619,17 +1610,25 @@ object Library {
     }
 
     /**
-     * Of the books remembered under [prefix] (all of them if it is empty), the one for which
-     * [of] is the most, of those still on the shelves; null if none is.
+     * Of the books remembered under [prefix] (all of them if it is empty) whose place is [wanted],
+     * the one for which [of] is the most, of those still on the shelves; null if none is.
      */
-    private fun <T : Comparable<T>> mostOf(ctx: Context, prefix: String, of: (BookState) -> T): Pair<File, T>? {
-        val all = withStates(ctx) { map -> map.entries.filter { it.key.startsWith(prefix) }.map { it.key to of(it.value) } }
+    private fun <T : Comparable<T>> mostOf(
+        ctx: Context, prefix: String, wanted: (BookState) -> Boolean = { true }, of: (BookState) -> T,
+    ): Pair<File, T>? {
+        val all = withStates(ctx) { map ->
+            map.entries.filter { it.key.startsWith(prefix) && wanted(it.value) }.map { it.key to of(it.value) }
+        }
         // Only the books looked at are asked whether they are still there, the likeliest first.
         return all.sortedByDescending { it.second }.asSequence().map { File(it.first) to it.second }.firstOrNull { shelved(it.first) }
     }
 
-    /** The book that was read last, wherever it stands in the library; null if none was ever read. Blocking. */
-    fun lastRead(ctx: Context): File? = mostOf(ctx, "") { it.lastRead }?.takeIf { it.second > 0 }?.first
+    /**
+     * The book that was read last, wherever it stands in the library, of those not read to the end:
+     * one that is, is not gone on with. Null if there is none. Blocking.
+     */
+    fun lastRead(ctx: Context): File? =
+        mostOf(ctx, "", { it.percent < FINISHED_AT }) { it.lastRead }?.takeIf { it.second > 0 }?.first
 
     private fun favoritePaths(ctx: Context): Set<String> =
         statePrefs(ctx).getStringSet(FAVORITES, null) ?: emptySet()

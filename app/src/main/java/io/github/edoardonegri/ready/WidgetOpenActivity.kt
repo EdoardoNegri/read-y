@@ -19,7 +19,9 @@ import kotlin.math.roundToInt
  * tapped book opens right there, where it stands on the widget, as a book does on the bookshelf
  * ([BookOpening]), and the reader takes over once its page fills the screen. Left again, the
  * reader goes to the bookshelf, to the shelf the book stands on, where the book is closed.
- * The place for choosing the books leads on to [WidgetBooksActivity].
+ * The place for choosing the books leads on to [WidgetBooksActivity]. The shortcut on the app's
+ * icon that goes on with the book read last (ContinueShortcut) opens it here too, its page sliding
+ * in from the right over the home screen ([EXTRA_SLIDE]).
  */
 class WidgetOpenActivity : AppCompatActivity() {
 
@@ -41,6 +43,7 @@ class WidgetOpenActivity : AppCompatActivity() {
             // Without the library there is nothing to read or to choose from; the bookshelf asks for it.
             !Library.hasAccess() -> leaveFor(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             book == null -> leaveFor(Intent(this, WidgetBooksActivity::class.java))
+            intent.getBooleanExtra(EXTRA_SLIDE, false) && book.isDoc && savedInstanceState == null -> slide(book)
             // The home screen did not say where the book stands, or it is gone: the reader says so.
             at == null || at.isEmpty || !book.isDoc || savedInstanceState != null -> read(book)
             else -> open(book, at)
@@ -50,6 +53,13 @@ class WidgetOpenActivity : AppCompatActivity() {
     private fun leaveFor(next: Intent) {
         startActivity(next)
         finish()
+    }
+
+    /** Slides the page of [book] in from the right, over the home screen, once the window is there to show it in. */
+    private fun slide(book: File) {
+        BookPrep.prepare(book)
+        if (Library.isFlowing(book)) window.decorView.post { FlowEngine.prepare(this) }
+        window.decorView.post { if (!isDestroyed) openBook(book, null) }
     }
 
     /** Opens [book] from [at], the place on the screen its picture on the widget has. */
@@ -118,12 +128,17 @@ class WidgetOpenActivity : AppCompatActivity() {
         arrived()
     }
 
-    /** Opens the book whose cover [cover] shows, on the paper the reader shows, and hands it to the reader. */
-    private fun openBook(book: File, cover: View) {
+    /**
+     * Opens the book whose cover [cover] shows, on the paper the reader shows, and hands it to the
+     * reader; without a cover, its page slides in from the right.
+     */
+    private fun openBook(book: File, cover: View?) {
         val settings = ReaderSettings(this)
         val paper = settings.lit(settings.palette.bg)
         if (Build.VERSION.SDK_INT < 30) {
-            BookOpening(this).open(cover, paper, BookOpening.kept(book, settings.look), bare = false) { read(book) }
+            val opening = BookOpening(this)
+            val kept = BookOpening.kept(book, settings.look)
+            if (cover == null) opening.slideIn(paper, kept) { read(book) } else opening.open(cover, paper, kept, bare = false) { read(book) }
             return
         }
         // The reader starts at once, unseen over the book opening, and sets out its page
@@ -133,7 +148,8 @@ class WidgetOpenActivity : AppCompatActivity() {
         val handoff = BookOpening.Handoff()
         BookOpening.handoff = handoff
         read(book, handoff)
-        BookOpening.Detached(this).also { detached = it }.open(cover, paper, book, settings.look, handoff)
+        val opening = BookOpening.Detached(this).also { detached = it }
+        if (cover == null) opening.slide(paper, book, settings.look, handoff) else opening.open(cover, paper, book, settings.look, handoff)
     }
 
     /** The book opening while the reader starts over it, see [openBook]. */
@@ -171,6 +187,9 @@ class WidgetOpenActivity : AppCompatActivity() {
     companion object {
         /** How much smaller than the bounds it gives the home screen shows the widget; a float. */
         const val EXTRA_SHOWN = "shown"
+
+        /** Set by the shortcut on the app's icon: the page of the book slides in, from nowhere on the screen. */
+        const val EXTRA_SLIDE = "slide"
 
         /**
          * How long the window is given to get into place, if nothing says that it has: longer

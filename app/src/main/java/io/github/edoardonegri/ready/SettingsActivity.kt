@@ -95,7 +95,10 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun applyBrightness() = s.light(window, mayStayOn = false)
+    /** The brightness chosen for reading is shown on the sample page alone, see PagePreview.brightness. */
+    private fun applyBrightness() {
+        preview.brightness = s.brightness
+    }
 
     private fun applyPage() = preview.apply()
 

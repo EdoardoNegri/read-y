@@ -88,6 +88,26 @@ class PageTurner(
     }
 
     /**
+     * Takes over the turn to the next page, which the engine has just shown, for it to be shown
+     * otherwise: the page being left stays in front, still, until [stop], or [turnTaken] turns it
+     * after all. Its picture; null, and nothing taken, if no page is being turned to the next one.
+     */
+    fun takeTurn(): Bitmap? {
+        if (turning <= 0) return null
+        val page = sheet.still ?: return null
+        content.removeCallbacks(startTurn)
+        content.removeCallbacks(dropTurn)
+        turning = 0
+        return page
+    }
+
+    /** Does [action] once the page being turned, if any, is turned, and the engine's page is seen. */
+    fun afterTurn(action: () -> Unit) = sheet.whenDropped(action)
+
+    /** Turns the page taken by [takeTurn] over like paper after all. */
+    fun turnTaken() = sheet.turn(true, ::picture, place())
+
+    /**
      * The engine tells where the page it shows is (ReaderHost.onPosition): a page being turned to
      * is there, and a moment later, once it is drawn too, the sheet turns over to it.
      */

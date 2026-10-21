@@ -47,9 +47,9 @@
             android:layout_height="0dp"
             android:layout_weight="1" />
 
-        <!-- A plank of the shelf the book stands on, in its wood (ReaderActivity), with the lit
-             front edge that sets it apart from the page. The cover that ends the book stands on
-             it as the book stood on its shelf. -->
+        <!-- A plank of the shelf the book stands on, with the lit front edge that sets it apart
+             from the page. The cover that ends the book stands on it as the book stood on its
+             shelf. -->
         <LinearLayout
             android:id="@+id/menuPlank"
             android:layout_width="match_parent"

@@ -6,6 +6,8 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Point
 import android.graphics.Rect
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.LayerDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -59,7 +61,7 @@ import kotlin.math.roundToInt
  * whichever shelf it stands on. Meanwhile a tap on a book or a shelf chooses it, or lets go of it,
  * and two taps on a shelf open it, to choose from what stands on it; a long press carries all
  * that is chosen. A tap on a plaque then opens what changes its book or shelf: the name, the
- * author and the cover of a book, the name and the wood of a shelf. Otherwise it shows the details.
+ * author and the cover of a book, the name of a shelf. Otherwise it shows the details.
  * Beside the arrow of the top rail is the open book that goes on with the book read last.
  */
 class MainActivity : AppCompatActivity() {
@@ -356,7 +358,6 @@ class MainActivity : AppCompatActivity() {
         Library.adoptBackup(this)
         if (!current.isFolder || !current.path.startsWith(root.path)) current = root
         val atRoot = current == root
-        showWood()
         val results = found
         val known = if (results == null) Library.knownShelf(this, current) else null
         // The very first shelf is listed in the background: asking the documents provider is slow, and the
@@ -419,18 +420,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Makes the case, its top rail and the search bar under it of the wood of the shelf shown. */
-    private fun showWood() {
-        val wood = Library.wood(this, current)
-        if (decoration.wood == wood) return
-        decoration.wood = wood
-        for (v in arrayOf(shelf, bar, searchRow)) v.background?.mutate()?.colorFilter = wood.filter
-        shelf.invalidate()
-    }
-
     private fun goUp() {
         val left = current
         val snapshot = snapshotShelf()
+        // The miniature it closes into shows no bars of how far its books are read; they go as it shrinks.
+        val bare = if (snapshot != null) snapshotShelf(bars = false) else null
         current = current.parentFile ?: Library.root()
         // What is carried out of the shelf is no longer in its miniature, which is drawn anew at
         // once for that: the shelf closes into it.
@@ -445,7 +439,7 @@ class MainActivity : AppCompatActivity() {
         shelf.doOnPreDraw {
             whenShown {
                 val thumbnail = shelf.findViewHolderForAdapterPosition(index)?.itemView?.findViewById<View>(R.id.cover)
-                if (thumbnail != null) zoom(locate(thumbnail), snapshot, opening = false) else hideGhost()
+                if (thumbnail != null) zoom(locate(thumbnail), snapshot, opening = false, bare) else hideGhost()
             }
         }
     }
@@ -472,22 +466,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Opens the book [f] in the reader, out of [cover], its cover on the shelf or whatever else it
-     * is opened from, if that is given; as a [bare] page growing out of it, without the book opening.
+     * Opens the book [f] in the reader, out of [cover], its cover on the shelf, if that is given;
+     * or, to [slide], with its page sliding in from the right, without the book opening.
      */
-    private fun read(f: File, cover: View?, bare: Boolean = false) {
+    private fun read(f: File, cover: View?, slide: Boolean = false) {
         // The book is read in the background meanwhile, rather than by the reader as it starts.
         BookPrep.prepare(f)
         val reader = Intent(this, ReaderActivity::class.java).putExtra(ReaderActivity.EXTRA_PATH, f.path)
-        if (cover == null) return startActivity(reader)
+        if (cover == null && !slide) return startActivity(reader)
         // The book opens on the shelf, and the reader takes over once its page fills the screen.
         reader.putExtra(ReaderActivity.EXTRA_FROM_SHELF, true).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
         val settings = ReaderSettings(this)
         val paper = settings.lit(settings.palette.bg)
-        // A book read to its end opens on its cover, so it is only enlarged out of its place: that cover is its last page.
-        val grown = !bare && !settings.vertical && Library.isFinished(this, f)
-        // That cover stands against the wall of the case the book stands in.
-        val wood = f.parentFile?.let { Library.wood(this, it) } ?: Wood.WALNUT
+        // A book read to its end opens on its cover, so it is only enlarged out of its place: that
+        // cover is its last page, and stands against the wall of the case, in the warm light.
+        val grown = !slide && !settings.vertical && Library.isFinished(this, f)
         if (Build.VERSION.SDK_INT >= 30) {
             // The reader starts at once, unseen over the shelf, and sets out the page while the
             // book opens; see BookOpening.Handoff.
@@ -497,11 +490,13 @@ class MainActivity : AppCompatActivity() {
             startActivity(reader.setClass(this, OpeningReaderActivity::class.java))
             // It opens in a window of its own, which the reader starting meanwhile does not hold up.
             // Where the menu stands over the cover is known from the last time the book was shown there.
-            detached.open(cover, paper, f, settings.look, handoff, bare, grown, wood, if (grown) Library.endMenu(this, f) else null)
+            if (cover == null) return detached.slide(paper, f, settings.look, handoff)
+            detached.open(cover, paper, f, settings.look, handoff, false, grown, settings.lamp, if (grown) Library.endMenu(this, f) else null)
             if (grown) sharpen(f, detached::sharpen)
             return
         }
-        opening.open(cover, paper, if (grown) null else BookOpening.kept(f, settings.look), bare, grown, wood = wood) { startActivity(reader) }
+        if (cover == null) return opening.slideIn(paper, BookOpening.kept(f, settings.look)) { startActivity(reader) }
+        opening.open(cover, paper, if (grown) null else BookOpening.kept(f, settings.look), false, grown, lamp = settings.lamp) { startActivity(reader) }
         if (grown) sharpen(f) { runOnUiThread { opening.sharpen(it) } }
     }
 
@@ -524,8 +519,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Goes on with the book that was read last, wherever in the library it stands: out of its
-     * place, if it happens to be in view.
+     * Goes on with the book that was read last, wherever in the library it stands: its page slides
+     * in from the right. It is closed on its own shelf all the same, see closeBook.
      */
     private fun resume() {
         val app = applicationContext
@@ -533,10 +528,7 @@ class MainActivity : AppCompatActivity() {
             val last = Library.lastRead(app)
             onShelf {
                 if (last == null) return@onShelf toast(R.string.nothing_read)
-                // Out of its cover, if that is in view; else its page grows out of the button. It
-                // is closed on its own shelf all the same, see closeBook.
-                coverInView(last)?.let { return@onShelf read(last, it) }
-                read(last, findViewById(R.id.resume), bare = true)
+                read(last, null, slide = true)
             }
         }
     }
@@ -562,16 +554,6 @@ class MainActivity : AppCompatActivity() {
     /** Opens a book while the reader starts behind it, see [read]. */
     private val detached by lazy { BookOpening.Detached(this) }
 
-    /** The cover of [f] on the shelf, if the whole of it is in view. */
-    private fun coverInView(f: File): View? {
-        val at = adapter.indexOf(f)
-        if (at < 0) return null
-        val cover = shelf.findViewHolderForAdapterPosition(at)?.itemView?.findViewById<View>(R.id.cover) ?: return null
-        val seen = Rect()
-        val whole = cover.isShown && cover.getGlobalVisibleRect(seen) && seen.width() == cover.width && seen.height() == cover.height
-        return if (whole) cover else null
-    }
-
     /** The reader came back with [left], the page its book was at: the book closes from it, where it stands. */
     private fun closeBook(left: BookOpening.Left) {
         // Opened from elsewhere than its place in view, such as the button that goes on with the
@@ -580,8 +562,7 @@ class MainActivity : AppCompatActivity() {
         if (at < 0) showShelfOf(left.file) else shelf.scrollToPosition(at)
         val settings = ReaderSettings(this)
         // Left on its cover, at its end, a book only shrinks back into its place.
-        val wood = left.file.parentFile?.let { Library.wood(this, it) } ?: Wood.WALNUT
-        opening.close(left.page, settings.lit(settings.palette.bg), grown = !settings.vertical && Library.isFinished(this, left.file), wood, left.menu) {
+        opening.close(left.page, settings.lit(settings.palette.bg), grown = !settings.vertical && Library.isFinished(this, left.file), settings.lamp, left.menu) {
             shelf.findViewHolderForAdapterPosition(adapter.indexOf(left.file))?.itemView?.findViewById(R.id.cover)
         }
     }
@@ -608,14 +589,13 @@ class MainActivity : AppCompatActivity() {
     /** Does [action] on the thread that draws the shelf, unless the shelf is gone by then. */
     private fun onShelf(action: () -> Unit) = runOnUiThread { if (!isFinishing && !isDestroyed) action() }
 
-    // ---- menu: new shelf, sorting, settings ----
+    // ---- menu: adding books and shelves, sorting, settings ----
 
     private fun showMenu() {
         val choices = ArrayList<Pair<String, () -> Unit>>()
         if (Library.hasAccess()) {
             choices += getString(R.string.add_books) to ::addBooks
-            choices += getString(R.string.add_folder) to ::addFolder
-            choices += getString(R.string.new_shelf) to ::askNewShelf
+            choices += getString(R.string.add_shelf) to ::askAddShelf
         }
         choices += getString(R.string.sort_by) to ::askSort
         choices += getString(R.string.settings) to { settings.launch(Intent(this, SettingsActivity::class.java)) }
@@ -839,8 +819,15 @@ class MainActivity : AppCompatActivity() {
         set.filter { f -> generateSequence(f.parentFile) { it.parentFile }.none { it in set } }
     }
 
+    /** A shelf is added empty, to be named, or with the books of a folder the reader picks, see [addFolder]. */
+    private fun askAddShelf() {
+        ShelfDialog(this).title(getString(R.string.add_shelf)).back(::showMenu).options(
+            listOf(getString(R.string.empty_shelf) to ::askNewShelf, getString(R.string.shelf_from_folder) to ::addFolder),
+        ).show()
+    }
+
     private fun askNewShelf() {
-        val dialog = ShelfDialog(this).title(getString(R.string.new_shelf)).back(::showMenu).input(R.string.shelf_name)
+        val dialog = ShelfDialog(this).title(getString(R.string.new_shelf)).back(::askAddShelf).input(R.string.shelf_name)
         dialog.primary(R.string.create) {
             if (Library.createShelf(current, dialog.text)) refresh() else toast(R.string.name_taken)
         }.show()
@@ -1217,8 +1204,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun spec() = ShelfSpec(shelf.width, columns, resources.displayMetrics.density)
 
-    // In full colour: with fewer, the soft shading of the back wall comes out in stripes.
-    private fun snapshotShelf(): Bitmap? = shelf.snapshot()
+    /**
+     * A picture of the shelf as it is, in full colour: with fewer, the soft shading of the back wall
+     * comes out in stripes. Without the [bars] of how far the books are read, if asked.
+     */
+    private fun snapshotShelf(bars: Boolean = true): Bitmap? {
+        if (bars) return shelf.snapshot()
+        adapter.showBars(shelf, 0f)
+        return shelf.snapshot().also { adapter.showBars(shelf, 1f) }
+    }
 
     /** Where a folder's miniature sits on the shelf: the scale and pivot that map the full shelf onto it. */
     private class Miniature(val px: Float, val py: Float, val scale: Float)
@@ -1238,12 +1232,17 @@ class MainActivity : AppCompatActivity() {
      * first rows from under the top rail down to where the books of the last one stand, so the folder's shelf (always the upper, opaque
      * layer) starts exactly on it, cropped to the same rows, and is enlarged until it fills the screen while the crop opens up. The
      * parent shelf zooms in step underneath. Closing plays the same thing backwards.
-     * [snapshot] is the shelf being left; the live list shows the one being entered.
+     * [snapshot] is the shelf being left; the live list shows the one being entered. The bars of
+     * how far the books are read, which the miniature does not show, come as the folder grows, and
+     * go as it shrinks: closing, the folder is [snapshot] over [bare], a picture of it without them.
      */
-    private fun zoom(m: Miniature, snapshot: Bitmap, opening: Boolean) {
+    private fun zoom(m: Miniature, snapshot: Bitmap, opening: Boolean, bare: Bitmap? = null) {
         shelf.animate().cancel()
         ghost.animate().cancel()
-        ghost.setImageBitmap(snapshot)
+        val barred = if (!opening && bare != null) BitmapDrawable(resources, snapshot) else null
+        if (barred != null) ghost.setImageDrawable(LayerDrawable(arrayOf(BitmapDrawable(resources, bare), barred)))
+        else ghost.setImageBitmap(snapshot)
+        if (opening) adapter.showBars(shelf, 0f)
         ghost.visibility = View.VISIBLE
         for (v in arrayOf(shelf, ghost)) {
             v.pivotX = m.px
@@ -1277,6 +1276,7 @@ class MainActivity : AppCompatActivity() {
             crop.top = (inset * (1 - t)).toInt()
             crop.bottom = (cropped + (h - cropped) * t).toInt()
             folder.clipBounds = crop
+            if (opening) adapter.showBars(shelf, t) else barred?.alpha = (t * 255).toInt()
         }
         ghostMove.withEndAction {
             shelf.clipBounds = null
@@ -1291,6 +1291,7 @@ class MainActivity : AppCompatActivity() {
     private fun cover(snapshot: Bitmap) {
         shelf.animate().cancel()
         ghost.animate().cancel()
+        adapter.showBars(shelf, 1f)
         ghost.scaleX = 1f
         ghost.scaleY = 1f
         ghost.alpha = 1f
@@ -1314,6 +1315,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun hideGhost() {
+        adapter.showBars(shelf, 1f)
         ghost.visibility = View.GONE
         ghost.setImageBitmap(null)
     }
@@ -1338,7 +1340,7 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * The plaque of [f] was tapped: it shows the details, or, while things are being chosen, lets
-     * the name of [f] be changed, and the cover of a book or the wood of a shelf.
+     * the name of [f] be changed, and the cover of a book.
      */
     private fun onPlaque(f: File) = if (picked != null) edit(f) else showInfo(f)
 
@@ -1376,17 +1378,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** The shelf [dir] as it stands on the shelf, beside its name and the wood it is made of, which can be changed there. */
+    /** The shelf [dir] as it stands on the shelf, beside its name, which can be changed there. */
     private fun editShelf(dir: File) {
-        val woods = Wood.entries
         val dialog = ShelfDialog(this).uncrossed().title(dir.name)
         val name = dialog.field(R.string.field_name, dir.name)
-        dialog.choice(R.string.field_aspect) {
-            // Its miniature, in the dialog and behind it, is made of the new wood straight away.
-            Library.setWood(this, dir, woods[it])
-            showShelfPicture(dialog, dir)
-            refresh()
-        }.show(woods.map { getString(it.label) }, Library.wood(this, dir).ordinal)
         showShelfPicture(dialog, dir)
         dialog.onClose { renamed(dir, dir.name, name) }
         dialog.show()
@@ -1398,7 +1393,6 @@ class MainActivity : AppCompatActivity() {
         if (spec.width <= 0) return
         dialog.picture.apply {
             cased = true
-            wood = Library.wood(this@MainActivity, dir)
             scaleType = ImageView.ScaleType.FIT_XY
             ratio = (spec.coverH + spec.miniRise).toFloat() / spec.miniW
         }
@@ -1414,7 +1408,7 @@ class MainActivity : AppCompatActivity() {
      * cover is: its first page, or a picture it was given, or a new one to be chosen.
      */
     private fun editBook(f: File, m: BookMeta) {
-        val dialog = ShelfDialog(this).uncrossed().title(m.title)
+        val dialog = ShelfDialog(this).uncrossed().title(m.title).plaque(Library.isFavorite(this, f), Library.isFinished(this, f))
         val name = dialog.field(R.string.field_name, m.title)
         val author = dialog.field(R.string.field_author, m.author)
         // What the cover can be, as the menu offers it: the first page only for a book of pages, the
@@ -1602,7 +1596,7 @@ class MainActivity : AppCompatActivity() {
         rows += getString(R.string.info_format) to f.extension.uppercase()
         f.parentFile?.let { rows += getString(R.string.info_folder) to place(it) }
 
-        ShelfDialog(this).details(rows).uncrossed().title(m.title).show()
+        ShelfDialog(this).details(rows).uncrossed().title(m.title).plaque(Library.isFavorite(this, f), Library.isFinished(this, f)).show()
     }
 
     /** The date [BookMeta.published] gives, with no more of it than is known. */

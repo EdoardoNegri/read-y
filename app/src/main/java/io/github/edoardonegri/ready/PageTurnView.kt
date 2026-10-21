@@ -157,6 +157,17 @@ class PageTurnView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         }
     }
 
+    /** The picture of the page being left, while it lies still in front of the page; else null. */
+    val still: Bitmap? get() = if (state == STILL) left else null
+
+    /** What is to be done once the page of the reader is shown again, see [whenDropped]. */
+    private val dropped = ArrayList<() -> Unit>()
+
+    /** Does [action] once the page of the reader is shown again: at once if it is, else once the sheet is turned or dropped. */
+    fun whenDropped(action: () -> Unit) {
+        if (state == IDLE) action() else dropped.add(action)
+    }
+
     /** Shows the page of the reader again, at once. */
     fun drop() {
         copies++
@@ -167,6 +178,7 @@ class PageTurnView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         }
         // Laid out all the same, so that it has the size of the page for the next picture.
         visibility = INVISIBLE
+        if (dropped.isNotEmpty()) dropped.toList().also { dropped.clear() }.forEach { it() }
     }
 
     /** Lets go of the pictures, which are as large as the screen. */

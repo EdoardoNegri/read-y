@@ -18,7 +18,7 @@ import kotlin.math.roundToInt
 
 /**
  * The places on a shelf. Tapping one opens it, tapping its plaque shows its details, or, while
- * things are being chosen, lets its name and cover or wood be changed. A long press picks it up.
+ * things are being chosen, lets its name, and the cover of a book, be changed. A long press picks it up.
  */
 class ShelfAdapter(
     private val onOpen: (File, View) -> Unit,
@@ -46,6 +46,18 @@ class ShelfAdapter(
 
     /** Shows on each book the shelf it stands on, for books gathered from several shelves. */
     var showPlaces = false
+
+    /**
+     * How much the bars that say how far the books are read show, 0..1: the miniature of a shelf has
+     * none, so they come as the shelf grows out of it, and go as it shrinks back into it.
+     */
+    private var bars = 1f
+
+    /** Shows the bars of the books on [shelf] [alpha] much, see [bars]. */
+    fun showBars(shelf: RecyclerView, alpha: Float) {
+        bars = alpha
+        for (i in 0 until shelf.childCount) (shelf.getChildViewHolder(shelf.getChildAt(i)) as? Holder)?.progress?.alpha = alpha
+    }
 
     /** What is being dragged; its places on the shelf stay empty while it is carried about. */
     var carried: Set<File> = emptySet()
@@ -235,7 +247,6 @@ class ShelfAdapter(
         val shelfSpec = spec()
         h.cover.binding = !f.isFolder
         h.cover.cased = f.isFolder
-        if (f.isFolder) h.cover.wood = Library.wood(ctx, f)
         // A book fills its place; a case rises above the books, through the gap the row leaves
         // at its top, up to the shelf above, and is wider by as much as that makes it larger.
         val rise = if (f.isFolder && shelfSpec.width > 0) shelfSpec.miniRise else 0
@@ -319,6 +330,7 @@ class ShelfAdapter(
         val begun = st.chapter > 0 || st.fraction > 0f
         h.progress.visibility = if (begun && st.percent > 0f && !plate.finished) View.VISIBLE else View.GONE
         h.progress.progress = (st.percent * 100).roundToInt()
+        h.progress.alpha = bars
         val known = Library.cachedMeta(ctx, f)
         val title = known?.title ?: f.nameWithoutExtension
         h.plaque.text = title

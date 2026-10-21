@@ -92,9 +92,6 @@ class RatioImageView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet
     /** Draws the depth of a bookcase (posts and the shadows inside it) over the image. */
     var cased by changes(false, ::invalidate)
 
-    /** The wood of the posts of a bookcase, see [cased]. */
-    var wood by changes(Wood.WALNUT, ::invalidate)
-
     private val shade = Paint()
     private val area = RectF()
 
@@ -107,11 +104,7 @@ class RatioImageView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet
         super.onDraw(canvas)
         area.set(0f, 0f, width.toFloat(), height.toFloat())
         if (binding) ShelfArt.drawBinding(canvas, area, shade)
-        if (cased) {
-            shade.colorFilter = wood.filter
-            ShelfArt.drawDepth(canvas, area, resources.displayMetrics.density, shade)
-            shade.colorFilter = null
-        }
+        if (cased) ShelfArt.drawDepth(canvas, area, resources.displayMetrics.density, shade)
     }
 }
 

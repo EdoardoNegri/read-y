@@ -80,7 +80,8 @@ class FlowEngine(
             throw IOException("The book has no readable content")
         }
         total = book.weights.sum().coerceAtLeast(1)
-        chapter = start.chapter.coerceIn(0, book.spine.lastIndex)
+        // A place written down while the page of the cover was still the first of the spine is one further on in it then.
+        chapter = (start.chapter - if (start.version < 2) book.skipped else 0).coerceIn(0, book.spine.lastIndex)
         pendingFraction = start.fraction
         // A book read to its end opens on its cover, which is where the pages that turn end.
         coverWanted = hasCover && start.percent >= Library.FINISHED_AT

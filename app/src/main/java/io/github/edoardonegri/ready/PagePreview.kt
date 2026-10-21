@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.os.Build
 import android.os.SystemClock
@@ -17,6 +18,7 @@ import java.io.InputStream
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
  * The page of a book as the reader would show it, in the settings, to see what they do: a sample
@@ -52,6 +54,14 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     private var scale = 1f
     private var screenW = 0
     private var screenH = 0
+
+    /**
+     * The brightness chosen for reading (ReaderSettings.brightness), 1..100, which the page is shown
+     * in: as much darker as the screen would be, while the rest of the settings stay as bright as the
+     * phone has them, as a window's brightness cannot be had for a part of it. -1 follows the phone.
+     */
+    var brightness by changes(-1, ::invalidate)
+    private val dimmer = Paint()
 
     /** The frame of brass around the screen. */
     private val rim = Paint().apply {
@@ -173,6 +183,11 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
 
     override fun dispatchDraw(canvas: Canvas) {
         super.dispatchDraw(canvas)
+        if (brightness in 1..99) {
+            // The light of the screen is seen about as its square root.
+            dimmer.color = Color.argb(((1 - sqrt(brightness / 100f)) * 255).roundToInt(), 0, 0, 0)
+            canvas.drawRect(screen.translationX, screen.translationY, screen.translationX + screenW * scale, screen.translationY + screenH * scale, dimmer)
+        }
         val half = rim.strokeWidth / 2
         canvas.drawRect(
             screen.translationX - half, screen.translationY - half,
