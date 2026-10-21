@@ -32,8 +32,8 @@ Notes for later, in no strict order. Tick a box when it is done. The file has tw
 # Code and general
 
 - [ ] **Improve the app in general.** Small polish, anything that feels rough when using it.
-- [ ] **Refactor.** The biggest files are `MainActivity.kt` (about 1,450 lines) and `Library.kt` (about 1,350 lines). Splitting what they do into smaller pieces would make later changes easier.
-- [ ] **Split `MainActivity.kt` first.** The dialogs, the About screen and the folder-access code are self-contained and could each move to their own file with little risk.
+- [ ] **Refactor.** The biggest files are `Library.kt` (about 1,750 lines), `MainActivity.kt` (about 1,120 lines since it was split) and `ReaderActivity.kt` (about 1,000 lines). Splitting what they do into smaller pieces would make later changes easier.
+- [x] **Split `MainActivity.kt` first.** Done: the About screen (`AboutDialog`), the folder access (`FolderAccess`), adding books and shelves (`ShelfAdding`), the details and editors the plaques open (`ShelfDetails`) and going into and out of a shelf (`ShelfZoom`) each have their own file. What is left in it is the shelf itself, choosing, searching and dragging; dragging (about 300 lines) could move out next.
 
 # Open ends
 
