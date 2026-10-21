@@ -195,11 +195,11 @@ class ReaderSettings(ctx: Context) {
 
     /**
      * Has the window of [act] drawn as many times a second as [refreshRate] asks for, as near as
-     * the screen can; or as often as the phone sees fit, for 0.
+     * the screen can; or as often as the phone sees fit, for 0, or if [normal] says so.
      */
-    fun refresh(act: Activity) {
+    fun refresh(act: Activity, normal: Boolean = false) {
         val lp = act.window.attributes
-        val mode = if (refreshRate == 0) null else displayOf(act)?.let { d ->
+        val mode = if (normal || refreshRate == 0) null else displayOf(act)?.let { d ->
             sameSize(d).minByOrNull { abs(it.refreshRate - refreshRate) }
         }
         lp.preferredDisplayModeId = mode?.modeId ?: 0

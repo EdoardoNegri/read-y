@@ -343,6 +343,8 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
 
     private fun coverChanged(on: Boolean) {
         onCover = on
+        // Before the book shuts over its last page: the screen is as quick as the phone makes it for that.
+        paceScreen()
         // The cover stands against the wall of the case, which shows round it; a page lies on its paper.
         if (on) root.background = wall else root.setBackgroundColor(s.litPalette.bg)
         if (!on) crease.box = null
@@ -458,7 +460,10 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         }
         val spot = BookOpening.Spot(at[0] + box.left, at[1] + box.top, box.width(), box.height(), picture, fit, binding = true)
         shuttingNow = true
-        shutting.shut(spot, left, s.litPalette.bg) { shuttingNow = false }
+        shutting.shut(spot, left, s.litPalette.bg) {
+            shuttingNow = false
+            paceScreen()
+        }
         // The layer of the book takes the place of the page in front, in the same frame.
         turner.stop()
     }
@@ -574,7 +579,8 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
      * which shows as a flicker.
      */
     private fun paceScreen() {
-        if (!hidden) s.refresh(this)
+        // The cover that ends the book is seen as it is, at the speed the phone chooses, as on the shelf.
+        if (!hidden) s.refresh(this, normal = onCover)
     }
 
     /** Shows the reader, once its book has opened on the shelf, and makes it a solid window again. */
@@ -754,6 +760,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         if (shuttingNow) {
             shuttingNow = false
             shutting.clear()
+            paceScreen()
         }
     }
 
