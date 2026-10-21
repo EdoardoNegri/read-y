@@ -471,7 +471,7 @@ class MainActivity : AppCompatActivity() {
         val settings = ReaderSettings(this)
         val paper = settings.lit(settings.palette.bg)
         // A book read to its end opens on its cover, so it is only enlarged out of its place: that
-        // cover is its last page, and stands against the wall of the case, in the warm light.
+        // cover is its last page, and stands against the wall of the case.
         val grown = !slide && !settings.vertical && Library.isFinished(this, f)
         if (Build.VERSION.SDK_INT >= 30) {
             // The reader starts at once, unseen over the shelf, and sets out the page while the
@@ -483,12 +483,12 @@ class MainActivity : AppCompatActivity() {
             // It opens in a window of its own, which the reader starting meanwhile does not hold up.
             // Where the menu stands over the cover is known from the last time the book was shown there.
             if (cover == null) return detached.slide(paper, f, settings.look, handoff)
-            detached.open(cover, paper, f, settings.look, handoff, grown, settings.lamp, if (grown) Library.endMenu(this, f) else null)
+            detached.open(cover, paper, f, settings.look, handoff, grown, if (grown) Library.endMenu(this, f) else null)
             if (grown) sharpen(f, detached::sharpen)
             return
         }
         if (cover == null) return opening.slideIn(paper, BookOpening.kept(f, settings.look)) { startActivity(reader) }
-        opening.open(cover, paper, if (grown) null else BookOpening.kept(f, settings.look), grown, lamp = settings.lamp) { startActivity(reader) }
+        opening.open(cover, paper, if (grown) null else BookOpening.kept(f, settings.look), grown) { startActivity(reader) }
         if (grown) sharpen(f) { runOnUiThread { opening.sharpen(it) } }
     }
 
@@ -554,7 +554,7 @@ class MainActivity : AppCompatActivity() {
         if (at < 0) showShelfOf(left.file) else shelf.scrollToPosition(at)
         val settings = ReaderSettings(this)
         // Left on its cover, at its end, a book only shrinks back into its place.
-        opening.close(left.page, settings.lit(settings.palette.bg), grown = !settings.vertical && Library.isFinished(this, left.file), settings.lamp, left.menu) {
+        opening.close(left.page, settings.lit(settings.palette.bg), grown = !settings.vertical && Library.isFinished(this, left.file), left.menu) {
             shelf.findViewHolderForAdapterPosition(adapter.indexOf(left.file))?.itemView?.findViewById(R.id.cover)
         }
     }

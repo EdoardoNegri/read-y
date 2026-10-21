@@ -211,14 +211,17 @@ class PageEngine(
     private fun showSingle() {
         resetZoom()
         // The cover is a picture of its own, whose colours are not turned round with those of print,
-        // and it stands against the wall of the case the book was taken from, not on paper.
+        // nor lie in the warm light, and it stands against the wall of the case the book was taken
+        // from, not on paper.
         val onCover = page >= count
         if (onCover) frame.background = null else frame.setBackgroundColor(s.litPalette.bg)
-        single.colorFilter = if (onCover) light(false, s.lamp) else filter
+        single.colorFilter = if (onCover) null else filter
         single.setImageBitmap(cache.get(page))
         placeCover()
         request(page)
         request(page + 1)
+        // Back from the cover is the last page, to be there when it is turned to rather than drawn after.
+        if (onCover) request(count - 1)
         report()
     }
 

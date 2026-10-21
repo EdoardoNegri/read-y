@@ -2,6 +2,7 @@ package io.github.edoardonegri.ready
 
 import android.os.Bundle
 import android.view.View
+import android.view.WindowManager
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
@@ -95,9 +96,19 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    /** The brightness chosen for reading is shown on the sample page alone, see PagePreview.brightness. */
+    /**
+     * The brightness chosen for reading is shown on the sample page alone, see PagePreview.brightness,
+     * as long as it is no brighter than the screen the settings are on. Chosen brighter, the settings
+     * are as bright as the reader will be, as a page cannot be shown brighter than its screen.
+     */
     private fun applyBrightness() {
+        val system = ReaderSettings.systemBrightness(this).coerceAtLeast(0.01f)
+        val chosen = if (s.brightness > 0) s.brightness / 100f else system
+        window.attributes = window.attributes.apply {
+            screenBrightness = if (chosen > system) chosen else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        }
         preview.brightness = s.brightness
+        preview.surroundings = maxOf(system, chosen)
     }
 
     private fun applyPage() = preview.apply()

@@ -57,10 +57,14 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
 
     /**
      * The brightness chosen for reading (ReaderSettings.brightness), 1..100, which the page is shown
-     * in: as much darker as the screen would be, while the rest of the settings stay as bright as the
-     * phone has them, as a window's brightness cannot be had for a part of it. -1 follows the phone.
+     * in: as much darker as the screen would be than [surroundings], while the rest of the settings
+     * stay as bright as they are, as a window's brightness cannot be had for a part of it. -1
+     * follows the phone.
      */
     var brightness by changes(-1, ::invalidate)
+
+    /** How bright the screen the settings are on is, 0..1, as the window brightness is told: what the page can be dimmed from. */
+    var surroundings by changes(1f, ::invalidate)
     private val dimmer = Paint()
 
     /** The frame of brass around the screen. */
@@ -183,9 +187,11 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
 
     override fun dispatchDraw(canvas: Canvas) {
         super.dispatchDraw(canvas)
-        if (brightness in 1..99) {
+        // The reader's screen is only ever as bright as the one it is shown on, or dimmer.
+        val relative = (brightness / 100f / surroundings.coerceAtLeast(MIN_LIGHT)).coerceAtMost(1f)
+        if (brightness > 0 && relative < 1f) {
             // The light of the screen is seen about as its square root.
-            dimmer.color = Color.argb(((1 - sqrt(brightness / 100f)) * 255).roundToInt(), 0, 0, 0)
+            dimmer.color = Color.argb(((1 - sqrt(relative)) * 255).roundToInt(), 0, 0, 0)
             canvas.drawRect(screen.translationX, screen.translationY, screen.translationX + screenW * scale, screen.translationY + screenH * scale, dimmer)
         }
         val half = rim.strokeWidth / 2
@@ -270,6 +276,9 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
 
         /** ReaderSettings.orientation for landscape. */
         const val LANDSCAPE = 2
+
+        /** The dimmest a screen is taken to be, as the dimmest a window can be told to be (ReaderSettings.light). */
+        const val MIN_LIGHT = 0.01f
 
         /** How wide the brass frame around the screen is, in dp. */
         const val RIM_DP = 2f

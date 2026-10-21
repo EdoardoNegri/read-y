@@ -55,8 +55,8 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     /** The name of the book, on the menu. */
     private lateinit var title: TextView
 
-    /** The back wall of a case, in the warm light, which the cover that ends the book stands against. */
-    private lateinit var wall: Drawable
+    /** The back wall of a case, which the cover that ends the book stands against. */
+    private val wall: Drawable by lazy { ShelfArt.wall(this) }
     private lateinit var pageTurn: PageTurnView
     private lateinit var info: PageInfoView
     private lateinit var turner: PageTurner
@@ -136,7 +136,12 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             insets
         }
         // Turned, the page has another shape, and what is around the text other places.
-        root.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob -> if (r - l != or - ol || b - t != ob - ot) arrangeInfo() }
+        root.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
+            if (r - l != or - ol || b - t != ob - ot) {
+                turned()
+                arrangeInfo()
+            }
+        }
         immersive()
 
         file = File(intent.getStringExtra(EXTRA_PATH) ?: "")
@@ -145,7 +150,6 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             leave()
             return
         }
-        wall = ShelfArt.wall(this, s.lamp)
         state = Library.state(this, file)
         finished = state.percent >= Library.FINISHED_AT
         pace = ReadingPace(this, ReadingPace.kindOf(file))
@@ -402,6 +406,15 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     private var endPicture: Bitmap? = null
     private var endPictureAsked = false
 
+    /**
+     * Near the end of the book, [percent] of it, reads the cover that ends it, for the book to shut
+     * over its last page. Not while the book still opens on the shelf, unseen: the shelf reads the
+     * cover too for a book that opens on it, and the two would hold each other up.
+     */
+    private fun readEndPictureIfNear(percent: Float) {
+        if (!endPictureAsked && !hidden && percent >= END_NEAR && engine?.hasCover == true) readEndPicture()
+    }
+
     /** Reads the cover that ends the book in the background, see [endPicture]. */
     private fun readEndPicture() {
         endPictureAsked = true
@@ -449,7 +462,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         }
         val spot = BookOpening.Spot(at[0] + box.left, at[1] + box.top, box.width(), box.height(), picture, fit, binding = true)
         shuttingNow = true
-        shutting.shut(spot, left, s.litPalette.bg, s.lamp) { shuttingNow = false }
+        shutting.shut(spot, left, s.litPalette.bg) { shuttingNow = false }
         // The layer of the book takes the place of the page in front, in the same frame.
         turner.stop()
     }
@@ -460,7 +473,8 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
      */
     private fun pictureEndMenu(h: BookOpening.Handoff, e: ReaderEngine) {
         showPosition(state.chapter, 1f, e is PageEngine, null, null)
-        menu.doOnLayout { h.menuPictured(pictureMenu()?.let(::endMenu)) }
+        // The shelf is upright: a menu laid out sideways, as the reader is turned, is none for it.
+        menu.doOnLayout { h.menuPictured(if (root.width < root.height) pictureMenu()?.let(::endMenu) else null) }
     }
 
     /**
@@ -620,6 +634,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     private fun reveal() {
         if (!hidden || isFinishing) return
         hidden = false
+        readEndPictureIfNear(state.percent)
         paceScreen()
         window.attributes = window.attributes.apply { alpha = 1f }
         window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
@@ -680,6 +695,8 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         // On the cover that ends the book the shelf closes the book as it opened it, from the menu
         // under the cover, which goes back into the row of the shelf: the screen is pictured as it is.
         if (onCover && menu.isVisible && root.width < root.height) return capture(::closeOnMenu)
+        // Seen sideways, the cover would be shut into its place on the shelf lying on its side: the shelf is just shown.
+        if (onCover && root.width > root.height) return goBack(null)
         // Otherwise the cover is seen whole.
         engine?.let { if (onCover) coverRoom(it, 0) }
         if (!menu.isVisible) return capture(::upright)
@@ -755,9 +772,8 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             2 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
-        // The page is shown in the warm light, see ReaderSettings.litPalette, and so is the wall
-        // the cover that ends the book stands against.
-        wall = ShelfArt.wall(this, s.lamp)
+        // The page is shown in the warm light, see ReaderSettings.litPalette; the cover that ends
+        // the book is not, nor is the wall it stands against.
         if (onCover) root.background = wall else root.setBackgroundColor(s.litPalette.bg)
         turner.stop()
         // The back of the sheet lies in the warm light like the page, which it is drawn over.
@@ -781,6 +797,18 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
 
     /** How the book was last laid out, see [applyLayout]. */
     private var laidOutAs = ""
+
+    /**
+     * The page has another shape, as the phone was turned: a page turning, or a book shutting over
+     * its last page, was pictured for the shape it had, and would be shown stretched, or stuck.
+     */
+    private fun turned() {
+        turner.stop()
+        if (shuttingNow) {
+            shuttingNow = false
+            shutting.clear()
+        }
+    }
 
     /** Works out where what is shown around the text goes, and leaves the text the room for it. */
     private fun arrangeInfo() {
@@ -871,13 +899,14 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         // A book of fixed pages is at the page it shows, which it counts as its chapter.
         val paged = engine is PageEngine
         turner.onPosition(chapter, fraction)
-        // Near the end, the cover that ends the book is read, for the book to shut over its last page.
-        if (!endPictureAsked && percent >= END_NEAR && engine?.hasCover == true) readEndPicture()
+        readEndPictureIfNear(percent)
         // How long each page is read for tells how fast the reader reads, and how long the rest will take.
         if (bookPages > 0 && !seeking) pace.at(percent * bookPages, SystemClock.elapsedRealtime())
+        // Where pages turn, only the cover that ends the book is the end of it, whatever the last page makes of a long book.
+        val placed = if (engine?.hasCover == true && percent < 1f) minOf(percent, Library.LAST_PAGE_AT) else percent
         state.chapter = chapter
         state.fraction = fraction
-        state.percent = percent
+        state.percent = placed
         state.lastRead = System.currentTimeMillis()
         // Scrolling reports its place several times a second; writing each one down would keep
         // the storage busy for nothing. It is saved now and then, and whenever the reader leaves.
@@ -885,7 +914,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         if (state.lastRead - savedAt > SAVE_EVERY_MS) savePosition()
         // The last page finishes the book and leaving it unfinishes it again: the shelf shows that
         // from what is saved, so a change is written down at once.
-        if ((percent >= Library.FINISHED_AT) != finished) {
+        if ((placed >= Library.FINISHED_AT) != finished) {
             finished = !finished
             (title.background as PlaqueDrawable).finished = finished
             savePosition()

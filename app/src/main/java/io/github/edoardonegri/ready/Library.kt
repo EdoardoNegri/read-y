@@ -199,6 +199,13 @@ object Library {
     /** How far into a book it counts as read to the end: the last page, with room for rounding. */
     const val FINISHED_AT = 0.999f
 
+    /**
+     * The most a page counts for that is not the cover that ends the book: counted in pages, the last
+     * page of a book of a thousand is 99.9% of it, which would finish the book before its cover is
+     * turned to, and keep it finished after the reader has gone back from the cover.
+     */
+    const val LAST_PAGE_AT = FINISHED_AT - 0.001f
+
     private const val WIDGET = "widget"
     private const val WIDGET_ORDER = "widgetOrder"
     private const val BIN = ".bin"

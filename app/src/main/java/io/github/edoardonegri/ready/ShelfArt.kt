@@ -2,14 +2,11 @@ package io.github.edoardonegri.ready
 
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffColorFilter
 import android.graphics.RadialGradient
 import android.graphics.Rect
 import android.graphics.RectF
@@ -459,12 +456,8 @@ object ShelfArt {
     private const val END_TOP_DP = 14
 
     /**
-     * The back wall of a case, as the shelves show it (shelf_back.xml), seen in the light of the
-     * [lamp] (ReaderSettings.lamp), as the page is where it stands behind the cover that ends a
-     * book: a new one each time, as each is drawn at its own size.
+     * The back wall of a case, as the shelves show it (shelf_back.xml), where it stands behind the
+     * cover that ends a book: a new one each time, as each is drawn at its own size.
      */
-    fun wall(ctx: Context, lamp: Int = Color.WHITE): Drawable =
-        ContextCompat.getDrawable(ctx, R.drawable.shelf_back)!!.mutate().apply {
-            colorFilter = if (lamp == Color.WHITE) null else PorterDuffColorFilter(lamp, PorterDuff.Mode.MULTIPLY)
-        }
+    fun wall(ctx: Context): Drawable = ContextCompat.getDrawable(ctx, R.drawable.shelf_back)!!.mutate()
 }

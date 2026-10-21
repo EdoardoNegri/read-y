@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import android.view.Display
 import android.view.Window
 import android.view.WindowManager
@@ -243,6 +244,13 @@ class ReaderSettings(ctx: Context) {
         /** How many times a second the screen of [act] can be drawn, from the least; one rate or none if it cannot be chosen. */
         fun refreshRates(act: Activity): List<Int> =
             displayOf(act)?.let { d -> sameSize(d).map { it.refreshRate.roundToInt() }.distinct().sorted() }.orEmpty()
+
+        /** How bright the phone has its screen, 0..1, as the brightness of a window is told; 1 if that cannot be told. */
+        fun systemBrightness(ctx: Context): Float = try {
+            Settings.System.getInt(ctx.contentResolver, Settings.System.SCREEN_BRIGHTNESS) / 255f
+        } catch (e: Settings.SettingNotFoundException) {
+            1f
+        }
 
         /** Where the fonts imported from the phone are kept. */
         fun fontsDir(ctx: Context) = File(ctx.filesDir, "fonts")

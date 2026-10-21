@@ -380,19 +380,28 @@ class FlowEngine(
      * Tells the page to show the cover over the last page, or to hide it again: it fills its box,
      * and round it the page shows nothing, for the wall of the case behind the web view to be seen.
      */
-    private fun cover(on: Boolean) {
+    private fun cover(on: Boolean, then: () -> Unit = {}) {
         web.setBackgroundColor(if (on) Color.TRANSPARENT else s.litPalette.bg)
         val d = act.resources.displayMetrics.density
         val r = coverBox
         val room = if (r.isEmpty) "null" else "[${r.left / d},${r.top / d},${r.width() / d},${r.height() / d}]"
-        web.evaluateJavascript("window.__r&&__r.cover($on,$room)", null)
+        web.evaluateJavascript("window.__r&&__r.cover($on,$room)") { if (!closed) then() }
     }
 
-    /** Shows the cover over the last page, as the book closed, or takes it away again to show the page it was over. */
+    /**
+     * Shows the cover over the last page, as the book closed, or takes it away again to show the
+     * page it was over. Taken away, the host is told once the page has shown itself: told sooner,
+     * it would picture the page for the turn back from the cover while that is still hidden, and
+     * turn over a blank one.
+     */
     private fun showCover(on: Boolean) {
         atCover = on
-        cover(on)
-        if (on) host.onPosition(chapter, lastFraction, 1f, null, null) else reportPage()
+        if (on) {
+            cover(true)
+            host.onPosition(chapter, lastFraction, 1f, null, null)
+        } else {
+            cover(false) { if (!atCover) reportPage() }
+        }
     }
 
     /** Tells the host the page last laid out, as it is when the cover is not over it. */
@@ -1069,6 +1078,8 @@ class FlowEngine(
       shutImg.style.setProperty('object-position', '50% 50%', 'important');
       shutImg.style.setProperty('max-width', 'none', 'important');
       shutImg.style.setProperty('max-height', 'none', 'important');
+      // Not in the warm light the pictures of the book lie in (see lamp): the cover that ends it is seen as it is.
+      shutImg.style.setProperty('filter', 'none', 'important');
       shut.appendChild(shutImg);
       document.documentElement.appendChild(shut);
     }
