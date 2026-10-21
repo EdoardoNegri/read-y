@@ -14,6 +14,7 @@ import android.view.WindowManager
 import androidx.core.content.edit
 import java.io.File
 import kotlin.math.abs
+import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.roundToInt
 import kotlin.properties.ReadWriteProperty
@@ -183,7 +184,7 @@ class ReaderSettings(ctx: Context) {
         val lp = window.attributes
         val wanted =
             if (brightness < 0) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-            else (brightness / 100f).coerceIn(0.01f, 1f)
+            else lightOf(brightness)
         // Told only of another brightness: every telling has the phone lay the window out anew.
         if (lp.screenBrightness != wanted) {
             lp.screenBrightness = wanted
@@ -249,6 +250,25 @@ class ReaderSettings(ctx: Context) {
         /** How many times a second the screen of [act] can be drawn, from the least; one rate or none if it cannot be chosen. */
         fun refreshRates(act: Activity): List<Int> =
             displayOf(act)?.let { d -> sameSize(d).map { it.refreshRate.roundToInt() }.distinct().sorted() }.orEmpty()
+
+        /**
+         * The brightness a window is told for the brightness [percent] chosen, 1..100: that is the
+         * place on the phone's own brightness slider, which is not even in light, as the eye is not;
+         * the window is told the light itself (0..1), as the phone works it out from its slider
+         * (android.util.BrightnessUtils). So 30 here is as bright as 30 on the phone's slider.
+         */
+        fun lightOf(percent: Int): Float {
+            val place = (percent / 100f).coerceIn(0f, 1f)
+            val light = if (place <= SLIDER_R) (place / SLIDER_R).let { it * it } else exp((place - SLIDER_C) / SLIDER_A) + SLIDER_B
+            return (light / SLIDER_TOP).coerceIn(0.01f, 1f)
+        }
+
+        // The curve of the phone's brightness slider, between its place and the light it stands for.
+        private const val SLIDER_R = 0.5f
+        private const val SLIDER_A = 0.17883277f
+        private const val SLIDER_B = 0.28466892f
+        private const val SLIDER_C = 0.55991073f
+        private const val SLIDER_TOP = 12f
 
         /** How bright the phone has its screen, 0..1, as the brightness of a window is told; 1 if that cannot be told. */
         fun systemBrightness(ctx: Context): Float = try {

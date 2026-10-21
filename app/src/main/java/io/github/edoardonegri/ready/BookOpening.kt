@@ -493,6 +493,9 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         steady(true)
     }
 
+    /** The display mode and rate the window of the activity asked for before the book moved, see [steady]. */
+    private var kept: Pair<Int, Float>? = null
+
     /**
      * Has the screen drawn as often a second as it can while the book opens or closes ([on]), or
      * as the app otherwise asks. A screen left to change its speed by itself may do so in the
@@ -501,6 +504,24 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
     private fun steady(on: Boolean) {
         val mode = if (on) ReaderSettings.fastestMode(act) else 0
         val lp = (if (detached) layer.layoutParams as? WindowManager.LayoutParams else act.window.attributes) ?: return
+        if (!detached) {
+            // The reader may hold its window to a slow rate, to save the battery; the book moves at the
+            // fastest the screen has while it moves, which a slow rate would draw out to several times as long.
+            if (on == (kept != null)) return
+            if (on) {
+                kept = lp.preferredDisplayModeId to lp.preferredRefreshRate
+                lp.preferredDisplayModeId = mode
+                lp.preferredRefreshRate = 0f
+            } else {
+                kept?.let { (id, rate) ->
+                    lp.preferredDisplayModeId = id
+                    lp.preferredRefreshRate = rate
+                }
+                kept = null
+            }
+            act.window.attributes = lp
+            return
+        }
         if (lp.preferredDisplayModeId == mode) return
         lp.preferredDisplayModeId = mode
         if (!detached) {
@@ -625,7 +646,9 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
                 // the last one, but never by much more than a frame's: where the phone is held up for a
                 // moment, as by the reader starting behind the book, the book waits rather than leaps.
                 if (last != 0L) {
-                    val by = if (lasts > 0f) ((now - last) / 1_000_000f).coerceAtMost(MAX_STEP_MS) / lasts else 1f
+                    // Never by much more than about two frames of the screen, which is slower than 60 a second where it is held so.
+                    val frame = 1000f / (layer.display?.refreshRate ?: 60f).coerceAtLeast(1f)
+                    val by = if (lasts > 0f) ((now - last) / 1_000_000f).coerceAtMost(maxOf(MAX_STEP_MS, frame * 2f)) / lasts else 1f
                     t = if (to > from) (t + by).coerceAtMost(to) else (t - by).coerceAtLeast(to)
                     pose(t)
                 }
@@ -1328,8 +1351,11 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         /** The endpaper on the inside of the cover. */
         private const val INSIDE = 0xFFD9CDB4.toInt()
 
-        /** How thick the board of a cover is, a part of the height of the book. */
-        private const val THICKNESS = 0.03f
+        /**
+         * How thick the board of a cover is, a part of the height of the book: that of a hardcover, a few
+         * millimetres on a book of about twenty centimetres, whatever the book holds.
+         */
+        private const val THICKNESS = 0.013f
 
         /** How dark the inside of the cover is as it stands edge-on, against facing the eye. */
         private const val INSIDE_DARK = 0.7f

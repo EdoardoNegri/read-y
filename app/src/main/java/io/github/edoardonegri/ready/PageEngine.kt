@@ -42,6 +42,9 @@ class PageEngine(
         override fun sizeOf(key: Int, value: Bitmap) = value.byteCount
     }
     private val pending = HashSet<Int>()
+
+    /** The pages that could not be drawn once, see [request]. */
+    private val failed = HashSet<Int>()
     private val ratios = FloatArray(count) { source.firstRatio }
     private var generation = 0
     /**
@@ -150,7 +153,9 @@ class PageEngine(
             main.post {
                 if (closed || gen != generation) return@post
                 pending.remove(i)
-                val result = bmp ?: return@post
+                // A page that could not be drawn is tried once more, rather than left blank until it is turned away from and back to.
+                val result = bmp ?: return@post run { if (failed.add(i)) main.postDelayed({ if (!closed && gen == generation) request(i) }, RETRY_MS) }
+                failed.remove(i)
                 cache.put(i, result)
                 ratios[i] = result.height.toFloat() / result.width
                 if (!s.vertical) {
@@ -463,6 +468,9 @@ class PageEngine(
     }
 
     private companion object {
+        /** How long a page that could not be drawn waits to be tried again, in ms. */
+        const val RETRY_MS = 400L
+
         const val MIN_ZOOM = 1f
         const val MAX_ZOOM = 5f
 

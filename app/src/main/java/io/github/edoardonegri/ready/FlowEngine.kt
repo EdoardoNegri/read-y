@@ -146,6 +146,8 @@ class FlowEngine(
 
         override fun onPageFinished(view: WebView, url: String?) {
             if (injected || closed) return
+            // A page that finished loading after another was asked for is not the one to be set out.
+            if (url != null && Uri.parse(url).path.orEmpty().removePrefix("/") != book.spine[chapter]) return
             injected = true
             view.evaluateJavascript(SCRIPT, null)
             val anchor = pendingAnchor?.let { JSONObject.quote(it) } ?: "null"
@@ -252,6 +254,7 @@ class FlowEngine(
      * going blank for a moment.
      */
     private fun load() {
+        loadRetries = 0
         if (!ready) return show()
         ready = false
         host.hold { if (!closed) show() }
@@ -270,7 +273,16 @@ class FlowEngine(
         web.setBackgroundColor(s.litPalette.bg)
         web.isVerticalScrollBarEnabled = s.vertical
         web.loadUrl("https://$HOST/" + Uri.encode(book.spine[chapter], "/"))
+        // A chapter that is never laid out leaves the page blank: it is asked for once more, and shown as it is if that fails too.
+        val serial = ++loadSerial
+        web.postDelayed({
+            if (closed || ready || serial != loadSerial) return@postDelayed
+            if (loadRetries++ < 1) show() else reveal()
+        }, LOAD_WAIT_MS)
     }
+
+    private var loadSerial = 0
+    private var loadRetries = 0
 
     private fun css(color: Int) = String.format("#%06X", color and 0xFFFFFF)
 
@@ -455,7 +467,10 @@ class FlowEngine(
             return
         }
         resetZoom()
+        val from = chapter
         web.evaluateJavascript("window.__r?__r.step($direction,${s.slidePages && s.vertical}):null") { moved ->
+            // Another step asked for meanwhile has taken the page on already, or is loading the next chapter.
+            if (chapter != from || !ready) return@evaluateJavascript
             val target = chapter + direction
             if (moved == "false" && !closed) {
                 if (target in book.spine.indices) {
@@ -841,6 +856,9 @@ class FlowEngine(
 
         /** What in [config] is about the light the page is in, which it is not laid out by. */
         private val LIGHT_KEYS = listOf("bg", "fg", "link", "themed", "lamp")
+
+        /** How long a chapter is waited for to be laid out, before it is asked for again, in ms. */
+        private const val LOAD_WAIT_MS = 4000L
 
         /** How long a layout is waited for, before another is asked for regardless, in ms. */
         private const val RELAYOUT_WAIT_MS = 400L

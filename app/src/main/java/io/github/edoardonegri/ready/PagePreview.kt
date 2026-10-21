@@ -18,7 +18,7 @@ import java.io.InputStream
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
+import kotlin.math.pow
 
 /**
  * The page of a book as the reader would show it, in the settings, to see what they do: a sample
@@ -195,10 +195,10 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     override fun dispatchDraw(canvas: Canvas) {
         super.dispatchDraw(canvas)
         // The reader's screen is only ever as bright as the one it is shown on, or dimmer.
-        val relative = (brightness / 100f / surroundings.coerceAtLeast(MIN_LIGHT)).coerceAtMost(1f)
-        if (brightness > 0 && relative < 1f) {
-            // The light of the screen is seen about as its square root.
-            dimmer.color = Color.argb(((1 - sqrt(relative)) * 255).roundToInt(), 0, 0, 0)
+        val relative = if (brightness > 0) (ReaderSettings.lightOf(brightness) / surroundings.coerceAtLeast(MIN_LIGHT)).coerceAtMost(1f) else 1f
+        if (relative < 1f) {
+            // The colours on the screen are the light they give to the power of 2.2, about.
+            dimmer.color = Color.argb(((1 - relative.pow(1 / SCREEN_GAMMA)) * 255).roundToInt(), 0, 0, 0)
             canvas.drawRect(screen.translationX, screen.translationY, screen.translationX + screenW * scale, screen.translationY + screenH * scale, dimmer)
         }
         val half = rim.strokeWidth / 2
@@ -286,6 +286,9 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
 
         /** The dimmest a screen is taken to be, as the dimmest a window can be told to be (ReaderSettings.light). */
         const val MIN_LIGHT = 0.01f
+
+        /** What a screen's colours are raised to, to make the light they give. */
+        const val SCREEN_GAMMA = 2.2f
 
         /** How wide the brass frame around the screen is, in dp. */
         const val RIM_DP = 2f

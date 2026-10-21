@@ -1375,10 +1375,14 @@ object Library {
         // A place is always told as the spine is counted now.
         val o = JSONObject().put("chapter", s.chapter).put("fraction", s.fraction.toDouble())
             .put("percent", s.percent.toDouble()).put("lastRead", s.lastRead).put("v", BookState.VERSION)
+        val was = isFinished(ctx, f)
         synchronized(statesLock) {
             statePrefs(ctx).edit { putString(f.path, o.toString()) }
             states?.put(f.path, s.copy(version = BookState.VERSION))
         }
+        // Read to its end, or taken back from it, the plaque of the book is of another metal on the
+        // miniatures of the shelves it stands on, which are drawn anew for that.
+        if (was != (s.percent >= FINISHED_AT)) touched(f)
     }
 
     /**
