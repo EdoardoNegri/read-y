@@ -165,9 +165,6 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
     /** Whether the page has its print, see [print]. */
     private var printed = false
 
-    /** Whether the page opening has no book around it, see [open]. */
-    private var bare = false
-
     /**
      * Whether the book is only enlarged out of its place on the shelf, its cover as it is, without
      * opening: it ends as the cover that ends a book read to its end, over the whole screen. The
@@ -234,16 +231,15 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
     /**
      * Opens the book whose cover is shown by [from], on paper of the colour [paperColor] with
      * [print] on it, a picture of the page as the reader shows it, if there is one; [then] is
-     * called when the page fills the screen, which it goes on doing until [clear]. A [bare] page,
-     * with no book around it, only grows out of the middle of [from] until it fills the screen.
+     * called when the page fills the screen, which it goes on doing until [clear].
      */
     fun open(
-        from: View, paperColor: Int, print: Bitmap?, bare: Boolean, grown: Boolean = false, menu: EndMenu? = null,
+        from: View, paperColor: Int, print: Bitmap?, grown: Boolean = false, menu: EndMenu? = null,
         lamp: Int = Color.WHITE, then: () -> Unit,
     ) {
         val spot = spot(from) ?: return then()
         if (grown) spot.scene = pictureScene(from, spot.row)
-        open(spot, paperColor, print, bare, grown, menu, lamp, then)
+        open(spot, paperColor, print, grown, menu, lamp, then)
     }
 
     /**
@@ -254,12 +250,11 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
      * the warm light of the [lamp] the reader shows that wall in (ReaderSettings.lamp).
      */
     fun open(
-        spot: Spot, paperColor: Int, print: Bitmap?, bare: Boolean, grown: Boolean = false, menu: EndMenu? = null,
+        spot: Spot, paperColor: Int, print: Bitmap?, grown: Boolean = false, menu: EndMenu? = null,
         lamp: Int = Color.WHITE, then: () -> Unit,
     ) {
         ticker = null
         sliding = false
-        this.bare = bare
         this.grown = grown
         book.clipBounds = null
         endMenu = if (grown) menu else null
@@ -278,8 +273,8 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         printed = print != null
         printedAt = 0f
         cover.alpha = 1f
-        cover.visibility = if (bare) View.GONE else View.VISIBLE
-        edge.visibility = if (grown) View.GONE else cover.visibility
+        cover.visibility = View.VISIBLE
+        edge.visibility = if (grown) View.GONE else View.VISIBLE
         sized {
             if (!place(spot)) return@sized then()
             pose(0f)
@@ -301,7 +296,6 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         light(if (grown) lamp else Color.WHITE)
         page.setImageBitmap(left)
         page.alpha = 1f
-        bare = false
         // Shown as it was left, over the whole screen, until the shelf is laid out.
         this.grown = false
         book.clipBounds = null
@@ -356,7 +350,6 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         page.setImageBitmap(left)
         page.setPadding(0, 0, 0, 0)
         page.alpha = 1f
-        bare = false
         grown = false
         book.clipBounds = null
         endMenu = null
@@ -387,7 +380,6 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
     fun slideIn(paperColor: Int, print: Bitmap?, then: () -> Unit) {
         ticker = null
         sliding = true
-        bare = false
         grown = false
         book.clipBounds = null
         endMenu = null
@@ -560,13 +552,6 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         y = (spot.y - origin[1]).toFloat()
         w = spot.w.toFloat()
         h = spot.h.toFloat()
-        // A bare page grows out of nothing, in the middle of where it comes from.
-        if (bare) {
-            x += w / 2
-            y += h / 2
-            w = 0f
-            h = 0f
-        }
         // The cover the shelf shows; a book that only grows takes the one it was given as large as it grows, if it was.
         // It is given its picture once it is told how to lay it out: given it before, it
         // would lay it out as it did the last book, until it is laid out anew.
@@ -768,8 +753,8 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
             }
             return
         }
-        // A bare page grows all the way through; a book's only once its cover has begun to open.
-        val zoom = if (bare) EASE.getInterpolation(t) else zoom(t)
+        // The page grows only once the cover has begun to open.
+        val zoom = zoom(t)
         val angle = angle(t)
         // Past the upright, it is the inside of the board that shows, and its front stands edge-on, unseen.
         cover.rotationY = -angle.coerceAtMost(90f)
@@ -1081,7 +1066,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
          * as soon as the reader has pictured it.
          */
         fun open(
-            from: View, paperColor: Int, file: File, look: String, handoff: Handoff, bare: Boolean = false, grown: Boolean = false,
+            from: View, paperColor: Int, file: File, look: String, handoff: Handoff, grown: Boolean = false,
             lamp: Int = Color.WHITE, known: EndMenu? = null,
         ) {
             val screen = act.window.decorView
@@ -1091,27 +1076,27 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
                 // A cover that only grows raises the menu of the reader as it does. Where the menu is
                 // known, from the last time the book was shown, it grows at once, and what is on the
                 // menu comes onto it once the reader has pictured that.
-                open(from, paperColor, null, bare, true, known, lamp, handoff::opened)
+                open(from, paperColor, null, true, known, lamp, handoff::opened)
                 handoff.whenMenu(WAIT_MS) { menu -> if (menu?.picture != null) thread.post { opening?.menuCame(menu) } }
             } else if (grown) {
                 // Else it waits a moment for the reader to picture it.
-                handoff.whenMenu(MENU_WAIT_MS) { menu -> open(from, paperColor, null, bare, true, menu, lamp, handoff::opened) }
+                handoff.whenMenu(MENU_WAIT_MS) { menu -> open(from, paperColor, null, true, menu, lamp, handoff::opened) }
             } else {
-                open(from, paperColor, kept(file, look), bare, false, null, lamp, handoff::opened)
+                open(from, paperColor, kept(file, look), false, null, lamp, handoff::opened)
             }
             handoff.whenPictured { print -> if (print != null) thread.post { opening?.print(print) } }
         }
 
         /** Opens the book whose cover is shown by [from], as [BookOpening.open] does; [then] is called on the main thread. */
         fun open(
-            from: View, paperColor: Int, print: Bitmap?, bare: Boolean, grown: Boolean = false, menu: EndMenu? = null,
+            from: View, paperColor: Int, print: Bitmap?, grown: Boolean = false, menu: EndMenu? = null,
             lamp: Int = Color.WHITE, then: () -> Unit,
         ) {
             val spot = spot(from) ?: return then()
             // The shelf around a book that only grows, which it is looked at closer as it grows; pictured here, where the shelf is.
             if (grown) spot.scene = pictureScene(from, spot.row)
             play(then) { o, done ->
-                o.open(spot, paperColor, print, bare, grown, menu, lamp, done)
+                o.open(spot, paperColor, print, grown, menu, lamp, done)
                 sharp?.let { if (grown) o.sharpen(it) }
             }
         }

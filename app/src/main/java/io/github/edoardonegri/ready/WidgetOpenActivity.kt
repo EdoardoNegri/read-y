@@ -138,7 +138,7 @@ class WidgetOpenActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT < 30) {
             val opening = BookOpening(this)
             val kept = BookOpening.kept(book, settings.look)
-            if (cover == null) opening.slideIn(paper, kept) { read(book) } else opening.open(cover, paper, kept, bare = false) { read(book) }
+            if (cover == null) opening.slideIn(paper, kept) { read(book) } else opening.open(cover, paper, kept) { read(book) }
             return
         }
         // The reader starts at once, unseen over the book opening, and sets out its page

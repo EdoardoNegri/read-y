@@ -83,7 +83,6 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        val tdbg = android.os.SystemClock.uptimeMillis()
         super.onCreate(savedInstanceState)
         s = ReaderSettings(this)
         setContentView(R.layout.activity_reader)
@@ -150,7 +149,6 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         state = Library.state(this, file)
         finished = state.percent >= Library.FINISHED_AT
         pace = ReadingPace(this, ReadingPace.kindOf(file))
-        android.util.Log.d("TDBG", "before-engine " + (android.os.SystemClock.uptimeMillis() - tdbg))
         val opened = try {
             if (Library.isFlowing(file)) FlowEngine(this, file, s, state, this)
             else PageEngine(this, file, s, state, this)
@@ -158,7 +156,6 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             unreadable()
             return
         }
-        android.util.Log.d("TDBG", "after-engine " + (android.os.SystemClock.uptimeMillis() - tdbg))
         engine = opened
         content.addView(opened.view, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         content.listener = this
@@ -183,7 +180,6 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             }
         }
         findViewById<ImageButton>(R.id.back).setOnClickListener { leave() }
-        android.util.Log.d("TDBG", "before-chapters " + (android.os.SystemClock.uptimeMillis() - tdbg))
         setUpChapters(opened)
         findViewById<ImageButton>(R.id.settings).setOnClickListener {
             settingsOpened = true
@@ -232,14 +228,12 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         })
 
         applyBrightness()
-        android.util.Log.d("TDBG", "before-layout " + (android.os.SystemClock.uptimeMillis() - tdbg))
         applyLayout()
         // Once the page is set out and drawn, unseen, the book opens on the shelf onto a picture of
         // it (see shown), and the reader shows itself when the book is open; not later than this
         // all the same, should the page never be set out.
         if (handoff != null) root.postDelayed({ pictured(null) }, SHOW_WAIT_MS)
         // Opening on its cover, a book has the menu picture ready for the cover that grows on the shelf.
-        android.util.Log.d("TDBG", "end " + (android.os.SystemClock.uptimeMillis() - tdbg))
         if (handoff != null && finished && opened.hasCover) pictureEndMenu(handoff, opened)
         if (!s.hintShown) {
             s.hintShown = true

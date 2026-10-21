@@ -208,7 +208,6 @@ class MainActivity : AppCompatActivity() {
         // the open book of the top rail goes on with that. Only a book the widget opened leads
         // to the shelf it stands on.
         if (savedInstanceState == null) asked = asked(intent)
-        if (savedInstanceState == null) goOn = intent.action == ContinueShortcut.ACTION
     }
 
     // While a book opens and its reader gets ready unseen over the shelf, the shelf is not tapped:
@@ -219,7 +218,6 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         asked(intent)?.let { asked = it }
-        if (intent.action == ContinueShortcut.ACTION) goOn = true
     }
 
     override fun onResume() {
@@ -234,17 +232,9 @@ class MainActivity : AppCompatActivity() {
         BookOpening.left = null
         if (left != null && SystemClock.uptimeMillis() - left.at < BookOpening.LEFT_MS) closeBook(left) else opening.clear()
         detached.clear()
-        // Asked by the shortcut on the app's icon, it goes on with the book read last, once the shelf is laid out.
-        if (goOn) {
-            goOn = false
-            shelf.post { if (!isFinishing) resume() }
-        }
         val app = applicationContext
         Library.io.execute { ContinueShortcut.refresh(app) }
     }
-
-    /** Whether the shortcut on the app's icon asked to go on with the book read last (ContinueShortcut). */
-    private var goOn = false
 
     /**
      * A book that was opened on the home-screen widget, which the reader is now left from: the
@@ -491,12 +481,12 @@ class MainActivity : AppCompatActivity() {
             // It opens in a window of its own, which the reader starting meanwhile does not hold up.
             // Where the menu stands over the cover is known from the last time the book was shown there.
             if (cover == null) return detached.slide(paper, f, settings.look, handoff)
-            detached.open(cover, paper, f, settings.look, handoff, false, grown, settings.lamp, if (grown) Library.endMenu(this, f) else null)
+            detached.open(cover, paper, f, settings.look, handoff, grown, settings.lamp, if (grown) Library.endMenu(this, f) else null)
             if (grown) sharpen(f, detached::sharpen)
             return
         }
         if (cover == null) return opening.slideIn(paper, BookOpening.kept(f, settings.look)) { startActivity(reader) }
-        opening.open(cover, paper, if (grown) null else BookOpening.kept(f, settings.look), false, grown, lamp = settings.lamp) { startActivity(reader) }
+        opening.open(cover, paper, if (grown) null else BookOpening.kept(f, settings.look), grown, lamp = settings.lamp) { startActivity(reader) }
         if (grown) sharpen(f) { runOnUiThread { opening.sharpen(it) } }
     }
 

@@ -22,7 +22,7 @@ import kotlin.math.roundToInt
  * to go on with.
  */
 object ContinueShortcut {
-    /** What the shortcut asks for; the bookshelf, which it once opened, goes on with the book read last for it. */
+    /** What the shortcut asks for, as a shortcut must ask for something. */
     const val ACTION = "io.github.edoardonegri.ready.CONTINUE"
 
     private const val ID = "continue"

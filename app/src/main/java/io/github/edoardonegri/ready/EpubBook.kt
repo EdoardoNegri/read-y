@@ -118,6 +118,8 @@ class EpubBook private constructor(private val zip: ZipArchive) : FlowBook {
             }
         }
         if (coverPath == null) coverPath = coverId?.let { manifest[it] }
+        // Newer books name the page of their cover among the landmarks of their navigation document.
+        if (coverPage == null) coverPage = nav?.let(::landmarkCover)
         // Most books begin with a page that holds nothing but their cover. The shelf shows the cover
         // already, and the reader ends the book on it: it is not one of the pages to read.
         spine.firstOrNull()?.takeIf { spine.size > 1 }?.let { first ->
@@ -169,6 +171,33 @@ class EpubBook private constructor(private val zip: ZipArchive) : FlowBook {
         return if (isCover) picture else null
     }
 
+    /** The page the navigation document [path] names the cover among its landmarks; null if it names none. */
+    private fun landmarkCover(path: String): String? = try {
+        stream(path)?.use { ins ->
+            var landmarks = false
+            var cover: String? = null
+            tags(ins) { x, name ->
+                if (cover != null) return@tags
+                if (x.eventType == XmlPullParser.START_TAG) when (name) {
+                    "nav" -> landmarks = "landmarks" in types(x)
+                    "a" -> if (landmarks && "cover" in types(x)) {
+                        x.getAttributeValue(null, "href")?.let { cover = resolve(path.substringBeforeLast('/', ""), it) }
+                    }
+                } else if (name == "nav") {
+                    landmarks = false
+                }
+            }
+            cover
+        }
+    } catch (e: Exception) {
+        null
+    }
+
+    /** What the tag [x] is said to be, by its epub:type. */
+    private fun types(x: XmlPullParser): List<String> =
+        (0 until x.attributeCount).firstOrNull { x.getAttributeName(it).substringAfter(':') == "type" }
+            ?.let { x.getAttributeValue(it).split(' ') }.orEmpty()
+
     private fun readNcx(ins: InputStream, base: String) {
         var depth = 0
         var label = ""
@@ -191,9 +220,7 @@ class EpubBook private constructor(private val zip: ZipArchive) : FlowBook {
         var depth = 0
         tags(ins) { x, name ->
             if (x.eventType == XmlPullParser.START_TAG) when (name) {
-                "nav" -> inToc = (0 until x.attributeCount).any {
-                    x.getAttributeName(it).substringAfter(':') == "type" && "toc" in x.getAttributeValue(it).split(' ')
-                }
+                "nav" -> inToc = "toc" in types(x)
                 "ol" -> if (inToc) depth++
                 "a" -> if (inToc) {
                     val href = x.getAttributeValue(null, "href")
