@@ -6,8 +6,10 @@ import java.io.Closeable
 import java.io.File
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutionException
-import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.Future
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
 interface ReaderHost {
     /**
@@ -142,7 +144,7 @@ object BookPrep {
      * Reads the books [prepare] is asked for, on a thread of its own: the threads that read the
      * covers and draw the shelves may well be busy, and the reader waits for the book.
      */
-    private val reading = Executors.newSingleThreadExecutor()
+    private val reading = Library.idle(ThreadPoolExecutor(1, 1, Library.IDLE_S, TimeUnit.SECONDS, LinkedBlockingQueue()))
 
     /** Starts reading [file] in the background, unless it is kept open from when it was last read. */
     @Synchronized

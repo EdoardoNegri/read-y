@@ -164,15 +164,16 @@ class ReaderSettings(ctx: Context) {
      * The colours of the page as they look in the light of the [lamp]: the reader shows them so,
      * rather than laying the light over the page, which would be one more layer to draw.
      */
-    val litPalette: Palette get() = palette.let { Palette(lit(it.bg), lit(it.fg), lit(it.link)) }
+    val litPalette: Palette get() = lamp.let { l -> palette.let { Palette(lit(it.bg, l), lit(it.fg, l), lit(it.link, l)) } }
 
     /** [color] as it looks in the light of the [lamp]. */
-    fun lit(color: Int): Int = lamp.let {
-        Color.rgb(
-            Color.red(color) * Color.red(it) / 255, Color.green(color) * Color.green(it) / 255,
-            Color.blue(color) * Color.blue(it) / 255,
-        )
-    }
+    fun lit(color: Int): Int = lit(color, lamp)
+
+    /** [lit] in the light [lamp] already worked out, for the many colours that are shown in it at once. */
+    private fun lit(color: Int, lamp: Int): Int = Color.rgb(
+        Color.red(color) * Color.red(lamp) / 255, Color.green(color) * Color.green(lamp) / 255,
+        Color.blue(color) * Color.blue(lamp) / 255,
+    )
 
     /**
      * Gives [window] the brightness chosen for reading, and keeps the screen on if [mayStayOn] and
@@ -180,10 +181,14 @@ class ReaderSettings(ctx: Context) {
      */
     fun light(window: Window, mayStayOn: Boolean) {
         val lp = window.attributes
-        lp.screenBrightness =
+        val wanted =
             if (brightness < 0) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
             else (brightness / 100f).coerceIn(0.01f, 1f)
-        window.attributes = lp
+        // Told only of another brightness: every telling has the phone lay the window out anew.
+        if (lp.screenBrightness != wanted) {
+            lp.screenBrightness = wanted
+            window.attributes = lp
+        }
         if (mayStayOn && keepScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }

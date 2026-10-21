@@ -44,7 +44,7 @@ class ImportActivity : Activity() {
         Library.io.execute {
             val (name, size) = Store.describe(uri)
             val imported = try {
-                Library.import(applicationContext, uri, type)
+                BookImport.import(applicationContext, uri, type)
             } catch (e: Exception) {
                 null
             }

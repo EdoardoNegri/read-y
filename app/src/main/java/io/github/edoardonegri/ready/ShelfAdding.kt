@@ -36,7 +36,7 @@ class ShelfAdding(
             var duplicates = 0
             for (uri in uris) {
                 val imported = try {
-                    Library.import(app, uri, app.contentResolver.getType(uri), dir)
+                    BookImport.import(app, uri, app.contentResolver.getType(uri), dir)
                 } catch (e: Exception) {
                     null
                 }
@@ -95,7 +95,7 @@ class ShelfAdding(
 
     /**
      * Adds every book in a folder the reader picks, onto a shelf named after it on the shelf shown,
-     * and those in its folders onto shelves inside that one (Library.importFolder). The files stay
+     * and those in its folders onto shelves inside that one (BookImport.importFolder). The files stay
      * where they are: a whole folder is copied, not moved, as books picked one by one are.
      */
     private fun addFolder() {
@@ -113,7 +113,7 @@ class ShelfAdding(
         val name = Store.describe(tree).first ?: tree.lastPathSegment?.substringAfterLast(':')?.substringAfterLast('/').orEmpty()
         Toast.makeText(act, act.getString(R.string.adding_folder, name), Toast.LENGTH_SHORT).show()
         Library.io.execute {
-            val done = Library.importFolder(app, tree, dir)
+            val done = BookImport.importFolder(app, tree, dir)
             onShelf {
                 added()
                 when {

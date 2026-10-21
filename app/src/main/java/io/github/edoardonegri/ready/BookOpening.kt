@@ -22,7 +22,6 @@ import android.provider.Settings
 import android.text.TextPaint
 import android.text.TextUtils
 import android.view.Choreographer
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager

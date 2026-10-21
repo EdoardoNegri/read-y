@@ -3,10 +3,8 @@ package io.github.edoardonegri.ready
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Rect
-import android.graphics.RectF
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Bundle
@@ -343,12 +341,6 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     private var menuBeforeCover = false
     private var keepMenu = false
 
-    /**
-     * How much room the plank of the menu takes at the foot of the screen: the menu is as large as
-     * the screen, with an empty place above its plank, and the room of the camera over that.
-     */
-    private fun menuRoom(m: View) = m.height - m.findViewById<View>(R.id.menuPlank).top
-
     private fun coverChanged(on: Boolean) {
         onCover = on
         // The cover stands against the wall of the case, which shows round it; a page lies on its paper.
@@ -369,7 +361,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
                     if (left != null) turner.stop()
                     return@doOnLayout
                 }
-                coverRoom(e, menuRoom(m))
+                coverRoom(e, MenuPictures.room(m))
                 if (left != null) shut(left)
             }
         } else {
@@ -431,6 +423,9 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         }
     }
 
+    /** What the opening and the closing of the book on the shelf are given of the menu, see MenuPictures. */
+    private val pictures by lazy { MenuPictures(this, root, menu, title, file) }
+
     /**
      * What shuts the book over its last page, as the shelf closes books, under the menu, which says
      * meanwhile that the book is at its end; and whether it does now.
@@ -475,56 +470,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     private fun pictureEndMenu(h: BookOpening.Handoff, e: ReaderEngine) {
         showPosition(state.chapter, 1f, e is PageEngine, null, null)
         // The shelf is upright: a menu laid out sideways, as the reader is turned, is none for it.
-        menu.doOnLayout { h.menuPictured(if (root.width < root.height) pictureMenu()?.let(::endMenu) else null) }
-    }
-
-    /**
-     * The menu as it stands over the cover that ends the book, from [picture] of its plank, for the
-     * book opening on its cover on the shelf or closing from it: with where the plaque with the name
-     * of the book is on the plank, which the plaque of the book on the shelf becomes.
-     */
-    private fun endMenu(picture: Bitmap): BookOpening.EndMenu {
-        // Where it is in the window, as its own place would tell it less the way its single line is scrolled.
-        val at = IntArray(2)
-        title.getLocationInWindow(at)
-        val plank = IntArray(2)
-        menu.findViewById<View>(R.id.menuPlank).getLocationInWindow(plank)
-        val left = (at[0] - plank[0]).toFloat()
-        val top = (at[1] - plank[1]).toFloat()
-        // The plaque pictured as it is drawn, name and all.
-        val plaque = try {
-            createBitmap(title.width.coerceAtLeast(1), title.height.coerceAtLeast(1)).also { title.draw(Canvas(it)) }
-        } catch (e: OutOfMemoryError) {
-            null
-        }
-        val plate = RectF(left, top, left + title.width, top + title.height)
-        val known = BookOpening.EndMenu(root.width, root.height, picture.height, plate, title.textSize, title.paddingStart.toFloat())
-        // Where it stands is kept, for the book to open on its cover at once the next time (BookOpening.Detached).
-        Library.setEndMenu(this, file, known)
-        return BookOpening.EndMenu(
-            known.screenW, known.screenH, known.height, known.title, known.titleText, known.titleInset, picture.uploaded(), plaque?.uploaded(),
-        )
-    }
-
-    /**
-     * The plank of the menu, pictured as it is, without the plaque with the name of the book: on the
-     * shelf the plaque of the book stands for it, which becomes it. Null if it cannot be pictured.
-     */
-    private fun pictureMenu(): Bitmap? {
-        val room = menuRoom(menu)
-        if (menu.width == 0 || room <= 0) return null
-        return try {
-            createBitmap(menu.width, room).also { bmp ->
-                val canvas = Canvas(bmp)
-                canvas.translate(0f, -(menu.height - room).toFloat())
-                title.alpha = 0f
-                menu.draw(canvas)
-                title.alpha = 1f
-            }
-        } catch (x: OutOfMemoryError) {
-            title.alpha = 1f
-            null
-        }
+        menu.doOnLayout { h.menuPictured(if (root.width < root.height) pictures.plank()?.let(pictures::endMenu) else null) }
     }
 
     /** Which [ReaderEngine.positionsVersion] the marks of the chapters along the seek bar were made for. */
@@ -725,9 +671,9 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
 
     /** Goes back to the shelf with [page], the cover that ends the book standing on the menu, and the menu pictured. */
     private fun closeOnMenu(page: Bitmap?) {
-        val picture = pictureMenu() ?: return goBack(page)
+        val picture = pictures.plank() ?: return goBack(page)
         // It is not opened on again: a book read to its end opens on its cover anyway.
-        goBack(page, keep = false, endMenu(picture))
+        goBack(page, keep = false, pictures.endMenu(picture))
     }
 
     /** The reader is on its way back to the shelf, see [leave]. */
@@ -819,7 +765,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         val c = cutout.insets
         content.setPadding(c.left, c.top + top, c.right, c.bottom + bottom)
         // The cover that ends the book keeps its place on the screen however the margins of the page change.
-        if (onCover && e != null) coverRoom(e, if (menu.isVisible) menuRoom(menu) else 0)
+        if (onCover && e != null) coverRoom(e, if (menu.isVisible) MenuPictures.room(menu) else 0)
     }
 
     /** Where the page shown is, as what is shown around the text tells it; see [showPosition]. */

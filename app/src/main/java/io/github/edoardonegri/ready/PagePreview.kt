@@ -114,8 +114,12 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         content.consumeAll = !s.vertical
         turner.stop()
         engine?.applySettings()
-        // The screen may be turned on its side now, or what is around the text be elsewhere.
-        requestLayout()
+        // The screen may be turned on its side now, which is the only way the settings change its size;
+        // what is around the text may be elsewhere all the same.
+        if (s.orientation != shownTurn) {
+            shownTurn = s.orientation
+            requestLayout()
+        }
         arrange()
         showInfo()
         clock()
@@ -169,6 +173,9 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         screenH = if (sh * scale <= h - room) sh else ((h - room) / scale).toInt()
         screen.measure(MeasureSpec.makeMeasureSpec(screenW, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(screenH, MeasureSpec.EXACTLY))
     }
+
+    /** The turn of the screen, ReaderSettings.orientation, it was last measured for. */
+    private var shownTurn = -1
 
     /** The size [arrange] last arranged what is around the text for. */
     private var arranged = ""

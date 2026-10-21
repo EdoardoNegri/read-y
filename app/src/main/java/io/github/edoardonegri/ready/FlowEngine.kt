@@ -10,6 +10,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Rect
 import android.net.Uri
+import android.os.SystemClock
 import android.view.View
 import android.webkit.JavascriptInterface
 import android.webkit.RenderProcessGoneDetail
@@ -264,6 +265,7 @@ class FlowEngine(
         injected = false
         stale = false
         applied = ""
+        relaying = false
         web.alpha = 0f
         web.setBackgroundColor(s.litPalette.bg)
         web.isVerticalScrollBarEnabled = s.vertical
@@ -592,9 +594,25 @@ class FlowEngine(
         }
         // Nothing the page is laid out by has changed, as when the settings were looked at and
         // left as they were: it stays as it is, rather than being laid out anew to the same.
-        if (config() == applied) return
+        val now = config()
+        if (now == applied) return
+        // Only the light changed, as it does while the warmth slider is dragged: the text keeps its
+        // place and its pages, and only the colours are given anew.
+        if (applied.isNotEmpty() && sameLayout(now, applied)) return tint(now)
         resetZoom()
         relayout()
+    }
+
+    /** Whether the configurations [a] and [b] (see [config]) lay the page out alike, whatever light it is in. */
+    private fun sameLayout(a: String, b: String): Boolean {
+        fun layout(config: String) = JSONObject(config).apply { for (key in LIGHT_KEYS) remove(key) }.toString()
+        return layout(a) == layout(b)
+    }
+
+    /** Gives the page the colours of [config], which lays it out as it is laid out already. */
+    private fun tint(config: String) {
+        applied = config
+        web.evaluateJavascript("window.__r&&__r.tint($config)", null)
     }
 
     /**
@@ -611,7 +629,26 @@ class FlowEngine(
      * The script does so in one go, before the page is drawn again; should the text change size
      * a moment later still, as the web view's text zoom has it do, the script follows that too.
      */
-    private fun relayout() = web.evaluateJavascript("window.__r&&__r.apply(${laidOut()},null,null)", null)
+    private fun relayout() {
+        // One at a time: dragging a slider asks for a layout at every step, which would queue up
+        // faster than the page is laid out. Whatever was asked meanwhile is laid out once, after.
+        val now = SystemClock.uptimeMillis()
+        if (relaying && now - relayoutAt < RELAYOUT_WAIT_MS) {
+            relayAgain = true
+            return
+        }
+        relaying = true
+        relayAgain = false
+        relayoutAt = now
+        web.evaluateJavascript("window.__r&&__r.apply(${laidOut()},null,null)") {
+            relaying = false
+            if (relayAgain && !closed && config() != applied) relayout()
+        }
+    }
+
+    private var relaying = false
+    private var relayAgain = false
+    private var relayoutAt = 0L
 
     // ---- enlarging the page by pinching ----
 
@@ -799,6 +836,12 @@ class FlowEngine(
                 else -> false
             }
         }
+
+        /** What in [config] is about the light the page is in, which it is not laid out by. */
+        private val LIGHT_KEYS = listOf("bg", "fg", "link", "themed", "lamp")
+
+        /** How long a layout is waited for, before another is asked for regardless, in ms. */
+        private const val RELAYOUT_WAIT_MS = 400L
 
         /** The most a pinch enlarges the page, and the least it is left enlarged by rather than shown whole. */
         private const val MAX_ZOOM = 4f
@@ -1045,6 +1088,13 @@ class FlowEngine(
   R.apply = function (c, frac, anchor) {
     R.cfg = c;
     layout(frac == null ? R.frac : frac, anchor);
+  };
+
+  // Only the light has changed: the colours are given anew, and the text stays as it is laid out.
+  R.tint = function (c) {
+    R.cfg = c;
+    st.textContent = css(c, R.W, R.H);
+    lamp(c.lamp);
   };
 
   R.step = function (d, slide) {

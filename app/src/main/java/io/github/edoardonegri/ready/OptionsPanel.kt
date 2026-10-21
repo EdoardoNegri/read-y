@@ -3,7 +3,6 @@ package io.github.edoardonegri.ready
 import android.app.Activity
 import android.graphics.Typeface
 import android.view.ContextThemeWrapper
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
@@ -146,7 +145,6 @@ class OptionsPanel(
         }
     }
 
-    /** A line of [into] for [item], with where on the page it is shown to choose. */
     /** Adds the name of a setting to [row], taking all the room the rest leaves. */
     private fun addName(row: LinearLayout, name: String) {
         row.addView(

@@ -225,9 +225,15 @@ class PageEngine(
         report()
     }
 
+    /** What the pages in [cache] were drawn for, see [applySettings]. */
+    private var drawnFor = ""
+
+    private fun drawing() = "${s.vertical}:${s.trimMargins}:${frame.width}x${frame.height}"
+
     // Every page is drawn anew, for another size or another mode.
     @SuppressLint("NotifyDataSetChanged")
     private fun configure() {
+        drawnFor = drawing()
         generation++
         pending.clear()
         cache.evictAll()
@@ -267,7 +273,26 @@ class PageEngine(
 
     override fun next() = step(1)
     override fun prev() = step(-1)
-    override fun applySettings() = configure()
+    override fun applySettings() {
+        // Only the light changed, as it does while the warmth is chosen: the pages drawn are shown in
+        // it as they are, rather than every one of them being drawn anew.
+        if (drawnFor == drawing()) relight() else configure()
+    }
+
+    /** Shows the pages already drawn in the light the settings say. */
+    @SuppressLint("NotifyDataSetChanged")
+    private fun relight() {
+        filter = light(s.darkMode && source.print, s.lamp)
+        if (s.vertical) {
+            frame.setBackgroundColor(s.litPalette.bg)
+            // The pages on screen take the filter as they are bound again; the bitmaps are in the cache.
+            adapter.notifyDataSetChanged()
+        } else {
+            val onCover = page >= count
+            if (!onCover) frame.setBackgroundColor(s.litPalette.bg)
+            single.colorFilter = if (onCover) null else filter
+        }
+    }
 
     override fun seekTo(fraction: Float) {
         if (s.vertical) {

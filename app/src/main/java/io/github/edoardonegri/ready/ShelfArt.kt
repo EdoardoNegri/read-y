@@ -190,16 +190,9 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
      */
     private fun gloss(c: Canvas, outline: Path, l: Float, t: Float, r: Float, b: Float) {
         paint.style = Paint.Style.FILL
-        paint.shader = LinearGradient(
-            0f, t, 0f, b,
-            intArrayOf(0x44FFFFFF, 0x52FFFFFF, 0x24FFFFFF, 0x00FFFFFF, 0x00000000, 0x1C000000),
-            floatArrayOf(0f, 0.16f, 0.4f, 0.62f, 0.7f, 1f), Shader.TileMode.CLAMP,
-        )
+        paint.shader = LinearGradient(0f, t, 0f, b, GLOSS_COLORS, GLOSS_STOPS, Shader.TileMode.CLAMP)
         c.drawPath(outline, paint)
-        paint.shader = LinearGradient(
-            l, 0f, r, 0f, intArrayOf(0x1A000000, 0x00000000, 0x00000000, 0x1A000000),
-            floatArrayOf(0f, 0.14f, 0.86f, 1f), Shader.TileMode.CLAMP,
-        )
+        paint.shader = LinearGradient(l, 0f, r, 0f, SIDE_COLORS, SIDE_STOPS, Shader.TileMode.CLAMP)
         c.drawPath(outline, paint)
         paint.shader = null
     }
@@ -300,6 +293,12 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
 
         /** Where the colours of [Metal.plate] lie, from the top of the plate to its bottom. */
         private val PLATE_STOPS = floatArrayOf(0f, 0.3f, 0.72f, 1f)
+
+        /** The shine over the plate, from its top to its bottom, and the shade at its two ends; see [gloss]. */
+        private val GLOSS_COLORS = intArrayOf(0x44FFFFFF, 0x52FFFFFF, 0x24FFFFFF, 0x00FFFFFF, 0x00000000, 0x1C000000)
+        private val GLOSS_STOPS = floatArrayOf(0f, 0.16f, 0.4f, 0.62f, 0.7f, 1f)
+        private val SIDE_COLORS = intArrayOf(0x1A000000, 0x00000000, 0x00000000, 0x1A000000)
+        private val SIDE_STOPS = floatArrayOf(0f, 0.14f, 0.86f, 1f)
 
         private val BRASS = Metal(
             rim = 0xFF5E450C.toInt(),
