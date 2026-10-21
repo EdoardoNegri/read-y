@@ -138,7 +138,8 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         // Turned, the page has another shape, and what is around the text other places.
         root.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
             if (r - l != or - ol || b - t != ob - ot) {
-                turned()
+                // The bars coming and going change the height a little; only turned over is another shape.
+                if ((r - l > b - t) != (or - ol > ob - ot)) turned()
                 arrangeInfo()
             }
         }
@@ -408,11 +409,11 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
 
     /**
      * Near the end of the book, [percent] of it, reads the cover that ends it, for the book to shut
-     * over its last page. Not while the book still opens on the shelf, unseen: the shelf reads the
-     * cover too for a book that opens on it, and the two would hold each other up.
+     * over its last page. Not for a book that opens on that cover, while it opens on the shelf,
+     * unseen: the shelf reads the cover too, and the two would hold each other up.
      */
     private fun readEndPictureIfNear(percent: Float) {
-        if (!endPictureAsked && !hidden && percent >= END_NEAR && engine?.hasCover == true) readEndPicture()
+        if (!endPictureAsked && (!hidden || percent < 1f) && percent >= END_NEAR && engine?.hasCover == true) readEndPicture()
     }
 
     /** Reads the cover that ends the book in the background, see [endPicture]. */
