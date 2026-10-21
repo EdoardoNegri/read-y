@@ -3,12 +3,12 @@ package io.github.edoardonegri.ready
 import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Rect
-import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.LayerDrawable
 import android.os.SystemClock
 import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.ImageView
+import androidx.core.graphics.drawable.toDrawable
 import androidx.core.view.isVisible
 import androidx.recyclerview.widget.RecyclerView
 
@@ -64,9 +64,10 @@ class ShelfZoom(
     fun zoom(m: Miniature, snapshot: Bitmap, opening: Boolean, bare: Bitmap? = null) {
         shelf.animate().cancel()
         ghost.animate().cancel()
-        val barred = if (!opening && bare != null) BitmapDrawable(act.resources, snapshot) else null
-        if (barred != null) ghost.setImageDrawable(LayerDrawable(arrayOf(BitmapDrawable(act.resources, bare), barred)))
-        else ghost.setImageBitmap(snapshot)
+        val barred = if (opening || bare == null) null else snapshot.toDrawable(act.resources).also {
+            ghost.setImageDrawable(LayerDrawable(arrayOf(bare.toDrawable(act.resources), it)))
+        }
+        if (barred == null) ghost.setImageBitmap(snapshot)
         if (opening) adapter.showBars(shelf, 0f)
         ghost.visibility = View.VISIBLE
         for (v in arrayOf(shelf, ghost)) {
