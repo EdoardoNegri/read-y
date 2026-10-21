@@ -30,7 +30,8 @@ class PageTurner(
 
     /** The engine has the new page: the sheet is turned over to it. */
     private val startTurn = Runnable {
-        sheet.turn(turning > 0, ::picture, place())
+        // Not turned like paper, the picture of the page left only stood in front for the book to shut over it, if it is.
+        if (s.slidePages && !s.vertical) sheet.turn(turning > 0, ::picture, place()) else sheet.drop()
         turning = 0
     }
 
@@ -76,7 +77,9 @@ class PageTurner(
         val e = engine() ?: return
         stop()
         val go = { if (direction > 0) e.next() else e.prev() }
-        if (s.slidePages && !s.vertical) {
+        // From the last page the book shuts over it, as it does with the pages turned like paper or not,
+        // which needs the page as it is seen to shrink into the cover (see takeTurn).
+        if ((s.slidePages && !s.vertical) || (direction > 0 && e.hasCover && e.onLastPage)) {
             // The page being left stays in view until the engine has the other one, see
             // onPosition: it is only turned once it is covered.
             turning = direction

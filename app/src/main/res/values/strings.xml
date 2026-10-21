@@ -128,7 +128,7 @@ Tap below and choose that file: Read-y will remove it, so that the book is kept 
     <string name="info_folder">Folder</string>
     <string name="opt_light">Light</string>
     <string name="opt_brightness">Brightness</string>
-    <string name="opt_brightness_system">system</string>
+    <string name="opt_brightness_system">System</string>
     <string name="opt_warmth">Warmth</string>
     <string name="opt_dark_mode">Dark mode</string>
     <string name="opt_keep_screen_on">Keep the screen on</string>

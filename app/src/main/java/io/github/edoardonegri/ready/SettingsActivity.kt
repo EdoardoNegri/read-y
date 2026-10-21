@@ -1,9 +1,7 @@
 package io.github.edoardonegri.ready
 
 import android.os.Bundle
-import android.os.SystemClock
 import android.view.View
-import android.view.WindowManager
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
@@ -98,38 +96,18 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     /**
-     * The brightness chosen for reading is shown on the sample page alone, see PagePreview.brightness,
-     * as long as it is no brighter than the screen the settings are on. Chosen brighter, the settings
-     * are as bright as the reader will be, as a page cannot be shown brighter than its screen.
+     * The brightness chosen for reading is shown on the sample page alone, see PagePreview.brightness:
+     * the settings themselves stay as bright as the phone has its screen. A page cannot be shown
+     * brighter than that, so a brightness above it shows the page as it is.
      */
     private fun applyBrightness() {
-        val system = ReaderSettings.systemBrightness(this).coerceAtLeast(0.01f)
-        val chosen = if (s.brightness > 0) s.brightness / 100f else system
-        wanted = if (chosen > system) chosen else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        preview.surroundings = ReaderSettings.systemBrightness(this)
         preview.brightness = s.brightness
-        preview.surroundings = maxOf(system, chosen)
-        // Dragging the slider asks at every step, and each telling has the phone lay the window out
-        // anew: it is told at most every so often, and always of the last brightness.
-        val wait = BRIGHTNESS_EVERY_MS - (SystemClock.uptimeMillis() - toldAt)
-        preview.removeCallbacks(tell)
-        if (wait <= 0) tell.run() else preview.postDelayed(tell, wait)
-    }
-
-    /** The brightness the window is to have, see [applyBrightness], and when it was last told. */
-    private var wanted = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-    private var toldAt = 0L
-
-    private val tell = Runnable {
-        toldAt = SystemClock.uptimeMillis()
-        if (window.attributes.screenBrightness != wanted) window.attributes = window.attributes.apply { screenBrightness = wanted }
     }
 
     private fun applyPage() = preview.apply()
 
     private companion object {
-        /** How often the window is told another brightness while the slider is dragged, in ms. */
-        const val BRIGHTNESS_EVERY_MS = 100L
-
         /** What a font file may say it is; some places call it nothing more than a file. */
         val FONT_TYPES = arrayOf(
             "font/*", "application/x-font-ttf", "application/x-font-otf", "application/font-sfnt",

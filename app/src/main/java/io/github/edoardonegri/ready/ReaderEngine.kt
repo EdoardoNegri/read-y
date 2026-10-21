@@ -73,6 +73,9 @@ interface ReaderEngine {
      */
     val hasCover: Boolean get() = false
 
+    /** Whether the page shown is the last, which the cover that ends the book is turned to from; see [hasCover]. */
+    val onLastPage: Boolean get() = false
+
     /**
      * Shows the cover that ends the book filling [box], in the engine's own view, cut to the shape
      * of the box about its middle, as the shelf shows a cover (ShelfArt.endCover). Round it the

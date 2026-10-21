@@ -308,6 +308,8 @@ class PageEngine(
 
     override val hasCover get() = !s.vertical
 
+    override val onLastPage get() = !s.vertical && page == count - 1
+
     /** Where the cover that ends the book stands, see [coverAt]; empty for the whole page. */
     private val coverBox = Rect()
 

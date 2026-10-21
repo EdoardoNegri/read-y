@@ -363,6 +363,8 @@ class FlowEngine(
     /** Whether the book ends on its cover, shown over the last page: not while it scrolls, and not for the sample of the settings. */
     override val hasCover get() = given == null && !s.vertical
 
+    override val onLastPage get() = ready && !atCover && !s.vertical && chapter == book.spine.lastIndex && lastPage >= lastPages - 1
+
     /** The cover, as a picture to serve to the page: the screen's width, and no wider than a phone's. */
     private fun coverBytes(): ByteArray {
         val width = minOf(act.resources.displayMetrics.widthPixels, 1080)
