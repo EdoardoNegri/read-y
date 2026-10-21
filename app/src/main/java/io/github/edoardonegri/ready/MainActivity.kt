@@ -253,6 +253,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // The brightness chosen for reading is that of the whole app, see ReaderSettings.light.
+        ReaderSettings(this).light(window, mayStayOn = false)
         whileOpening.isEnabled = false
         warmUpReader()
         val book = asked

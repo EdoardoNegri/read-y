@@ -1,6 +1,7 @@
 package io.github.edoardonegri.ready
 
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.View
 import android.widget.ImageButton
 import android.widget.TextView
@@ -96,18 +97,29 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     /**
-     * The brightness chosen for reading is shown on the sample page alone, see PagePreview.brightness:
-     * the settings themselves stay as bright as the phone has its screen. A page cannot be shown
-     * brighter than that, so a brightness above it shows the page as it is.
+     * The brightness chosen for reading is the brightness of the whole screen, as it is while reading
+     * and on the bookshelf (see ReaderSettings.light). Dragging the slider asks at every step, and each
+     * telling has the phone lay the window out anew: it is told at most every so often, and always of the last.
      */
     private fun applyBrightness() {
-        preview.surroundings = ReaderSettings.systemBrightness(this)
-        preview.brightness = s.brightness
+        val wait = BRIGHTNESS_EVERY_MS - (SystemClock.uptimeMillis() - toldAt)
+        window.decorView.removeCallbacks(tell)
+        if (wait <= 0) tell.run() else window.decorView.postDelayed(tell, wait)
+    }
+
+    private var toldAt = 0L
+
+    private val tell = Runnable {
+        toldAt = SystemClock.uptimeMillis()
+        s.light(window, mayStayOn = false)
     }
 
     private fun applyPage() = preview.apply()
 
     private companion object {
+        /** How often the window is told another brightness while the slider is dragged, in ms. */
+        const val BRIGHTNESS_EVERY_MS = 100L
+
         /** What a font file may say it is; some places call it nothing more than a file. */
         val FONT_TYPES = arrayOf(
             "font/*", "application/x-font-ttf", "application/x-font-otf", "application/font-sfnt",

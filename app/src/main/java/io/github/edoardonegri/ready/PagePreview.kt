@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.os.Build
 import android.os.SystemClock
@@ -18,7 +17,6 @@ import java.io.InputStream
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.pow
 
 /**
  * The page of a book as the reader would show it, in the settings, to see what they do: a sample
@@ -54,18 +52,6 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     private var scale = 1f
     private var screenW = 0
     private var screenH = 0
-
-    /**
-     * The brightness chosen for reading (ReaderSettings.brightness), 1..100, which the page is shown
-     * in: as much darker as the screen would be than [surroundings], while the rest of the settings
-     * stay as bright as they are, as a window's brightness cannot be had for a part of it. -1
-     * follows the phone.
-     */
-    var brightness by changes(-1, ::invalidate)
-
-    /** How bright the screen the settings are on is, 0..1, as the window brightness is told: what the page can be dimmed from. */
-    var surroundings by changes(1f, ::invalidate)
-    private val dimmer = Paint()
 
     /** The frame of brass around the screen. */
     private val rim = Paint().apply {
@@ -194,13 +180,6 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
 
     override fun dispatchDraw(canvas: Canvas) {
         super.dispatchDraw(canvas)
-        // The reader's screen is only ever as bright as the one it is shown on, or dimmer.
-        val relative = if (brightness > 0) (ReaderSettings.lightOf(brightness) / surroundings.coerceAtLeast(MIN_LIGHT)).coerceAtMost(1f) else 1f
-        if (relative < 1f) {
-            // The colours on the screen are the light they give to the power of 2.2, about.
-            dimmer.color = Color.argb(((1 - relative.pow(1 / SCREEN_GAMMA)) * 255).roundToInt(), 0, 0, 0)
-            canvas.drawRect(screen.translationX, screen.translationY, screen.translationX + screenW * scale, screen.translationY + screenH * scale, dimmer)
-        }
         val half = rim.strokeWidth / 2
         canvas.drawRect(
             screen.translationX - half, screen.translationY - half,
@@ -283,12 +262,6 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
 
         /** ReaderSettings.orientation for landscape. */
         const val LANDSCAPE = 2
-
-        /** The dimmest a screen is taken to be, as the dimmest a window can be told to be (ReaderSettings.light). */
-        const val MIN_LIGHT = 0.01f
-
-        /** What a screen's colours are raised to, to make the light they give. */
-        const val SCREEN_GAMMA = 2.2f
 
         /** How wide the brass frame around the screen is, in dp. */
         const val RIM_DP = 2f

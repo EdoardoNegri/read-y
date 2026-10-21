@@ -81,6 +81,12 @@ class WidgetBooksActivity : AppCompatActivity() {
         }
     })
 
+    override fun onResume() {
+        super.onResume()
+        // The brightness chosen for reading is that of the whole app, see ReaderSettings.light.
+        ReaderSettings(this).light(window, mayStayOn = false)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Without the library there is nothing to choose from; the bookshelf asks for it.
