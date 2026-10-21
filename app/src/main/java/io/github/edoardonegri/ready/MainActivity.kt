@@ -525,21 +525,9 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Reads the cover of [f] as large as it grows when it is only enlarged out of the shelf, in the
-     * background, and gives it to [then]: the one the shelf keeps is only as large as the shelf shows it.
+     * background, and gives it to [then]; see Library.sharpCover.
      */
-    private fun sharpen(f: File, then: (Bitmap) -> Unit) {
-        val app = applicationContext
-        val width = resources.displayMetrics.widthPixels
-        Library.io.execute {
-            val sharp = try {
-                Library.bigCover(app, f, width).uploaded()
-            } catch (e: Throwable) {
-                // Not even the cover the shelf keeps can be read, or not as large: the book grows with that one.
-                return@execute
-            }
-            then(sharp)
-        }
-    }
+    private fun sharpen(f: File, then: (Bitmap) -> Unit) = Library.sharpCover(this, f, resources.displayMetrics.widthPixels, then)
 
     /**
      * Goes on with the book that was read last, wherever in the library it stands: its page slides

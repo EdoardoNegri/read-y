@@ -929,6 +929,23 @@ object Library {
     private fun coversDir() = File(root(), ".covers")
 
     /**
+     * Reads the cover of [f] as large as it grows when it is only enlarged out of its place on the
+     * shelf or the widget, in the background, and gives it to [then]: the one kept is only as large
+     * as the shelf shows it. Nothing is given if even that cannot be read, and the book grows with the one it has.
+     */
+    fun sharpCover(ctx: Context, f: File, width: Int, then: (Bitmap) -> Unit) {
+        val app = ctx.applicationContext
+        io.execute {
+            val sharp = try {
+                bigCover(app, f, width).uploaded()
+            } catch (e: Throwable) {
+                return@execute
+            }
+            then(sharp)
+        }
+    }
+
+    /**
      * The cover of [f] as large as the cover that ends it, [width] wide, read from the book itself as
      * the reader reads it (see [endCover]): for a book that only grows out of the shelf to show, sharper
      * than the one the shelf keeps. Blocking.

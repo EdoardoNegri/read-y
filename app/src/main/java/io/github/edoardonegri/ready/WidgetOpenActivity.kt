@@ -135,10 +135,17 @@ class WidgetOpenActivity : AppCompatActivity() {
     private fun openBook(book: File, cover: View?) {
         val settings = ReaderSettings(this)
         val paper = settings.lit(settings.palette.bg)
+        // A book read to its end opens on its cover, which only grows, as it does on the bookshelf.
+        val grown = cover != null && !settings.vertical && Library.isFinished(this, book)
+        val sharpWidth = resources.displayMetrics.widthPixels
         if (Build.VERSION.SDK_INT < 30) {
             val opening = BookOpening(this)
-            val kept = BookOpening.kept(book, settings.look)
-            if (cover == null) opening.slideIn(paper, kept) { read(book) } else opening.open(cover, paper, kept) { read(book) }
+            if (cover == null) {
+                opening.slideIn(paper, BookOpening.kept(book, settings.look)) { read(book) }
+            } else {
+                opening.open(cover, paper, if (grown) null else BookOpening.kept(book, settings.look), grown) { read(book) }
+                if (grown) Library.sharpCover(this, book, sharpWidth) { runOnUiThread { opening.sharpen(it) } }
+            }
             return
         }
         // The reader starts at once, unseen over the book opening, and sets out its page
@@ -149,7 +156,13 @@ class WidgetOpenActivity : AppCompatActivity() {
         BookOpening.handoff = handoff
         read(book, handoff)
         val opening = BookOpening.Detached(this).also { detached = it }
-        if (cover == null) opening.slide(paper, book, settings.look, handoff) else opening.open(cover, paper, book, settings.look, handoff)
+        if (cover == null) {
+            opening.slide(paper, book, settings.look, handoff)
+        } else {
+            // Where the menu stands over the cover is known from the last time the book was shown there.
+            opening.open(cover, paper, book, settings.look, handoff, grown, if (grown) Library.endMenu(this, book) else null)
+            if (grown) Library.sharpCover(this, book, sharpWidth, opening::sharpen)
+        }
     }
 
     /** The book opening while the reader starts over it, see [openBook]. */
