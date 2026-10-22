@@ -396,7 +396,7 @@ fun TextView.holdBrass(down: Boolean) {
  * A drop-down menu in brass: the choice made stands on a plate like a brass button's, with an
  * arrow engraved at either end, and the choices open on a wooden board that hangs from the foot
  * of the plate, each in its own typeface if [show] is given some. [onPick] is told whenever
- * another is picked.
+ * another is picked, and whenever [repeats] is picked, the one it is, even if it is the choice made.
  */
 @SuppressLint("ViewConstructor")
 class BrassDropdown(ctx: Context, private val onPick: (Int) -> Unit) : AppCompatTextView(ctx) {
@@ -409,6 +409,9 @@ class BrassDropdown(ctx: Context, private val onPick: (Int) -> Unit) : AppCompat
 
     /** The choice made. */
     private var chosen = -1
+
+    /** A choice that is told to [onPick] again when it is picked while it is the choice made; none if -1. */
+    var repeats = -1
 
     /** The board of choices while it is open. */
     private var board: PopupWindow? = null
@@ -464,7 +467,7 @@ class BrassDropdown(ctx: Context, private val onPick: (Int) -> Unit) : AppCompat
                 setPadding(side, dp(12), side, dp(12))
                 setOnClickListener {
                     board?.dismiss()
-                    if (i == chosen) return@setOnClickListener
+                    if (i == chosen && i != repeats) return@setOnClickListener
                     select(i)
                     onPick(i)
                 }

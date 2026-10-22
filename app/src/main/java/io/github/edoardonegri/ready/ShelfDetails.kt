@@ -94,26 +94,26 @@ class ShelfDetails(
 
     /**
      * The book [f], described by [m], by its cover, beside its name, its author and what its
-     * cover is: its first page, or a picture it was given, or a new one to be chosen.
+     * cover is: its original, if it has one, or the template made for it, or its first page, or a
+     * custom picture, which is chosen from the phone's pictures.
      */
     private fun editBook(f: File, m: BookMeta) {
         val dialog = ShelfDialog(act).uncrossed().title(m.title).plaque(Library.isFavorite(act, f), Library.isFinished(act, f))
         val name = dialog.field(R.string.field_name, m.title)
         val author = dialog.field(R.string.field_author, m.author)
-        // What the cover can be, as the menu offers it: the first page only for a book of pages, the
-        // picture the reader gave only once there is one, and a new one always last.
+        // What the cover can be, as the menu offers it: the original only for a book that has one,
+        // the first page only for a book of pages, and a custom picture always.
         var kinds = listOf<CoverKind>()
         lateinit var aspect: BrassDropdown
         aspect = dialog.choice(R.string.field_aspect) { index ->
             when (kinds.getOrNull(index)) {
-                CoverKind.BOOK -> setCoverMode(f, Library.CoverMode.OWN)
+                CoverKind.ORIGINAL -> setCoverMode(f, Library.CoverMode.OWN)
+                CoverKind.TEMPLATE -> setCoverMode(f, Library.CoverMode.MADE, Library.tone(act, f))
                 CoverKind.FIRST -> setCoverMode(f, Library.CoverMode.FIRST_PAGE)
-                CoverKind.MADE -> setCoverMode(f, Library.CoverMode.MADE, Library.tone(act, f))
-                CoverKind.NEW -> {
+                CoverKind.CUSTOM -> {
                     coverFor = f
                     pickPicture.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 }
-                // The picture the book has already stays as it is.
                 else -> Unit
             }
         }
@@ -129,20 +129,22 @@ class ShelfDetails(
             dialog.picture.setImageBitmap(cover)
             val mode = Library.coverMode(act, f)
             kinds = buildList {
-                add(CoverKind.BOOK)
+                if (m.hasCover) add(CoverKind.ORIGINAL)
+                add(CoverKind.TEMPLATE)
                 if (!Library.isFlowing(f)) add(CoverKind.FIRST)
-                add(CoverKind.MADE)
-                if (custom) add(CoverKind.PICTURE)
-                add(CoverKind.NEW)
+                add(CoverKind.CUSTOM)
             }
+            // A book with no cover of its own shows the template, whichever it was last told to show.
             val now = when {
-                custom -> CoverKind.PICTURE
+                custom -> CoverKind.CUSTOM
                 mode == Library.CoverMode.FIRST_PAGE -> CoverKind.FIRST
-                mode == Library.CoverMode.MADE -> CoverKind.MADE
-                else -> CoverKind.BOOK
+                mode == Library.CoverMode.MADE || !m.hasCover -> CoverKind.TEMPLATE
+                else -> CoverKind.ORIGINAL
             }
             aspect.show(kinds.map { act.getString(it.label) }, kinds.indexOf(now))
-            val made = now == CoverKind.MADE
+            // Choosing the custom picture again chooses another.
+            aspect.repeats = kinds.indexOf(CoverKind.CUSTOM)
+            val made = now == CoverKind.TEMPLATE
             toneName.visibility = if (made) View.VISIBLE else View.GONE
             toneMenu.visibility = toneName.visibility
             toneMenu.show(Library.TONES.map { act.getString(it.first) }, Library.tone(act, f))
@@ -190,8 +192,8 @@ class ShelfDetails(
 
     /** What the cover of a book can be, by the name the menu of the editor gives it. */
     private enum class CoverKind(val label: Int) {
-        BOOK(R.string.cover_book), FIRST(R.string.cover_first), MADE(R.string.cover_made),
-        PICTURE(R.string.cover_own), NEW(R.string.cover_new),
+        ORIGINAL(R.string.cover_original), TEMPLATE(R.string.cover_template),
+        FIRST(R.string.cover_first), CUSTOM(R.string.cover_custom),
     }
 
     /** Says what the cover of [f] is, see [Library.setCoverMode], and shows it in the editor and on the shelf. */

@@ -198,11 +198,10 @@ Tap below and choose that file: Read-y will remove it, so that the book is kept 
     <string name="font_casual">Casual</string>
     <string name="font_cursive">Cursive</string>
     <string name="cover">Cover</string>
+    <string name="cover_original">Original</string>
+    <string name="cover_template">Template</string>
     <string name="cover_first">First page</string>
-    <string name="cover_own">Own picture</string>
-    <string name="cover_new">New picture…</string>
-    <string name="cover_book">The book\'s own</string>
-    <string name="cover_made">Made for it</string>
+    <string name="cover_custom">Custom</string>
     <string name="field_tone">Color</string>
     <string name="tone_red">Red</string>
     <string name="tone_blue">Blue</string>

@@ -43,8 +43,11 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.ceil
 
-/** What a book says about itself. [published] is a day, a month or a year, as 2011-05-17, 2011-05 or 2011; empty if unknown. */
-data class BookMeta(val title: String, val author: String, val pages: Int, val published: String = "")
+/**
+ * What a book says about itself. [published] is a day, a month or a year, as 2011-05-17, 2011-05 or 2011; empty if unknown.
+ * [hasCover] is whether it has a cover of its own: a book of pages always has one, its first page; one laid out anew may not.
+ */
+data class BookMeta(val title: String, val author: String, val pages: Int, val published: String = "", val hasCover: Boolean = true)
 
 /**
  * Reading position. For PDFs [chapter] is the page index; for EPUBs it is the spine index. [version]
@@ -208,7 +211,7 @@ object Library {
     private const val WIDGET = "widget"
     private const val WIDGET_ORDER = "widgetOrder"
     private const val BIN = ".bin"
-    private const val META_VERSION = 3
+    private const val META_VERSION = 4
     private const val SHELF_BACK = 0xFF2A1A10.toInt()
     private const val SHELF_BACK_LIGHT = 0xFF3A2416.toInt()
 
@@ -785,7 +788,7 @@ object Library {
             val o = JSONObject(json)
             if (o.optString("sig") != sig || o.optInt("v") != META_VERSION) null
             else {
-                val m = BookMeta(o.optString("title"), o.optString("author"), o.optInt("pages"), o.optString("published"))
+                val m = BookMeta(o.optString("title"), o.optString("author"), o.optInt("pages"), o.optString("published"), o.optBoolean("cover", true))
                 metas[f.path] = sig to m
                 named(ctx, f, m)
             }
@@ -856,7 +859,7 @@ object Library {
             Log.w(TAG, "Cannot read ${f.path}", e)
         }
 
-        val meta = BookMeta(title, author, pages, published)
+        val meta = BookMeta(title, author, pages, published, hasCover = bmp != null)
         try {
             cover.parentFile?.mkdirs()
             // Written in full before it is put in its place: a cover half written as the app was
@@ -873,7 +876,7 @@ object Library {
             Log.w(TAG, "Cannot save cover for ${f.path}", e)
         }
         val o = JSONObject().put("sig", sig(f)).put("v", META_VERSION).put("title", title).put("author", author)
-            .put("pages", pages).put("published", published)
+            .put("pages", pages).put("published", published).put("cover", meta.hasCover)
         metaPrefs(ctx).edit { putString(f.path, o.toString()) }
         metas[f.path] = sig(f) to meta
         return named(ctx, f, meta)
@@ -984,8 +987,9 @@ object Library {
     fun hasCustomCover(ctx: Context, f: File) = customCover(ctx, f) != null
 
     /**
-     * What the cover is of a book that was given no picture: the one it has itself, its first page
-     * (which the book then reads on from, as it is the cover), or one made for it.
+     * What the cover is of a book that was given no picture: the one it has itself (the original,
+     * if it has one: else the template is what shows, see [BookMeta.hasCover]), its first page
+     * (which the book then reads on from, as it is the cover), or the template made for it.
      */
     enum class CoverMode { OWN, FIRST_PAGE, MADE }
 
