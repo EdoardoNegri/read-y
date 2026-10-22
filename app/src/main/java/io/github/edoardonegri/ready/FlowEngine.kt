@@ -145,17 +145,30 @@ class FlowEngine(
         }
 
         override fun onPageFinished(view: WebView, url: String?) {
-            if (injected || closed) return
+            if (closed || ready) return
             // A page that finished loading after another was asked for is not the one to be set out.
             if (url != null && Uri.parse(url).path.orEmpty().removePrefix("/") != book.spine[chapter]) return
-            injected = true
-            view.evaluateJavascript(SCRIPT, null)
-            val anchor = pendingAnchor?.let { JSONObject.quote(it) } ?: "null"
-            view.evaluateJavascript("__r.apply(${laidOut()},$pendingFraction,$anchor)", null)
-            pendingAnchor = null
-            // If the chapter could not be scripted (e.g. malformed XHTML) still show what loaded.
-            view.postDelayed({ if (!closed && !ready) reveal() }, 1500)
+            inject(view, loadSerial, false)
         }
+    }
+
+    /**
+     * Sets the chapter out. The script and the layout each take hold only once in a page, so this can
+     * be asked again: a page that finished loading may have been replaced by another of the same
+     * chapter (see [show]) after it was scripted, and the one that stayed would otherwise be shown
+     * as the book has it, its pictures at their full size and in no light. Should the chapter still
+     * not be laid out a moment later it is scripted once more, and shown as it is only if that fails too
+     * (e.g. malformed XHTML).
+     */
+    private fun inject(view: WebView, serial: Int, retried: Boolean) {
+        injected = true
+        view.evaluateJavascript(SCRIPT, null)
+        val anchor = pendingAnchor?.let { JSONObject.quote(it) } ?: "null"
+        view.evaluateJavascript("window.__r&&!__r.cfg&&__r.apply(${laidOut()},$pendingFraction,$anchor)", null)
+        view.postDelayed({
+            if (closed || ready || serial != loadSerial) return@postDelayed
+            if (retried) reveal() else inject(view, serial, true)
+        }, 1500)
     }
 
     private inner class Bridge {
@@ -229,6 +242,7 @@ class FlowEngine(
     private fun reveal() {
         if (ready) return
         ready = true
+        pendingAnchor = null
         web.alpha = 1f
         // The first page, once all of it is there to be drawn: a book that opens on its cover once
         // the picture of it is there too, which the page fetches only once it shows it.
