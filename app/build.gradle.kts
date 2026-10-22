@@ -17,6 +17,11 @@ android {
         versionName = "1.0"
     }
 
+    // The app has English text only: the translations the libraries bring along are left out.
+    androidResources {
+        localeFilters += "en"
+    }
+
     buildTypes {
         release {
             optimization {
