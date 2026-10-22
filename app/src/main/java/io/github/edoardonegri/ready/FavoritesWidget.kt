@@ -403,8 +403,8 @@ private class Shelves(private val ctx: Context, private val shelf: WidgetShelf) 
         val area = RectF(0f, bmp.height - bmp.width * 1.5f, bmp.width.toFloat(), bmp.height.toFloat())
         paint.color = ShelfArt.LEATHER
         c.drawRect(area, paint)
-        Library.decodeCover(ctx, f, BitmapFactory.Options().apply { inSampleSize = 2 })?.let { Library.drawCropped(c, it, area, paint) }
-        ShelfArt.drawBinding(c, area, paint)
+        val picture = Library.decodeCover(ctx, f, BitmapFactory.Options().apply { inSampleSize = 2 })
+        if (picture != null) ShelfArt.drawBound(c, picture, area, paint) else ShelfArt.drawBinding(c, area, paint)
         return bmp
     }
 

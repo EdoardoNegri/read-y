@@ -136,20 +136,21 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
     }
 
     /**
-     * A cover with the [binding] the shelf draws over it (ShelfArt.drawBinding), which goes with it
+     * A cover with the [binding] the shelf draws with it (ShelfArt.drawBound), which goes with it
      * as it swings open, or grows; it is as large as the cover makes it.
      */
     private class Cover(ctx: Activity) : AppCompatImageView(ctx) {
-        private val paint = Paint()
         private val area = RectF()
+        private val bound = ViewBinding(this)
         var binding by changes(false, ::invalidate)
 
         override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            if (!binding) return
-            // Over the picture, which is drawn within the padding.
+            if (!binding) return super.onDraw(canvas)
+            // The picture is drawn within the padding, and so is the binding.
             area.set(paddingLeft.toFloat(), paddingTop.toFloat(), (width - paddingRight).toFloat(), (height - paddingBottom).toFloat())
-            ShelfArt.drawBinding(canvas, area, paint)
+            bound.begin(canvas, area)
+            super.onDraw(canvas)
+            bound.end(canvas, area)
         }
     }
 

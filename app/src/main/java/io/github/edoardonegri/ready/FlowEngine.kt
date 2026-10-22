@@ -391,11 +391,14 @@ class FlowEngine(
 
     override val onLastPage get() = ready && !atCover && !s.vertical && chapter == book.spine.lastIndex && lastPage >= lastPages - 1
 
-    /** The cover, as a picture to serve to the page: the screen's width, and no wider than a phone's. */
+    /**
+     * The cover, as a picture to serve to the page: the screen's width, and no wider than a phone's;
+     * in the shape of a book, which the page shows as it is, with its crease in place (ShelfArt.bound).
+     */
     private fun coverBytes(): ByteArray {
         val width = minOf(act.resources.displayMetrics.widthPixels, 1080)
-        val cover = Library.endCover(act.applicationContext, file, width) { book.coverBitmap(width) }
-        return ByteArrayOutputStream().also { cover.compress(Bitmap.CompressFormat.JPEG, 90, it) }.toByteArray()
+        val cover = ShelfArt.bound(Library.endCover(act.applicationContext, file, width) { book.coverBitmap(width) })
+        return ByteArrayOutputStream().also { cover.compress(Bitmap.CompressFormat.JPEG, 92, it) }.toByteArray()
     }
 
     /** Where the cover stands, in pixels, see [coverAt]; empty for the whole page. */

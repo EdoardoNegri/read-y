@@ -192,7 +192,8 @@ class PageEngine(
         val app = frame.context.applicationContext
         exec.execute {
             val bmp = try {
-                Library.endCover(app, file, w) { source.render(0, w, h, false) }
+                // In the shape of a book, with its crease in place: the cover is shown as it is, over the page.
+                ShelfArt.bound(Library.endCover(app, file, w) { source.render(0, w, h, false) })
             } catch (e: Throwable) {
                 null
             }

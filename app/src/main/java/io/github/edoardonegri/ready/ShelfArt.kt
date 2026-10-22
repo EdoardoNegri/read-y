@@ -1,9 +1,12 @@
 package io.github.edoardonegri.ready
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
@@ -11,10 +14,16 @@ import android.graphics.RadialGradient
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.os.Build
+import android.widget.ImageView
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.createBitmap
 import androidx.core.graphics.withTranslation
+import java.util.WeakHashMap
 import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.sin
 
 /**
@@ -326,10 +335,175 @@ object ShelfArt {
     const val LEATHER = 0xFF24160D.toInt()
 
     /**
+     * Draws the picture [b] as a cover in [cover]: cut to its shape about its middle, as the shelf
+     * shows a cover, and starting at the crease, which has the colours of the edge it meets
+     * ([edge]), so that nothing of the picture is hidden by it. With the shading of the binding
+     * ([drawBinding]) over it, unless it is to be [shaded] by someone else, as the reader does.
+     */
+    fun drawBound(c: Canvas, b: Bitmap, cover: RectF, paint: Paint, shaded: Boolean = true) {
+        val seen = cut(b.width, b.height, cover.width(), cover.height(), RectF())
+        edge(b, seen)?.let { drawCrease(c, cover, it, paint) }
+        val src = Rect(seen.left.toInt(), seen.top.toInt(), seen.right.toInt(), seen.bottom.toInt())
+        c.drawBitmap(b, src, RectF(cover.left + HINGE * cover.width(), cover.top, cover.right, cover.bottom), paint)
+        if (shaded) drawBinding(c, cover, paint)
+    }
+
+    /**
+     * The cover that ends a book as the reader shows it, but for the shading ([drawBinding]) that it
+     * draws over it: [b] cut to the shape of a book, as large as it is, with the crease in place.
+     */
+    fun bound(b: Bitmap): Bitmap {
+        val w = minOf(b.width.toFloat(), b.height / ShelfSpec.BOOK).toInt().coerceAtLeast(1)
+        val h = (w * ShelfSpec.BOOK).toInt()
+        val out = createBitmap(w, h)
+        drawBound(Canvas(out), b, RectF(0f, 0f, w.toFloat(), h.toFloat()), Paint(Paint.FILTER_BITMAP_FLAG), shaded = false)
+        return out
+    }
+
+    /**
+     * Begins to draw a picture that fits [cover], one an ImageView draws: puts the crease, and
+     * moves the drawing over to the part of [cover] that starts at it; ends with [endBound], given
+     * what this gives back, which is -1 where there is no [edge] to make the crease of, and the
+     * picture is then drawn as it is.
+     */
+    fun beginBound(c: Canvas, cover: RectF, edge: Bitmap?, paint: Paint): Int {
+        if (edge == null) return -1
+        drawCrease(c, cover, edge, paint)
+        val saved = c.save()
+        c.translate(cover.left + HINGE * cover.width(), 0f)
+        c.scale(1f - HINGE, 1f)
+        c.translate(-cover.left, 0f)
+        return saved
+    }
+
+    /** Ends what [beginBound] began, with the shading of the binding over it. */
+    fun endBound(c: Canvas, saved: Int, cover: RectF, paint: Paint) {
+        if (saved >= 0) c.restoreToCount(saved)
+        drawBinding(c, cover, paint)
+    }
+
+    /** Paints the crease of [cover], where its hinge is, from [edge]; the picture comes over the rest. */
+    private fun drawCrease(c: Canvas, cover: RectF, edge: Bitmap, paint: Paint) {
+        val filtering = paint.isFilterBitmap
+        paint.isFilterBitmap = true
+        paint.style = Paint.Style.FILL
+        paint.alpha = 255
+        paint.shader = null
+        // A little under the picture, which is drawn over it, to leave no seam.
+        c.drawBitmap(edge, null, RectF(cover.left, cover.top, cover.left + HINGE * cover.width() + 1f, cover.bottom), paint)
+        paint.isFilterBitmap = filtering
+    }
+
+    /** Sets [out] to the part of a picture [w] by [h] that a cover [coverW] by [coverH] shows, as with centerCrop. */
+    fun cut(w: Int, h: Int, coverW: Float, coverH: Float, out: RectF): RectF {
+        val scale = max(coverW / w, coverH / h)
+        val sw = coverW / scale
+        val sh = coverH / scale
+        out.set((w - sw) / 2, (h - sh) / 2, (w + sw) / 2, (h + sh) / 2)
+        return out
+    }
+
+    /** What is known of the colours along the left edge of [seen], a part of a picture, as a strip that is [EDGE_ROWS] high. */
+    private class Known(val seen: RectF, val strip: Bitmap)
+
+    private val known = WeakHashMap<Bitmap, MutableList<Known>>()
+
+    /**
+     * The colours along the left edge of [seen], the part of the picture [b] that a cover shows, from
+     * top to bottom as a strip a pixel wide: each the average of a little of the edge over a stretch
+     * of its height, [EDGE_ROWS] of them, so that a busy edge makes a smooth crease. Kept for the
+     * picture, which is looked at once for each part of it that is shown. Null if it cannot be looked into.
+     */
+    fun edge(b: Bitmap, seen: RectF): Bitmap? {
+        if (b.isRecycled || seen.isEmpty) return null
+        val slack = EDGE_SLACK * max(b.width, b.height)
+        synchronized(known) {
+            known[b]?.firstOrNull { it.seen.isNear(seen, slack) }?.let { return it.strip }
+        }
+        val strip = read(b, seen) ?: return null
+        remember(b, seen, strip)
+        return strip
+    }
+
+    /**
+     * Keeps for [to], the picture [from] as the drawing hardware keeps it, which cannot be looked
+     * into, the edge it has as a cover cut to the shape of a book, as it is shown nearly everywhere.
+     */
+    fun keepBookEdge(from: Bitmap, to: Bitmap) {
+        val seen = cut(from.width, from.height, 1f, ShelfSpec.BOOK, RectF())
+        edge(from, seen)?.let { remember(to, seen, it) }
+    }
+
+    private fun remember(b: Bitmap, seen: RectF, strip: Bitmap) {
+        synchronized(known) {
+            val list = known.getOrPut(b) { mutableListOf() }
+            if (list.size >= EDGE_KEPT) list.removeAt(0)
+            list.add(Known(RectF(seen), strip))
+        }
+    }
+
+    private fun RectF.isNear(o: RectF, slack: Float) =
+        Math.abs(left - o.left) <= slack && Math.abs(top - o.top) <= slack &&
+            Math.abs(right - o.right) <= slack && Math.abs(bottom - o.bottom) <= slack
+
+    private fun read(b: Bitmap, seen: RectF): Bitmap? {
+        // A picture the drawing hardware keeps cannot be looked into, but a copy of it can.
+        val readable = if (Build.VERSION.SDK_INT >= 26 && b.config == Bitmap.Config.HARDWARE) {
+            try {
+                b.copy(Bitmap.Config.ARGB_8888, false) ?: return null
+            } catch (e: OutOfMemoryError) {
+                return null
+            }
+        } else {
+            b
+        }
+        try {
+            val colors = IntArray(EDGE_ROWS)
+            for (row in 0 until EDGE_ROWS) {
+                var r = 0
+                var g = 0
+                var bl = 0
+                for (j in 0 until EDGE_DOWN) {
+                    val y = (seen.top + seen.height() * (row + (j + 0.5f) / EDGE_DOWN) / EDGE_ROWS).toInt().coerceIn(0, readable.height - 1)
+                    for (i in 0 until EDGE_ACROSS) {
+                        val x = (seen.left + seen.width() * EDGE_PART * (i + 0.5f) / EDGE_ACROSS).toInt().coerceIn(0, readable.width - 1)
+                        val p = readable.getPixel(x, y)
+                        r += Color.red(p)
+                        g += Color.green(p)
+                        bl += Color.blue(p)
+                    }
+                }
+                val n = EDGE_DOWN * EDGE_ACROSS
+                colors[row] = Color.rgb(r / n, g / n, bl / n)
+            }
+            return Bitmap.createBitmap(colors, 1, EDGE_ROWS, Bitmap.Config.ARGB_8888)
+        } catch (e: Exception) {
+            return null
+        } finally {
+            if (readable !== b) readable.recycle()
+        }
+    }
+
+    /**
+     * How the crease of a cover is made of the edge of its picture: the colours are those of the
+     * outer [EDGE_PART] of the picture's width, in [EDGE_ROWS] bands from the top to the foot (each
+     * about 1.5% of the height), found from [EDGE_DOWN] by [EDGE_ACROSS] places in each band. Tried
+     * from none up to a band of 9%: 1.5% is as smooth as it can be before the edge of a band of
+     * colour that meets the crease begins to run into it. Two parts of a picture whose sides are
+     * as near as [EDGE_SLACK] of its size share a strip, and [EDGE_KEPT] parts are kept for each picture.
+     */
+    private const val EDGE_ROWS = 64
+    private const val EDGE_PART = 0.02f
+    private const val EDGE_DOWN = 6
+    private const val EDGE_ACROSS = 3
+    private const val EDGE_SLACK = 0.01f
+    private const val EDGE_KEPT = 4
+
+    /**
      * Gives a flat cover the look of a bound book: a shaded hinge along the spine, the crease, and
      * a lit edge beside it. All of it is as wide as the cover makes it ([HINGE]), so that a cover
      * looks the same however large it is drawn: on the shelf, as it grows off it, and as the cover
-     * that ends a book.
+     * that ends a book. The shading goes over a cover that starts at the crease ([drawBound]).
      */
     fun drawBinding(c: Canvas, cover: RectF, paint: Paint) {
         val hinge = HINGE * cover.width()
@@ -413,8 +587,11 @@ object ShelfArt {
         paint.shader = null
     }
 
-    /** How wide the crease of a cover is, a part of its width: about 5dp on the shelf. */
-    const val HINGE = 0.045f
+    /**
+     * How wide the crease of a cover is, a part of its width: about 4dp on the shelf. The joint of
+     * a hardback sits some 6 to 8mm in from the spine on a book 13 to 15cm wide, a little over 4% of it.
+     */
+    const val HINGE = 0.04f
 
     /** Width of the posts [drawDepth] gives a case. */
     private const val POST_DP = 5
@@ -459,4 +636,49 @@ object ShelfArt {
      * cover that ends a book: a new one each time, as each is drawn at its own size.
      */
     fun wall(ctx: Context): Drawable = ContextCompat.getDrawable(ctx, R.drawable.shelf_back)!!.mutate()
+}
+
+/**
+ * The binding of a cover that an ImageView draws: [begin] before the view draws its picture, and
+ * [end] after it. The picture is drawn as the view lays it out, but from the crease on, and the
+ * crease has the colours of the edge of the picture that is shown there (see [ShelfArt.drawBound]).
+ * Where the view shows no picture it can look into, only the shading of the binding is drawn.
+ */
+class ViewBinding(private val view: ImageView) {
+    private val paint = Paint()
+    private val inverse = Matrix()
+    private val seen = RectF()
+    private var saved = -1
+
+    fun begin(canvas: Canvas, area: RectF) {
+        saved = ShelfArt.beginBound(canvas, area, edge(), paint)
+    }
+
+    fun end(canvas: Canvas, area: RectF) {
+        ShelfArt.endBound(canvas, saved, area, paint)
+        saved = -1
+    }
+
+    /** The edge of the part of the picture the view shows, within its padding; null if it shows none that can be looked into. */
+    private fun edge(): Bitmap? {
+        val drawable = view.drawable ?: return null
+        val bmp = (drawable as? BitmapDrawable)?.bitmap ?: return null
+        val w = (view.width - view.paddingLeft - view.paddingRight).toFloat()
+        val h = (view.height - view.paddingTop - view.paddingBottom).toFloat()
+        if (w <= 0f || h <= 0f) return null
+        if (view.scaleType == ImageView.ScaleType.FIT_XY) {
+            seen.set(0f, 0f, bmp.width.toFloat(), bmp.height.toFloat())
+        } else {
+            // Where the view's own place is in the picture, which the view lays out as it is told to.
+            if (!view.imageMatrix.invert(inverse)) return null
+            seen.set(0f, 0f, w, h)
+            inverse.mapRect(seen)
+            // The drawable is as large as its picture, unless the picture is made for another density.
+            val sx = bmp.width.toFloat() / drawable.intrinsicWidth.coerceAtLeast(1)
+            val sy = bmp.height.toFloat() / drawable.intrinsicHeight.coerceAtLeast(1)
+            seen.set(seen.left * sx, seen.top * sy, seen.right * sx, seen.bottom * sy)
+            if (!seen.intersect(0f, 0f, bmp.width.toFloat(), bmp.height.toFloat())) return null
+        }
+        return ShelfArt.edge(bmp, seen)
+    }
 }

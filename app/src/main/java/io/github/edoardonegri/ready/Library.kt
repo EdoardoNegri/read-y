@@ -160,19 +160,21 @@ object Library {
 
     /**
      * Which way the covers kept in files were made, in their names, with how wide ([coverWidth]):
-     * covers made before the made covers took the shape of a book on the shelf, or narrower, are
-     * made anew, and the old files let go.
+     * covers made before the made covers took the shape of a book on the shelf, or narrower, or
+     * before their frame ran as near the spine as it does the other edges, are made anew, and the
+     * old files let go.
      */
-    private const val COVERS_MADE = 4
+    private const val COVERS_MADE = 5
 
     /**
-     * How far in from the edge the gold frame of a made cover runs (placeholder): on it, all but a
-     * hair; on the spine side, just beside the crease the shelf draws there (ShelfArt.HINGE). The
-     * frame is [FRAME_W] wide, and what is written stands [TEXT_IN] inside it.
+     * How far in from the edge the gold frame of a made cover runs (placeholder): all but a hair, on
+     * every side, the spine side too: the cover is drawn from the crease the shelf draws there on
+     * (ShelfArt.drawBound), and the crease is of the colour of the leather. The frame is [FRAME_W]
+     * wide, and what is written stands [TEXT_IN] inside it.
      */
     private const val FRAME_W = 4f
     private const val FRAME_IN = 4f
-    private const val FRAME_SPINE = COVER_W * ShelfArt.HINGE + FRAME_W / 2
+    private const val FRAME_SPINE = FRAME_IN
     private const val TEXT_IN = 32f
 
     /** How much shows of what stands beside the chosen things in a miniature, of 255; as on the shelf (ShelfAdapter). */
@@ -937,7 +939,7 @@ object Library {
         val app = ctx.applicationContext
         io.execute {
             val sharp = try {
-                bigCover(app, f, width).uploaded()
+                bigCover(app, f, width).uploaded(cover = true)
             } catch (e: Throwable) {
                 return@execute
             }
@@ -1255,8 +1257,8 @@ object Library {
                 name = meta(ctx, f).title
                 paint.color = ShelfArt.LEATHER
                 c.drawRect(cover, paint)
-                coverToDraw(ctx, f)?.let { drawCropped(c, it, cover, paint) }
-                ShelfArt.drawBinding(c, cover, paint)
+                val picture = coverToDraw(ctx, f)
+                if (picture != null) ShelfArt.drawBound(c, picture, cover, paint) else ShelfArt.drawBinding(c, cover, paint)
             }
 
             val plaque = Rect(
@@ -1291,18 +1293,6 @@ object Library {
         return bmp
     }
 
-    /** Draws [b] into [dst] the way an ImageView with centerCrop does. */
-    fun drawCropped(c: Canvas, b: Bitmap, dst: RectF, paint: Paint) {
-        val scale = maxOf(dst.width() / b.width, dst.height() / b.height)
-        val sw = dst.width() / scale
-        val sh = dst.height() / scale
-        val src = Rect(
-            ((b.width - sw) / 2).toInt(), ((b.height - sh) / 2).toInt(),
-            ((b.width + sw) / 2).toInt(), ((b.height + sh) / 2).toInt(),
-        )
-        c.drawBitmap(b, src, dst, paint)
-    }
-
     /**
      * The cover made for a book that has none: dark leather with a gold frame round its edge, its
      * [title] and its [author]. It has the shape of a book on the shelf (ShelfSpec.BOOK), which
@@ -1324,7 +1314,7 @@ object Library {
             strokeWidth = FRAME_W
         }
         c.drawRect(FRAME_SPINE, FRAME_IN, w - FRAME_IN, h - FRAME_IN, frame)
-        // What is written stands in the middle of the frame, as far inside it on either side, the crease left out.
+        // What is written stands in the middle of the frame, as far inside it on either side.
         val textLeft = FRAME_SPINE + TEXT_IN
 
         fun text(s: String, size: Float, style: Int, lines: Int): StaticLayout {

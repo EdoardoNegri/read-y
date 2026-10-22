@@ -417,7 +417,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         val width = resources.displayMetrics.widthPixels
         Library.io.execute {
             val picture = try {
-                Library.bigCover(app, file, width).uploaded()
+                Library.bigCover(app, file, width).uploaded(cover = true)
             } catch (e: Throwable) {
                 null
             }

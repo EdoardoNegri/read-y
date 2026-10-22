@@ -68,8 +68,13 @@ fun View.snapshot(): Bitmap? {
  * time it is drawn, which takes the frame that draws it a moment longer: one shown in the middle of
  * the book opening would hold it up. Itself where it cannot be.
  */
-fun Bitmap.uploaded(): Bitmap =
-    if (Build.VERSION.SDK_INT >= 26 && config != Bitmap.Config.HARDWARE) copy(Bitmap.Config.HARDWARE, false) ?: this else this
+fun Bitmap.uploaded(cover: Boolean = false): Bitmap {
+    if (Build.VERSION.SDK_INT < 26 || config == Bitmap.Config.HARDWARE) return this
+    val up = copy(Bitmap.Config.HARDWARE, false) ?: return this
+    // A cover is shown with its crease, whose colours are those of its edge, which cannot be looked into once it is kept there.
+    if (cover) ShelfArt.keepBookEdge(this, up)
+    return up
+}
 
 /** A property that calls [then] whenever it is set to something other than it was, e.g. to draw a view anew. */
 fun <T> changes(initial: T, then: () -> Unit) = Delegates.observable(initial) { _, old, new -> if (old != new) then() }
@@ -86,7 +91,7 @@ class RatioImageView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet
      */
     var tall by changes(0, ::requestLayout)
 
-    /** Draws a book binding (shaded spine hinge) over the image. */
+    /** Draws a book binding (the crease along the spine, shaded) with the image: it starts at the crease. */
     var binding by changes(false, ::invalidate)
 
     /** Draws the depth of a bookcase (posts and the shadows inside it) over the image. */
@@ -94,6 +99,7 @@ class RatioImageView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet
 
     private val shade = Paint()
     private val area = RectF()
+    private val bound = ViewBinding(this)
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
@@ -101,9 +107,10 @@ class RatioImageView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet
     }
 
     override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
         area.set(0f, 0f, width.toFloat(), height.toFloat())
-        if (binding) ShelfArt.drawBinding(canvas, area, shade)
+        if (binding) bound.begin(canvas, area)
+        super.onDraw(canvas)
+        if (binding) bound.end(canvas, area)
         if (cased) ShelfArt.drawDepth(canvas, area, resources.displayMetrics.density, shade)
     }
 }
@@ -593,9 +600,10 @@ class RailButton(ctx: Context, attrs: AttributeSet?) : AppCompatImageButton(ctx,
 }
 
 /**
- * The crease the shelf draws along the spine of a cover (ShelfArt.drawBinding), over the cover that
+ * The shading the shelf draws along the spine of a cover (ShelfArt.drawBinding), over the cover that
  * ends a book where the reader shows it, so that it looks as it does on the shelf: [box] is where
- * the cover is, or null while it is not shown.
+ * the cover is, or null while it is not shown. The cover is made with its crease in place
+ * (ShelfArt.bound), which only needs this shading over it.
  */
 class CoverCrease @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = null) : View(ctx, attrs) {
     private val paint = Paint()

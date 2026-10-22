@@ -75,12 +75,10 @@ object ContinueShortcut {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         paint.color = ShelfArt.LEATHER
         c.drawRect(area, paint)
-        Library.cover(ctx, book)?.let { cover ->
-            // A picture the drawing hardware keeps cannot be drawn here, but a copy of it can.
-            val drawable = if (Build.VERSION.SDK_INT >= 26 && cover.config == Bitmap.Config.HARDWARE) cover.copy(Bitmap.Config.ARGB_8888, false) else cover
-            drawable?.let { Library.drawCropped(c, it, area, paint) }
-        }
-        ShelfArt.drawBinding(c, area, paint)
+        val cover = Library.cover(ctx, book)
+        // A picture the drawing hardware keeps cannot be drawn here, but a copy of it can.
+        val drawable = if (cover != null && Build.VERSION.SDK_INT >= 26 && cover.config == Bitmap.Config.HARDWARE) cover.copy(Bitmap.Config.ARGB_8888, false) else cover
+        if (drawable != null) ShelfArt.drawBound(c, drawable, area, paint) else ShelfArt.drawBinding(c, area, paint)
         return IconCompat.createWithAdaptiveBitmap(bmp)
     }
 
