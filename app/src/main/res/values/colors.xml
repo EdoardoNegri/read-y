@@ -10,4 +10,8 @@
     <color name="plaque_text">#FF3B2A05</color>
     <color name="cream">#FFF3E6C8</color>
     <color name="black">#FF000000</color>
+    <!-- The switches of the settings: a gold knob on a dim gold track when on, a dark one on a grey track when off. -->
+    <color name="switch_track_on">#FF7A6626</color>
+    <color name="switch_thumb_off">#FF272727</color>
+    <color name="switch_track_off">#FF5E5E5E</color>
 </resources>

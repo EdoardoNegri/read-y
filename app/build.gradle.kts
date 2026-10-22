@@ -38,7 +38,7 @@ android {
 dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.core.ktx)
-    implementation(libs.material)
+    implementation(libs.androidx.recyclerview)
     // Installs the baseline profile (baselineprofile/) on phones that do not get it from Google Play.
     implementation(libs.androidx.profileinstaller)
     baselineProfile(project(":baselineprofile"))

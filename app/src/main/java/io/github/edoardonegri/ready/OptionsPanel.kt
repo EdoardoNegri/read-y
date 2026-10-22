@@ -1,6 +1,7 @@
 package io.github.edoardonegri.ready
 
 import android.app.Activity
+import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.view.ContextThemeWrapper
 import android.view.View
@@ -9,8 +10,8 @@ import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
-import com.google.android.material.switchmaterial.SwitchMaterial
 import java.io.File
 import kotlin.math.abs
 
@@ -310,7 +311,10 @@ class OptionsPanel(
     }
 
     private fun toggle(name: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-        val sw = SwitchMaterial(ctx)
+        val sw = SwitchCompat(ctx)
+        val on = intArrayOf(android.R.attr.state_checked)
+        sw.thumbTintList = ColorStateList(arrayOf(on, intArrayOf()), intArrayOf(color(R.color.gold), color(R.color.switch_thumb_off)))
+        sw.trackTintList = ColorStateList(arrayOf(on, intArrayOf()), intArrayOf(color(R.color.switch_track_on), color(R.color.switch_track_off)))
         sw.text = name
         sw.textSize = 15f
         sw.typeface = Typeface.SERIF
