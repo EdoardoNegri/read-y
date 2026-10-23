@@ -1022,30 +1022,33 @@ class FlowEngine(
     return Math.round(r.left + R.page * R.W) + ':' + Math.round(r.top);
   }
 
-  // For a while after the page is laid out, the text may still change size by itself: the web
-  // view's text zoom comes into force a moment later, a font or a picture comes in. Each frame
-  // until then the pages are counted again, and the place being read is kept, before it is drawn.
-  var watching = 0;
+  // After the page is laid out, the text may still change size by itself: the web view's text
+  // zoom comes into force a moment later, a font or a picture comes in, however late. Whenever
+  // anything in it changes size, the pages are counted again, and the place being read is kept,
+  // before it is drawn; while nothing does, nothing is done, and the screen is left to rest.
+  var watching = null;
   function settle() {
-    var id = ++watching, frames = 0, was = extent();
-    var look = function () {
-      if (id !== watching) return;
+    if (watching) watching.disconnect();
+    if (!window.ResizeObserver) return;
+    var was = extent();
+    watching = new ResizeObserver(function () {
       var now = extent();
-      if (now !== was) {
-        was = now;
-        if (R.cfg.vertical) {
-          window.scrollTo(0, Math.round(R.frac * maxScroll()));
-          report();
-        } else {
-          var frac = R.frac;
-          R.pages = count();
-          R.go(Math.floor(frac * R.pages + 0.001));
-          was = extent();
-        }
+      if (now === was) return;
+      was = now;
+      if (R.cfg.vertical) {
+        window.scrollTo(0, Math.round(R.frac * maxScroll()));
+        report();
+      } else {
+        var frac = R.frac;
+        R.pages = count();
+        R.go(Math.floor(frac * R.pages + 0.001));
+        was = extent();
       }
-      if (++frames < 45) requestAnimationFrame(look);
-    };
-    requestAnimationFrame(look);
+    });
+    // Each part of the chapter is watched, for the body itself keeps the size of the page as its
+    // columns grow.
+    watching.observe(document.body);
+    for (var el = document.body.firstElementChild; el; el = el.nextElementSibling) watching.observe(el);
   }
 
   function report() {
