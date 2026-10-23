@@ -22,6 +22,20 @@ android {
         localeFilters += "en"
     }
 
+    // Files the libraries bring along that nothing in the app reads: Kotlin's descriptions of its own
+    // types (for kotlin-reflect, which is not used), the coroutines' debugger probes, the libraries'
+    // version stamps and their licence texts.
+    packaging {
+        resources {
+            excludes += listOf(
+                "kotlin/**",
+                "DebugProbesKt.bin",
+                "META-INF/*.version",
+                "META-INF/**/LICENSE.txt",
+            )
+        }
+    }
+
     buildTypes {
         release {
             optimization {
