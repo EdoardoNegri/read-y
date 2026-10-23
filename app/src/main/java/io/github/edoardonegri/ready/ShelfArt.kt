@@ -20,6 +20,7 @@ import android.os.Build
 import android.widget.ImageView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.createBitmap
+import androidx.core.graphics.get
 import androidx.core.graphics.withTranslation
 import java.util.WeakHashMap
 import kotlin.math.cos
@@ -467,7 +468,7 @@ object ShelfArt {
                     val y = (seen.top + seen.height() * (row + (j + 0.5f) / EDGE_DOWN) / EDGE_ROWS).toInt().coerceIn(0, readable.height - 1)
                     for (i in 0 until EDGE_ACROSS) {
                         val x = (seen.left + seen.width() * EDGE_PART * (i + 0.5f) / EDGE_ACROSS).toInt().coerceIn(0, readable.width - 1)
-                        val p = readable.getPixel(x, y)
+                        val p = readable[x, y]
                         r += Color.red(p)
                         g += Color.green(p)
                         bl += Color.blue(p)

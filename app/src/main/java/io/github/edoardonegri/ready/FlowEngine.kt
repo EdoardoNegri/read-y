@@ -147,7 +147,7 @@ class FlowEngine(
         override fun onPageFinished(view: WebView, url: String?) {
             if (closed || ready) return
             // A page that finished loading after another was asked for is not the one to be set out.
-            if (url != null && Uri.parse(url).path.orEmpty().removePrefix("/") != book.spine[chapter]) return
+            if (url != null && url.toUri().path.orEmpty().removePrefix("/") != book.spine[chapter]) return
             inject(view, loadSerial, false)
         }
     }
