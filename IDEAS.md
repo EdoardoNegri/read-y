@@ -16,6 +16,7 @@ Notes for later, in no strict order. Tick a box when it is done. The file has tw
 
 - [ ] **A "Currently reading" widget.** The only widget shows favorites. A single large book that opens where you left off would be a second, simpler widget.
 - [ ] **Share a book out of the app** from the long-press menu.
+- [ ] **Tags.** A book can have one or more tags, say "to read", "sci-fi" or "lent to Anna". Tags are picked while editing the book, where new ones can be created as well. The shelf search finds books by their tags too, as it does by title and author.
 - [ ] **Something for tapping the brass title plaque.** The first idea (details of the shelf being shown) was built and then taken out again. The plaque does nothing for now. Ideas: the reading stats above, or a summary of the whole library.
 
 ## Languages and store

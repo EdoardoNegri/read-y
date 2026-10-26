@@ -70,14 +70,28 @@ class OptionsPanel(
         }
 
         section(t(R.string.opt_page))
+        // How many pages are shown side by side, which only a screen on its side, whose pages turn, has room for.
+        val spread = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        fun showSpread() {
+            spread.visibility = if (s.orientation == ReaderSettings.LANDSCAPE && !s.vertical) View.VISIBLE else View.GONE
+        }
         buttons(t(R.string.opt_direction), listOf(t(R.string.opt_direction_pages), t(R.string.opt_direction_scroll)), if (s.vertical) 1 else 0) {
             s.vertical = it == 1
+            showSpread()
             onLayout()
         }
         buttons(t(R.string.opt_rotation), listOf(t(R.string.opt_rotation_auto), t(R.string.opt_rotation_portrait), t(R.string.opt_rotation_landscape)), s.orientation) {
             s.orientation = it
+            showSpread()
             onLayout()
         }
+        within(spread) {
+            buttons(t(R.string.opt_spread), listOf(t(R.string.opt_spread_one), t(R.string.opt_spread_two)), if (s.twoPages) 1 else 0) {
+                s.twoPages = it == 1
+                onLayout()
+            }
+        }
+        showSpread()
         // What is shown around the text, each where the reader puts it, once it is shown at all.
         val around = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         fun showAround() {
@@ -189,6 +203,15 @@ class OptionsPanel(
             View(ctx).apply { setBackgroundColor(color(R.color.gold_dark)) },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply { topMargin = dp(6) },
         )
+    }
+
+    /** Adds [group] to the section being filled, and what [add] adds into it rather than into the section. */
+    private fun within(group: LinearLayout, add: () -> Unit) {
+        val outer = section
+        outer.addView(group)
+        section = group
+        add()
+        section = outer
     }
 
     /** The name of a setting on the left and, for a slider, what it is set to on the right. */

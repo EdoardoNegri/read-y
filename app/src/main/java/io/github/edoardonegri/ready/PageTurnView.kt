@@ -126,24 +126,34 @@ class PageTurnView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     }
 
     /**
+     * Whether the pages turned are two side by side, bound in the middle as an open book's: the
+     * right one turns over about the middle onto the left, see [drawBound].
+     */
+    private var bound = false
+
+    /**
      * Turns the sheet: [forward] folds the page being left away from the right, otherwise the
      * page shown by now, at [place], is folded back over it from the left: as it was pictured
      * when it was last left, if that was there and laid out the same, or else as [draw] draws it,
-     * as [cover] says.
+     * as [cover] says. Two pages side by side, if [spread], turn as the pages of a book do; the
+     * page turned to is then pictured going forward too, for its left page is on the back of the sheet.
      */
-    fun turn(forward: Boolean, draw: (Bitmap?) -> Bitmap?, place: String?) {
+    fun turn(forward: Boolean, draw: (Bitmap?) -> Bitmap?, place: String?, spread: Boolean = false) {
         if (state != STILL) return
-        if (!forward) {
+        if (!forward || spread) {
             val back = 1 - shown
-            val kept = pictures[back]?.takeIf { place != null && places[back] == place && it.width == width && it.height == height }
+            val kept = pictures[back]?.takeIf { !forward && place != null && places[back] == place && it.width == width && it.height == height }
             if (kept == null) {
                 pictures[back] = draw(pictures[back])?.also { it.prepareToDraw() } ?: return drop()
                 places[back] = place
             }
         }
+        bound = spread
         state = if (forward) FORWARD else BACKWARD
         val w = width.toFloat()
-        animator = ValueAnimator.ofFloat(if (forward) w else 0f, if (forward) 0f else w).apply {
+        // Bound in the middle, the sheet is folded from its outer edge as far as the middle.
+        val end = if (spread) w / 2 else 0f
+        animator = ValueAnimator.ofFloat(if (forward) w else end, if (forward) end else w).apply {
             duration = TURN_MS
             interpolator = AccelerateDecelerateInterpolator()
             addUpdateListener {
@@ -191,6 +201,7 @@ class PageTurnView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     override fun onDraw(canvas: Canvas) {
         val under = left ?: return
         if (state == IDLE) return
+        if (bound && state != STILL) return drawBound(canvas)
         if (state != FORWARD) canvas.drawBitmap(under, 0f, 0f, null)
         if (state == STILL) return
         val sheet = (if (state == FORWARD) under else arrived) ?: return
@@ -210,6 +221,39 @@ class PageTurnView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         }
         landing.setBounds((edge - 18 * d).toInt(), 0, edge.toInt(), h)
         if (edge > 0f) landing.draw(canvas)
+    }
+
+    /**
+     * Two pages side by side, turned as a book's: the right page of the earlier two is folded over
+     * about the middle onto their left page, with the later two's left page on its back, and their
+     * right page uncovered beneath it. Going back, it is the same turned the other way round. The
+     * shadows fade as the sheet lies down on either side, so that nothing changes as the pages are shown again.
+     */
+    private fun drawBound(canvas: Canvas) {
+        val earlier = (if (state == FORWARD) left else arrived) ?: return
+        val later = (if (state == FORWARD) arrived else left) ?: return
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val edge = 2 * fold - w
+        // What is left of the earlier two, and the later right page where the sheet has been lifted from.
+        canvas.withClip(0f, 0f, fold, h) { drawBitmap(earlier, 0f, 0f, null) }
+        canvas.withClip(fold, 0f, w, h) { drawBitmap(later, 0f, 0f, null) }
+        // How far over the sheet is, from 0 lying on the right to 1 lying on the left; it stands
+        // upright, and casts the most shadow, half way.
+        val over = ((w - fold) / (w / 2)).coerceIn(0f, 1f)
+        val alpha = (255 * 4 * over * (1 - over)).toInt()
+        for (shade in arrayOf(uncovered, back, landing)) shade.alpha = alpha
+        uncovered.setBounds(fold.toInt(), 0, (fold + 26 * d).toInt(), h.toInt())
+        uncovered.draw(canvas)
+        // The sheet folded over, the later left page on its back, coming down over the earlier one.
+        canvas.withClip(edge, 0f, fold, h) {
+            drawBitmap(later, edge, 0f, null)
+            back.setBounds(edge.toInt(), 0, fold.toInt(), h.toInt())
+            back.draw(this)
+        }
+        landing.setBounds((edge - 18 * d).toInt(), 0, edge.toInt(), h.toInt())
+        if (edge > 0f) landing.draw(canvas)
+        for (shade in arrayOf(uncovered, back, landing)) shade.alpha = 255
     }
 
     private companion object {

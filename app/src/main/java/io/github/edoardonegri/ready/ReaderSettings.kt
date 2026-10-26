@@ -67,7 +67,7 @@ class ReaderSettings(ctx: Context) {
      */
     val look: String
         get() = listOf(
-            fontSize, lineSpacing, marginH, marginV, font, fontFile, hyphenation, darkMode, warmth, infoLayout, orientation, vertical,
+            fontSize, lineSpacing, marginH, marginV, font, fontFile, hyphenation, darkMode, warmth, infoLayout, orientation, vertical, spread,
         ).joinToString(":")
 
     /** Where everything is shown around the text, as one word: a picture of a page is shown again only for one laid out the same. */
@@ -91,8 +91,14 @@ class ReaderSettings(ctx: Context) {
     /** true = continuous vertical scrolling, false = horizontal pages. */
     var vertical by bool(false)
 
-    /** 0 = follow sensor, 1 = portrait, 2 = landscape. */
+    /** 0 = follow sensor, 1 = portrait, 2 = landscape ([LANDSCAPE]). */
     var orientation by int(0)
+
+    /** In landscape, two pages are shown side by side, as the two of an open book; see [spread]. */
+    var twoPages by bool(false)
+
+    /** Whether two pages are shown side by side: asked for, in landscape, with the pages turning rather than scrolling. */
+    val spread: Boolean get() = twoPages && orientation == LANDSCAPE && !vertical
 
     /** Index into [FONTS]; see [fontFile]. */
     var font by int(0)
@@ -228,6 +234,9 @@ class ReaderSettings(ctx: Context) {
         }
 
         private const val INFO = "info_"
+
+        /** [orientation] for landscape. */
+        const val LANDSCAPE = 2
 
         /** The highest step of [hyphenation]. */
         const val HYPHENATION_MAX = 4

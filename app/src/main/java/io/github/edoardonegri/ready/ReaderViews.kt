@@ -4,11 +4,14 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Picture
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.os.Build
 import android.util.AttributeSet
@@ -25,6 +28,7 @@ import androidx.core.graphics.createBitmap
 import androidx.core.graphics.withClip
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.properties.Delegates
 
@@ -619,5 +623,50 @@ class CoverCrease @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     override fun onDraw(canvas: Canvas) {
         area.set(box ?: return)
         ShelfArt.drawBinding(canvas, area, paint)
+    }
+}
+
+/**
+ * The crease down the middle of two pages side by side (ReaderSettings.spread), where the paper of
+ * an open book curves down into its binding: a shadow on either side, deepest in the middle. A
+ * book of flowing text has its page draw the same, see [gradient].
+ */
+class SpineCrease(ctx: Context) : View(ctx) {
+    /** The colour of the shadow: black, or on dark pages the colour of their print, a faint seam of light. */
+    var color = Color.BLACK
+        set(value) {
+            if (field == value) return
+            field = value
+            paint.shader = null
+            invalidate()
+        }
+
+    private val paint = Paint()
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        paint.shader = null
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val mid = width / 2f
+        val reach = reach(mid)
+        if (paint.shader == null) paint.shader = LinearGradient(mid - reach, 0f, mid + reach, 0f, colors(color), STOPS, Shader.TileMode.CLAMP)
+        canvas.drawRect(mid - reach, 0f, mid + reach, height.toFloat(), paint)
+    }
+
+    companion object {
+        /** How far the crease reaches into each page, a part of its width: as far as the hinge of a cover (ShelfArt.HINGE). */
+        fun reach(page: Float) = ShelfArt.HINGE * page
+
+        /** Across the crease, where the shadow is as dark as [ALPHAS] say. */
+        private val STOPS = floatArrayOf(0f, 0.35f, 0.5f, 0.65f, 1f)
+        private val ALPHAS = intArrayOf(0, 0x12, 0x45, 0x12, 0)
+
+        private fun colors(color: Int) = IntArray(ALPHAS.size) { color and 0xFFFFFF or (ALPHAS[it] shl 24) }
+
+        /** The crease in [color] as a CSS background, across an element as wide as it reaches on both sides. */
+        fun gradient(color: Int) = ALPHAS.indices.joinToString(",", "linear-gradient(to right,", ")") {
+            "rgba(%d,%d,%d,%.3f) %.0f%%".format(Locale.US, Color.red(color), Color.green(color), Color.blue(color), ALPHAS[it] / 255f, STOPS[it] * 100)
+        }
     }
 }

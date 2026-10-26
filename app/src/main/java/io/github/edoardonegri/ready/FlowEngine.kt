@@ -308,9 +308,18 @@ class FlowEngine(
         val dm = act.resources.displayMetrics
         val w = if (web.width > 0) web.width else dm.widthPixels
         val h = if (web.height > 0) web.height else dm.heightPixels
+        // Two pages side by side on a screen on its side, if asked for: each half as wide, in whole
+        // CSS pixels, so the page is made an even number of them wide.
+        val cols = if (s.spread && w > h) 2 else 1
+        val cssW = (w / dm.density).toInt().let { it - it % cols }
         return JSONObject()
-            .put("w", (w / dm.density).toInt())
+            .put("w", cssW)
             .put("h", (h / dm.density).toInt())
+            .put("cols", cols)
+            // The crease between the two pages, how far it reaches into each, and its shadow: on dark
+            // pages the faint light of their print.
+            .put("creaseW", if (cols == 2) SpineCrease.reach(cssW / 2f).roundToInt() else 0)
+            .put("crease", if (cols == 2) SpineCrease.gradient(if (s.darkMode) p.fg else Color.BLACK) else "")
             .put("bg", css(p.bg))
             .put("fg", css(p.fg))
             .put("link", css(p.link))
@@ -872,7 +881,7 @@ class FlowEngine(
         }
 
         /** What in [config] is about the light the page is in, which it is not laid out by. */
-        private val LIGHT_KEYS = listOf("bg", "fg", "link", "themed", "lamp")
+        private val LIGHT_KEYS = listOf("bg", "fg", "link", "themed", "lamp", "crease")
 
         /** How long a chapter is waited for to be laid out, before it is asked for again, in ms. */
         private const val LOAD_WAIT_MS = 4000L
@@ -918,10 +927,16 @@ class FlowEngine(
   var tail = document.createElement('div');
   tail.style.cssText = 'height:0;margin:0;padding:0;border:0;';
   document.body.appendChild(tail);
+  // The crease between two pages side by side (see css): outside the text, which moves by the page,
+  // and not in the way of a tap.
+  var crease = document.createElement('div');
+  crease.id = 'readyCrease';
+  crease.style.cssText = 'position:fixed;top:0;height:100%;pointer-events:none;z-index:2147483646;display:none;';
+  document.documentElement.appendChild(crease);
   var R = window.__r = { page: 0, pages: 1, frac: 0, cfg: null, W: 0, H: 0 };
 
   function css(c, W, H) {
-    var ih = H - 2 * c.mv, iw = W - 2 * c.mh;
+    var ih = H - 2 * c.mv;
     var s = 'html{margin:0!important;padding:0!important;background:' + c.bg + '!important;}'
       + 'body{background:' + c.bg + '!important;color:' + c.fg + '!important;margin:0!important;'
       + 'box-sizing:border-box!important;max-width:none!important;'
@@ -954,13 +969,20 @@ class FlowEngine(
     // shows the page through it: its own colour, made to fill the page, would stand out below the
     // picture, which keeps its shape.
     s += '*:has(> img:only-child),*:has(> svg:only-child){background:transparent!important;}';
+    // The crease between two pages side by side, down the middle of the screen.
+    s += c.crease
+      ? '#readyCrease{display:block!important;left:' + (W / 2 - c.creaseW) + 'px!important;width:' + (2 * c.creaseW)
+        + 'px!important;background:' + c.crease + '!important;}'
+      : '#readyCrease{display:none!important;}';
     if (c.vertical) {
       s += 'html{overflow-x:hidden!important;overflow-y:auto!important;}'
         + 'body{width:auto!important;height:auto!important;min-height:' + H + 'px;}';
     } else {
+      // The screen holds cols columns, each as wide as a page of its share of it with its margins.
+      var cw = W / (c.cols || 1) - 2 * c.mh;
       s += 'html{width:' + W + 'px!important;height:' + H + 'px!important;overflow:hidden!important;}'
         + 'body{width:' + W + 'px!important;height:' + H + 'px!important;'
-        + 'column-width:' + iw + 'px!important;column-gap:' + (2 * c.mh) + 'px!important;'
+        + 'column-width:' + cw + 'px!important;column-gap:' + (2 * c.mh) + 'px!important;'
         + 'column-fill:auto!important;overflow:visible!important;}';
     }
     return s;
@@ -1197,6 +1219,8 @@ class FlowEngine(
       }
     }
     shut.style.display = on ? 'block' : 'none';
+    // A closed book shows no crease between pages.
+    crease.style.visibility = on ? 'hidden' : '';
   };
 
   R.linked = function (x, y) {

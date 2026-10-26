@@ -30,10 +30,18 @@ class PageTurner(
 
     /** The engine has the new page: the sheet is turned over to it. */
     private val startTurn = Runnable {
+        // Back onto the last page is from the cover that ends the book, which is one picture across the screen.
+        val spread = bound && !(turning < 0 && engine()?.let { it.hasCover && it.onLastPage } == true)
         // Not turned like paper, the picture of the page left only stood in front for the book to shut over it, if it is.
-        if (s.slidePages && !s.vertical) sheet.turn(turning > 0, ::picture, place()) else sheet.drop()
+        if (s.slidePages && !s.vertical) sheet.turn(turning > 0, ::picture, place(), spread) else sheet.drop()
         turning = 0
     }
+
+    /**
+     * Whether the page being turned is one of two side by side (ReaderSettings.spread), and
+     * is not turned to the cover that ends the book; see [PageTurnView.turn].
+     */
+    private var bound = false
 
     /** Whether the picture of the page in front, see [hold], stands for the engine rather than for a page being turned. */
     private var held = false
@@ -83,6 +91,7 @@ class PageTurner(
             // The page being left stays in view until the engine has the other one, see
             // onPosition: it is only turned once it is covered.
             turning = direction
+            bound = s.spread && content.width > content.height && !(direction > 0 && e.hasCover && e.onLastPage)
             content.postDelayed(dropTurn, WAIT_MS)
             sheet.cover(window, ::picture, place(), go)
         } else {

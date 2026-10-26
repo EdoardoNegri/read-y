@@ -3,6 +3,7 @@ package io.github.edoardonegri.ready
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Rect
 import android.graphics.Color
 import android.graphics.ColorFilter
@@ -14,10 +15,12 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
+import androidx.core.graphics.createBitmap
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import java.io.File
 import java.util.concurrent.Executors
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
@@ -54,6 +57,16 @@ class PageEngine(
     private val coverFirst = Library.coverMode(act.applicationContext, file) == Library.CoverMode.FIRST_PAGE && count > 1
     private val skip get() = if (coverFirst && !s.vertical) 1 else 0
 
+    /**
+     * How many pages are on the screen at once: two side by side, as the two of an open book, on a
+     * screen on its side if that is asked for (ReaderSettings.spread), from the first page read; else one.
+     * The two are kept in [cache] as one picture, under the first of them.
+     */
+    private val per get() = if (s.spread && frame.width > frame.height) 2 else 1
+
+    /** The first of the pages on the screen with page [i]; the cover that ends the book is the cover. */
+    private fun firstOf(i: Int) = if (i >= count) count else skip + (i - skip).coerceAtLeast(0) / per * per
+
     // A book read to its end opens on its cover, where the pages that turn end: the page after the last one.
     private var page = if (!s.vertical && start.percent >= Library.FINISHED_AT) count else start.chapter.coerceIn(if (coverFirst && !s.vertical) 1 else 0, count - 1)
 
@@ -69,6 +82,9 @@ class PageEngine(
 
     private val frame = FrameLayout(act)
     private val single = ImageView(act).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
+
+    /** The crease between two pages side by side, over the middle of [single], which they meet in; enlarged along with them. */
+    private val crease = SpineCrease(act)
     private val list = RecyclerView(act)
     private val lm = LinearLayoutManager(act)
     private val gap = (4 * act.resources.displayMetrics.density).toInt()
@@ -97,7 +113,7 @@ class PageEngine(
     }
 
     init {
-        for (v in arrayOf(single, list)) {
+        for (v in arrayOf(single, list, crease)) {
             v.pivotX = 0f
             v.pivotY = 0f
         }
@@ -120,6 +136,8 @@ class PageEngine(
         })
         frame.addView(list, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         frame.addView(single, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        frame.addView(crease, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        crease.visibility = View.GONE
         frame.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
             if (r - l != or - ol || b - t != ob - ot) frame.post { if (!closed) configure() }
         }
@@ -147,9 +165,10 @@ class PageEngine(
         if (w == 0 || frame.height == 0 || !pending.add(i)) return
         val gen = generation
         val trim = s.trimMargins
+        val two = per == 2
         exec.execute {
             // The page stays blank if it cannot be drawn.
-            val bmp = render(i, w, h, trim)
+            val bmp = draw(i, w, h, trim, two)
             main.post {
                 if (closed || gen != generation) return@post
                 pending.remove(i)
@@ -157,7 +176,7 @@ class PageEngine(
                 val result = bmp ?: return@post run { if (failed.add(i)) main.postDelayed({ if (!closed && gen == generation) request(i) }, RETRY_MS) }
                 failed.remove(i)
                 cache.put(i, result)
-                ratios[i] = result.height.toFloat() / result.width
+                if (!two) ratios[i] = result.height.toFloat() / result.width
                 if (!s.vertical) {
                     // A page that is enlarged shows the drawing made for its size, see [zoomEnd].
                     if (i == page && zoom == 1f) single.setImageBitmap(result)
@@ -180,6 +199,36 @@ class PageEngine(
         if (closed) null else source.render(i, w, h, trim)
     } catch (e: Throwable) {
         null
+    }
+
+    /**
+     * Draws page [i] as [render] does, or if [two], it and the page after it side by side into [w]
+     * by [h], each into half of it, meeting in the middle as the pages of an open book; the last page,
+     * if it has none after it, stands where the first of two would.
+     */
+    private fun draw(i: Int, w: Int, h: Int, trim: Boolean, two: Boolean): Bitmap? {
+        if (!two) return render(i, w, h, trim)
+        val left = render(i, w / 2, h, trim) ?: return null
+        val right = if (i + 1 < count) render(i + 1, w / 2, h, trim) else null
+        if (right == null && i + 1 < count) {
+            left.recycle()
+            return null
+        }
+        return try {
+            // As wide on both sides of the middle, where the crease is drawn (see [crease]).
+            val half = max(left.width, right?.width ?: 0)
+            createBitmap(2 * half, max(left.height, right?.height ?: 0)).also { out ->
+                Canvas(out).apply {
+                    drawBitmap(left, (half - left.width).toFloat(), (out.height - left.height) / 2f, null)
+                    if (right != null) drawBitmap(right, half.toFloat(), (out.height - right.height) / 2f, null)
+                }
+            }
+        } catch (e: OutOfMemoryError) {
+            null
+        } finally {
+            left.recycle()
+            right?.recycle()
+        }
     }
 
     /** Draws the cover that ends the book, to the size of the screen, in the background, and delivers it when done. */
@@ -223,18 +272,19 @@ class PageEngine(
         if (onCover) frame.background = null else frame.setBackgroundColor(s.litPalette.bg)
         single.colorFilter = if (onCover) null else filter
         single.setImageBitmap(cache.get(page))
+        crease.visibility = if (per == 2 && !onCover) View.VISIBLE else View.GONE
         placeCover()
         request(page)
-        request(page + 1)
+        request(minOf(page + per, count))
         // Back from the cover is the last page, to be there when it is turned to rather than drawn after.
-        if (onCover) request(count - 1)
+        if (onCover) request(firstOf(count - 1))
         report()
     }
 
     /** What the pages in [cache] were drawn for, see [applySettings]. */
     private var drawnFor = ""
 
-    private fun drawing() = "${s.vertical}:${s.trimMargins}:${frame.width}x${frame.height}"
+    private fun drawing() = "${s.vertical}:${s.trimMargins}:$per:${frame.width}x${frame.height}"
 
     // Every page is drawn anew, for another size or another mode.
     @SuppressLint("NotifyDataSetChanged")
@@ -248,10 +298,12 @@ class PageEngine(
         // Dark mode shows print with its colours turned round; pictures stay as they are. Either
         // lies in the warm light.
         filter = light(s.darkMode && source.print, s.lamp)
+        crease.color = creaseColor()
         if (s.vertical) {
             // The column of pages has no cover after its last page.
             page = page.coerceAtMost(count - 1)
             single.visibility = View.GONE
+            crease.visibility = View.GONE
             single.setImageBitmap(null)
             list.visibility = View.VISIBLE
             adapter.notifyDataSetChanged()
@@ -261,8 +313,9 @@ class PageEngine(
             list.visibility = View.GONE
             single.visibility = View.VISIBLE
             single.colorFilter = filter
-            // Coming from scrolling, where the first page is read too, and where the cover is not.
-            page = page.coerceIn(skip, count)
+            // Coming from scrolling, where the first page is read too, and where the cover is not;
+            // or from one page on the screen to two, which start with the first page read.
+            page = firstOf(page.coerceIn(skip, count))
             showSingle()
         }
     }
@@ -271,8 +324,10 @@ class PageEngine(
         if (s.vertical) {
             val by = direction * (frame.height * 0.88f).toInt()
             if (s.slidePages) list.smoothScrollBy(0, by) else list.scrollBy(0, by)
-        } else if (page + direction in skip..count) {
-            page += direction
+        } else {
+            val to = if (direction > 0) minOf(page + per, count) else firstOf(page - 1)
+            if (to == page || to !in skip..count) return
+            page = to
             showSingle()
         }
     }
@@ -285,10 +340,14 @@ class PageEngine(
         if (drawnFor == drawing()) relight() else configure()
     }
 
+    /** The colour of the [crease]: a shadow, or on print turned round in dark mode, the faint light of its paper. */
+    private fun creaseColor() = if (s.darkMode && source.print) s.litPalette.fg else Color.BLACK
+
     /** Shows the pages already drawn in the light the settings say. */
     @SuppressLint("NotifyDataSetChanged")
     private fun relight() {
         filter = light(s.darkMode && source.print, s.lamp)
+        crease.color = creaseColor()
         if (s.vertical) {
             frame.setBackgroundColor(s.litPalette.bg)
             // The pages on screen take the filter as they are bound again; the bitmaps are in the cache.
@@ -307,14 +366,14 @@ class PageEngine(
             lm.scrollToPositionWithOffset(page, 0)
             report()
         } else {
-            page = skip + (fraction.coerceIn(0f, 1f) * (count - skip)).roundToInt().coerceIn(0, count - skip)
+            page = firstOf(skip + (fraction.coerceIn(0f, 1f) * (count - skip)).roundToInt().coerceIn(0, count - skip))
             showSingle()
         }
     }
 
     override val hasCover get() = !s.vertical
 
-    override val onLastPage get() = !s.vertical && page == count - 1
+    override val onLastPage get() = !s.vertical && page < count && page + per >= count
 
     /** Where the cover that ends the book stands, see [coverAt]; empty for the whole page. */
     private val coverBox = Rect()
@@ -336,14 +395,20 @@ class PageEngine(
     override fun snap(fraction: Float): Float {
         if (s.vertical) return fraction
         val n = count - skip
-        return (fraction.coerceIn(0f, 1f) * n).roundToInt().coerceIn(0, n).toFloat() / n
+        return placeOf(fraction).toFloat() / n
     }
 
     override fun pagesAt(fraction: Float): Pair<Pair<Int, Int>?, Pair<Int, Int>?> {
         if (s.vertical) return null to null
         val n = count - skip
-        val place = (fraction.coerceIn(0f, 1f) * n).roundToInt().coerceIn(0, n)
+        val place = placeOf(fraction)
         return if (place >= n) null to null else null to (place + 1 to n)
+    }
+
+    /** Which of the pages read, from 0, the place [fraction] of the whole book shows first: the cover after the last. */
+    private fun placeOf(fraction: Float): Int {
+        val n = count - skip
+        return firstOf(skip + (fraction.coerceIn(0f, 1f) * n).roundToInt().coerceIn(0, n)) - skip
     }
 
     // ---- enlarging the page by pinching ----
@@ -365,7 +430,7 @@ class PageEngine(
     override val zoomed get() = zoom > 1f
 
     private fun resetZoom() {
-        for (v in arrayOf(single, list)) {
+        for (v in arrayOf(single, list, crease)) {
             v.scaleX = 1f
             v.scaleY = 1f
             v.translationX = 0f
@@ -387,12 +452,13 @@ class PageEngine(
         val h = frame.height.toFloat()
         tx = tx.coerceIn(w * (1 - zoom), 0f)
         ty = if (s.vertical) ty.coerceAtMost(0f) else ty.coerceIn(h * (1 - zoom), 0f)
-        val view = if (s.vertical) list else single
         val visual = zoom / committed
-        view.scaleX = visual
-        view.scaleY = visual
-        view.translationX = tx
-        view.translationY = if (s.vertical && visual == 1f) 0f else ty
+        for (view in if (s.vertical) arrayOf(list) else arrayOf(single, crease)) {
+            view.scaleX = visual
+            view.scaleY = visual
+            view.translationX = tx
+            view.translationY = if (s.vertical && visual == 1f) 0f else ty
+        }
     }
 
     override fun zoomBy(factor: Float, x: Float, y: Float) {
@@ -434,8 +500,9 @@ class PageEngine(
         val shown = page
         val gen = generation
         val trim = s.trimMargins
+        val two = per == 2
         exec.execute {
-            val bmp = render(shown, w, h, trim)
+            val bmp = draw(shown, w, h, trim, two)
             main.post {
                 if (!closed && bmp != null && gen == generation && shown == page && zoom > 1f) single.setImageBitmap(bmp)
             }

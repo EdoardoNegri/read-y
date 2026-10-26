@@ -142,6 +142,9 @@ Tap below and choose that file: Read-y will remove it, so that the book is kept 
     <string name="opt_rotation_auto">Auto</string>
     <string name="opt_rotation_portrait">Portrait</string>
     <string name="opt_rotation_landscape">Landscape</string>
+    <string name="opt_spread">Pages on the screen</string>
+    <string name="opt_spread_one">One page</string>
+    <string name="opt_spread_two">Two pages</string>
     <string name="opt_show_page">Show information on the page</string>
     <string name="info_time">Time</string>
     <string name="info_book_page">Page in the book</string>

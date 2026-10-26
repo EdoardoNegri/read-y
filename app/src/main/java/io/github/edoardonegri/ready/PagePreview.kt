@@ -140,7 +140,7 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         return if (landscape) max(a, b) to min(a, b) else min(a, b) to max(a, b)
     }
 
-    private val landscape get() = s.orientation == LANDSCAPE
+    private val landscape get() = s.orientation == ReaderSettings.LANDSCAPE
 
     /** The cutout as it is on the screen in the turn the reader gives it. */
     private fun shownCutout() = if (landscape) cutout.turned(screenSize().second) else cutout
@@ -259,9 +259,6 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     private companion object {
         /** What the sample book is called, as a file it is not read from. */
         const val SAMPLE = "sample"
-
-        /** ReaderSettings.orientation for landscape. */
-        const val LANDSCAPE = 2
 
         /** How wide the brass frame around the screen is, in dp. */
         const val RIM_DP = 2f
