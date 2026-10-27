@@ -64,6 +64,9 @@ class PageTurnView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     private val back = shade(GradientDrawable.Orientation.LEFT_RIGHT, 0x12000000, 0x00000000, 0x38000000)
     private val landing = shade(GradientDrawable.Orientation.RIGHT_LEFT, 0x47000000, 0)
 
+    /** The three shades, which fade together as two pages side by side are turned (drawBound). */
+    private val shades = arrayOf(uncovered, back, landing)
+
     private fun shade(orientation: GradientDrawable.Orientation, vararg colors: Int) = GradientDrawable(orientation, colors)
 
     /** Counts the pictures asked for by [cover], so that one that comes after it was given up on is not shown. */
@@ -242,7 +245,7 @@ class PageTurnView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         // upright, and casts the most shadow, half way.
         val over = ((w - fold) / (w / 2)).coerceIn(0f, 1f)
         val alpha = (255 * 4 * over * (1 - over)).toInt()
-        for (shade in arrayOf(uncovered, back, landing)) shade.alpha = alpha
+        for (shade in shades) shade.alpha = alpha
         uncovered.setBounds(fold.toInt(), 0, (fold + 26 * d).toInt(), h.toInt())
         uncovered.draw(canvas)
         // The sheet folded over, the later left page on its back, coming down over the earlier one.
@@ -253,7 +256,7 @@ class PageTurnView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         }
         landing.setBounds((edge - 18 * d).toInt(), 0, edge.toInt(), h.toInt())
         if (edge > 0f) landing.draw(canvas)
-        for (shade in arrayOf(uncovered, back, landing)) shade.alpha = 255
+        for (shade in shades) shade.alpha = 255
     }
 
     private companion object {

@@ -108,19 +108,19 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         }
         arrange()
         showInfo()
-        clock()
+        clock.start(s)
     }
 
     fun pause() {
         turner.stop()
         sheet.release()
         engine?.pause()
-        removeCallbacks(tick)
+        clock.stop()
     }
 
     fun resume() {
         engine?.resume()
-        clock()
+        clock.start(s)
     }
 
     fun close() {
@@ -143,7 +143,7 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     private val landscape get() = s.orientation == ReaderSettings.LANDSCAPE
 
     /** The cutout as it is on the screen in the turn the reader gives it. */
-    private fun shownCutout() = if (landscape) cutout.turned(screenSize().second) else cutout
+    private fun shownCutout() = if (landscape) screenSize().let { (long, short) -> cutout.turned(short, long, left = true) } else cutout
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
@@ -207,17 +207,7 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     }
 
     /** Shows the time anew on the minute, while it is shown. */
-    private val tick = object : Runnable {
-        override fun run() {
-            showInfo()
-            postDelayed(this, untilMinute())
-        }
-    }
-
-    private fun clock() {
-        removeCallbacks(tick)
-        if (s.showPage && s.infoAt(InfoItem.TIME) != InfoPlace.HIDDEN) postDelayed(tick, untilMinute())
-    }
+    private val clock = MinuteClock(this, ::showInfo)
 
     // ---- the reader's part ----
 

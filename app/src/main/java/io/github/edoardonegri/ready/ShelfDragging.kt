@@ -265,8 +265,8 @@ class ShelfDragging(
     /** Shows [view], the arrow or a button of the board, as what the carried things would be dropped on; null for none. */
     private fun aim(view: View?) {
         if (view == aimed) return
-        aimed?.animate()?.scaleX(1f)?.scaleY(1f)?.duration = 120
-        view?.animate()?.scaleX(1.5f)?.scaleY(1.5f)?.duration = 120
+        aimed?.scaleTo(1f)
+        view?.scaleTo(1.5f)
         aimed = view
         up.removeCallbacks(leaver)
         if (view == up) up.postDelayed(leaver, OPEN_MS)
@@ -307,8 +307,8 @@ class ShelfDragging(
      */
     private fun hold(target: File?, view: View?) {
         if (view == intoView) return
-        intoView?.animate()?.scaleX(1f)?.scaleY(1f)?.duration = 120
-        view?.animate()?.scaleX(1.12f)?.scaleY(1.12f)?.duration = 120
+        intoView?.scaleTo(1f)
+        view?.scaleTo(1.12f)
         into = target
         intoView = view
         shelf.removeCallbacks(opener)
@@ -338,12 +338,20 @@ class ShelfDragging(
         if (acted) host.stopPicking() else host.refresh()
     }
 
+    /** Grows or shrinks this view, which what is carried is held over, to [scale] of its size. */
+    private fun View.scaleTo(scale: Float) {
+        animate().scaleX(scale).scaleY(scale).duration = SCALE_MS
+    }
+
     private companion object {
         /** How long the dragged item keeps its place before it may take another, in ms. */
         const val MOVE_MS = 180L
 
         /** How long what is carried is held over a shelf or the arrow before it is taken there, in ms. */
         const val OPEN_MS = 700L
+
+        /** How long what is carried takes to grow or shrink what it is held over, in ms. */
+        const val SCALE_MS = 120L
 
         /** How much of what is carried shows over what lies under it, of 255. */
         const val CARRIED_ALPHA = 120

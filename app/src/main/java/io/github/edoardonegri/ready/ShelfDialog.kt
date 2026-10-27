@@ -193,12 +193,7 @@ class ShelfDialog(private val ctx: Context) {
     }
 
     /** A drop-down menu named [label] among the fields; [onPick] is told what is picked in it. */
-    fun choice(label: Int, onPick: (Int) -> Unit): BrassDropdown {
-        fieldLabel(label)
-        val menu = BrassDropdown(ctx, onPick)
-        fields.addView(menu, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)))
-        return menu
-    }
+    fun choice(label: Int, onPick: (Int) -> Unit): BrassDropdown = namedChoice(label, onPick).second
 
     /** Like [choice], with the name of the field given too, to be shown or hidden along with the menu. */
     fun namedChoice(label: Int, onPick: (Int) -> Unit): Pair<View, BrassDropdown> {
@@ -271,20 +266,12 @@ class ShelfDialog(private val ctx: Context) {
     fun back(action: () -> Unit) = apply {
         val arrow = view.findViewById<View>(R.id.dialogBack)
         arrow.visibility = View.VISIBLE
-        arrow.setOnClickListener {
-            dialog.dismiss()
-            action()
-        }
+        arrow.setOnClickListener(closeAnd(action))
     }
 
     /** A column of brass buttons; each closes the dialog and runs its action. */
     fun options(choices: List<Pair<String, () -> Unit>>) = apply {
-        for ((label, action) in choices) {
-            option(label).setOnClickListener {
-                dialog.dismiss()
-                action()
-            }
-        }
+        for ((label, action) in choices) button(label, action)
     }
 
     /**
@@ -322,11 +309,12 @@ class ShelfDialog(private val ctx: Context) {
     }
 
     /** A brass button in the column that closes the dialog and runs [action]. */
-    fun button(label: String, action: () -> Unit) = apply {
-        option(label).setOnClickListener {
-            dialog.dismiss()
-            action()
-        }
+    fun button(label: String, action: () -> Unit) = apply { option(label).setOnClickListener(closeAnd(action)) }
+
+    /** What a button that closes the dialog and runs [action] does when it is pressed. */
+    private fun closeAnd(action: () -> Unit) = View.OnClickListener {
+        dialog.dismiss()
+        action()
     }
 
     /** How many buttons the column has, which is what makes it scroll; the words between them do not count. */
@@ -358,10 +346,7 @@ class ShelfDialog(private val ctx: Context) {
         val button = view.findViewById<TextView>(R.id.dialogPrimary)
         button.setText(text)
         button.visibility = View.VISIBLE
-        button.setOnClickListener {
-            dialog.dismiss()
-            action()
-        }
+        button.setOnClickListener(closeAnd(action))
         // Done on the keyboard of a field is the same as the button.
         input.setOnEditorActionListener { _, actionId, event ->
             val done = actionId == EditorInfo.IME_ACTION_DONE ||
@@ -382,6 +367,26 @@ class ShelfDialog(private val ctx: Context) {
         val width = minOf(ctx.resources.displayMetrics.widthPixels - dp(40), dp(400))
         dialog.window?.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT)
     }
+}
+
+/** A wooden board that [content] scrolls on, as the choices of a drop-down menu hang from it. */
+fun woodBoard(content: View) = ScrollView(content.context).apply {
+    isVerticalScrollBarEnabled = false
+    setBackgroundResource(R.drawable.panel_wood)
+    // The grain of the board ends at its round corners.
+    clipToOutline = true
+    addView(content)
+}
+
+/**
+ * A window [width] by [height] that holds [board] over the screen and is closed by a tap beside
+ * it; [onDismiss] is told once it closes.
+ */
+fun boardWindow(board: View, width: Int, height: Int, onDismiss: () -> Unit) = PopupWindow(board, width, height, true).apply {
+    setBackgroundDrawable(Color.TRANSPARENT.toDrawable())
+    elevation = 8 * board.resources.displayMetrics.density
+    isOutsideTouchable = true
+    setOnDismissListener { onDismiss() }
 }
 
 /**
@@ -473,12 +478,7 @@ class BrassDropdown(ctx: Context, private val onPick: (Int) -> Unit) : AppCompat
                 }
             })
         }
-        val scroll = ScrollView(context)
-        scroll.isVerticalScrollBarEnabled = false
-        scroll.setBackgroundResource(R.drawable.panel_wood)
-        // The grain of the board ends at its round corners.
-        scroll.clipToOutline = true
-        scroll.addView(list)
+        val scroll = woodBoard(list)
         // The room from the foot of the plate down to the foot of the screen.
         val screen = Rect()
         getWindowVisibleDisplayFrame(screen)
@@ -487,16 +487,10 @@ class BrassDropdown(ctx: Context, private val onPick: (Int) -> Unit) : AppCompat
         val room = screen.bottom - (at[1] + height) - dp(8)
         scroll.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.UNSPECIFIED)
         val tall = scroll.measuredHeight.coerceAtMost(room.coerceAtLeast(dp(48)))
-        board = PopupWindow(scroll, width, tall, true).apply {
-            setBackgroundDrawable(Color.TRANSPARENT.toDrawable())
-            elevation = 8 * d
-            isOutsideTouchable = true
-            setOnDismissListener {
-                board = null
-                plate.arrows = 1
-            }
-            showAsDropDown(this@BrassDropdown, 0, 0)
-        }
+        board = boardWindow(scroll, width, tall) {
+            board = null
+            plate.arrows = 1
+        }.apply { showAsDropDown(this@BrassDropdown, 0, 0) }
         plate.arrows = -1
         // The choice made is in view, even far down a long list.
         scroll.post { list.getChildAt(chosen)?.let { scroll.scrollTo(0, (it.top - tall / 3).coerceAtLeast(0)) } }

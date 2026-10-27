@@ -26,6 +26,7 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
@@ -103,6 +104,13 @@ class FlowEngine(
         web.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
             if (r - l != or - ol || b - t != ob - ot) web.post { if (!closed) applySettings() }
         }
+        // The page never scrolls sideways, nor up or down where its pages turn: the script moves
+        // them within it instead. Made another size, as when the screen is turned, the web view
+        // may be left scrolled all the same, which would show the page cut off at one side and
+        // the next one beside it; that is undone at once.
+        web.setOnScrollChangeListener { v, x, y, _, _ ->
+            if (x != 0 || (y != 0 && !s.vertical)) v.scrollTo(0, if (s.vertical) y else 0)
+        }
         load()
     }
 
@@ -142,6 +150,18 @@ class FlowEngine(
             // app would end along with it unless that is seen to here; the reader opens the book anew.
             if (!closed) host.reopen()
             return true
+        }
+
+        /**
+         * The page is never enlarged by the web view itself, only as a whole by the engine (see
+         * placeZoom): a scale it takes on of its own is undone. It does so as it is made another size,
+         * as when the screen is turned, for the lock screen and back, with the columns of the page
+         * still laid out for the size it had: enlarged so, the page would stand cut off at the right.
+         * [newScale] is in pixels of the screen to a pixel of the page, as large as the density at 1.
+         */
+        override fun onScaleChanged(view: WebView, oldScale: Float, newScale: Float) {
+            val whole = view.resources.displayMetrics.density
+            if (abs(newScale / whole - 1f) > 0.001f) view.post { if (!closed) view.zoomBy(whole / newScale) }
         }
 
         override fun onPageFinished(view: WebView, url: String?) {
@@ -934,6 +954,10 @@ class FlowEngine(
   crease.style.cssText = 'position:fixed;top:0;height:100%;pointer-events:none;z-index:2147483646;display:none;';
   document.documentElement.appendChild(crease);
   var R = window.__r = { page: 0, pages: 1, frac: 0, cfg: null, W: 0, H: 0 };
+  // Where in the chapter the reader last went, 0..1, which the page is kept at however often it is
+  // laid out anew: the page shown then is the one this is on, which may begin earlier. Gone by the
+  // start of that page instead, turning the screen to and fro would go back a page each time.
+  R.held = 0;
 
   function css(c, W, H) {
     var ih = H - 2 * c.mv;
@@ -1018,8 +1042,12 @@ class FlowEngine(
     document.body.style.setProperty('transform', page ? 'translateX(' + (-page * R.W) + 'px)' : 'none', 'important');
   }
 
+  // How far the page scrolls, by the height of the window as it is: the web view is made another
+  // size, as when the screen is turned, before the page is laid out for it (R.H), and its text
+  // changes size meanwhile, which is followed (see settle); by the height it had, the place in it
+  // would be told wrong, and kept so.
   function maxScroll() {
-    return Math.max(0, document.documentElement.scrollHeight - R.H);
+    return Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
   }
 
   function find(id) {
@@ -1061,9 +1089,8 @@ class FlowEngine(
         window.scrollTo(0, Math.round(R.frac * maxScroll()));
         report();
       } else {
-        var frac = R.frac;
         R.pages = count();
-        R.go(Math.floor(frac * R.pages + 0.001));
+        R.go(Math.floor(R.held * R.pages + 0.001));
         was = extent();
       }
     });
@@ -1076,7 +1103,7 @@ class FlowEngine(
   function report() {
     if (R.cfg.vertical) {
       var max = maxScroll(), y = window.scrollY;
-      R.frac = max > 0 ? Math.min(1, y / max) : 0;
+      R.frac = R.held = max > 0 ? Math.min(1, y / max) : 0;
       Android.onLayout(0, 1, R.frac, max > 0 ? Math.min(1, (y + R.H) / (max + R.H)) : 1);
     } else {
       R.frac = R.page / R.pages;
@@ -1103,6 +1130,7 @@ class FlowEngine(
       report();
     } else {
       R.go(Math.floor((r.left + R.page * R.W) / R.W));
+      R.held = R.frac;
     }
   };
 
@@ -1135,7 +1163,10 @@ class FlowEngine(
         window.scrollTo(0, 0);
         R.pages = count();
         var p = frac >= 1 ? R.pages - 1 : Math.floor(frac * R.pages + 0.001);
-        if (anchor && find(anchor)) R.anchor(anchor); else R.go(p);
+        if (anchor && find(anchor)) R.anchor(anchor); else {
+          R.go(p);
+          R.held = frac;
+        }
       }
       R.laid = true;
       settle();
@@ -1149,7 +1180,7 @@ class FlowEngine(
 
   R.apply = function (c, frac, anchor) {
     R.cfg = c;
-    layout(frac == null ? R.frac : frac, anchor);
+    layout(frac == null ? R.held : frac, anchor);
   };
 
   // Only the light has changed: the colours are given anew, and the text stays as it is laid out.
@@ -1170,6 +1201,7 @@ class FlowEngine(
     var p = R.page + d;
     if (p < 0 || p >= R.pages) return false;
     R.go(p, slide);
+    R.held = R.frac;
     return true;
   };
 

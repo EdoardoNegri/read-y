@@ -34,13 +34,15 @@
         android:layout_height="match_parent"
         android:visibility="invisible" />
 
-    <!-- The space above the panel is not clickable, so taps there reach the book and close the menu. -->
+    <!-- The space above the panel is not clickable, so taps there reach the book and close the menu.
+         Closed, it is invisible rather than gone: it stays laid out, so that it shows at once
+         (ReaderActivity.showMenu). -->
     <LinearLayout
         android:id="@+id/menu"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
-        android:visibility="gone">
+        android:visibility="invisible">
 
         <View
             android:layout_width="match_parent"

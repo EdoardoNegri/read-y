@@ -248,25 +248,10 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
     fun open(
         spot: Spot, paperColor: Int, print: Bitmap?, grown: Boolean = false, menu: EndMenu? = null, then: () -> Unit,
     ) {
-        ticker = null
-        sliding = false
-        this.grown = grown
-        book.clipBounds = null
-        endMenu = if (grown) menu else null
-        menuHeight = endMenu?.height ?: 0
-        plank.visibility = if (menuHeight > 0) View.VISIBLE else View.GONE
-        if (menuHeight > 0) plank.set(spot.row, endMenu)
-        pageIsCover = false
-        page.setPadding(0, 0, 0, 0)
-        paper(grown, paperColor)
-        page.animate().cancel()
-        page.alpha = 1f
         // A cover that grows has no page: the print the reader sends later, the cover over the menu
         // as the reader shows it, is what the cover comes to be as it ends (see pose).
-        page.setImageBitmap(print)
-        printed = print != null
-        printedAt = 0f
-        cover.alpha = 1f
+        begin(print, paperColor, grown, menu)
+        raisePlank(spot.row)
         cover.visibility = View.VISIBLE
         edge.visibility = if (grown) View.GONE else View.VISIBLE
         sized {
@@ -284,24 +269,11 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
      * page just fades.
      */
     fun close(left: Bitmap, paperColor: Int, grown: Boolean = false, menu: EndMenu? = null, find: () -> View?) {
-        ticker = null
-        sliding = false
-        paper(grown, paperColor)
-        page.setImageBitmap(left)
-        page.alpha = 1f
-        // Shown as it was left, over the whole screen, until the shelf is laid out.
-        this.grown = false
-        book.clipBounds = null
         // A book left on its cover, at its end, only shrinks into its place: the opening of a grown
         // book played backwards, the menu going back into the row it came from.
-        endMenu = if (grown) menu else null
-        menuHeight = endMenu?.height ?: 0
-        plank.visibility = View.GONE
-        pageIsCover = false
-        page.setPadding(0, 0, 0, 0)
-        printed = true
-        printedAt = 0f
-        cover.alpha = 1f
+        begin(left, paperColor, grown, menu)
+        // Shown as it was left, over the whole screen, until the shelf is laid out.
+        this.grown = false
         cover.visibility = View.INVISIBLE
         edge.visibility = View.INVISIBLE
         pose(1f)
@@ -316,10 +288,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
                 // A grown book is the page it was left at, which the cover on the shelf takes over from as it ends.
                 cover.visibility = View.VISIBLE
                 edge.visibility = if (grown) View.INVISIBLE else View.VISIBLE
-                if (menuHeight > 0) {
-                    plank.set(spot.row, endMenu)
-                    plank.visibility = View.VISIBLE
-                }
+                raisePlank(spot.row)
                 pose(1f)
                 run(1f, 0f, ::clear)
             } else {
@@ -338,24 +307,9 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
      * away once it is shut, and [then] is called.
      */
     fun shut(spot: Spot, left: Bitmap, paperColor: Int, spread: Boolean = false, then: () -> Unit) {
-        ticker = null
-        sliding = false
+        begin(left, paperColor)
         this.spread = spread
-        paper(false, paperColor)
-        page.animate().cancel()
-        page.setImageBitmap(left)
         edge.leaf(if (spread) left else null)
-        page.setPadding(0, 0, 0, 0)
-        page.alpha = 1f
-        grown = false
-        book.clipBounds = null
-        endMenu = null
-        menuHeight = 0
-        plank.visibility = View.GONE
-        pageIsCover = false
-        printed = true
-        printedAt = 0f
-        cover.alpha = 1f
         cover.visibility = View.VISIBLE
         edge.visibility = View.VISIBLE
         sized {
@@ -391,21 +345,8 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
      * there is one. [then] is called when it fills the screen, which it goes on doing until [clear].
      */
     fun slideIn(paperColor: Int, print: Bitmap?, then: () -> Unit) {
-        ticker = null
+        begin(print, paperColor)
         sliding = true
-        grown = false
-        book.clipBounds = null
-        endMenu = null
-        menuHeight = 0
-        plank.visibility = View.GONE
-        pageIsCover = false
-        paper(false, paperColor)
-        page.animate().cancel()
-        page.setPadding(0, 0, 0, 0)
-        page.alpha = 1f
-        page.setImageBitmap(print)
-        printed = print != null
-        printedAt = 0f
         cover.visibility = View.GONE
         edge.visibility = View.GONE
         sized {
@@ -415,8 +356,41 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         }
     }
 
+    /** Shows the plank of [row] growing into the menu, for a book that only grows onto a menu ([menuHeight]). */
+    private fun raisePlank(row: Row?) {
+        if (menuHeight <= 0) return
+        plank.set(row, endMenu)
+        plank.visibility = View.VISIBLE
+    }
+
     /** Whether the page only slides in, see [slideIn]. */
     private var sliding = false
+
+    /**
+     * Sets the book out anew for [open], [close], [shut] or [slideIn], whatever it did before:
+     * [print] on its page, on paper of the colour [paperColor], or against the wall of the case if
+     * it is [grown], with the [menu] it grows onto then. The plank stays hidden, and the cover and
+     * its edge are for each of them to show.
+     */
+    private fun begin(print: Bitmap?, paperColor: Int, grown: Boolean = false, menu: EndMenu? = null) {
+        ticker = null
+        sliding = false
+        spread = false
+        this.grown = grown
+        book.clipBounds = null
+        endMenu = if (grown) menu else null
+        menuHeight = endMenu?.height ?: 0
+        plank.visibility = View.GONE
+        pageIsCover = false
+        paper(grown, paperColor)
+        page.animate().cancel()
+        page.setPadding(0, 0, 0, 0)
+        page.alpha = 1f
+        page.setImageBitmap(print)
+        printed = print != null
+        printedAt = 0f
+        cover.alpha = 1f
+    }
 
     /**
      * Lays the book on paper of the colour [paperColor]; or, a [grown] one, against the wall of the
@@ -664,6 +638,11 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
     private fun run(from: Float, to: Float, then: () -> Unit) {
         // As long as animations are made to last on this phone; at once where they are turned off.
         val lasts = OPEN_MS * durationScale()
+        // Never by much more than about two frames of the screen, which is slower than 60 a second
+        // where it is held so. Asked once: up to Android 10, the display is asked anew by the
+        // system each time, which is too slow for every frame.
+        val frame = 1000f / (layer.display?.refreshRate ?: 60f).coerceAtLeast(1f)
+        val most = maxOf(MAX_STEP_MS, frame * 2f)
         val step = object : Choreographer.FrameCallback {
             private var t = from
             private var last = 0L
@@ -674,9 +653,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
                 // the last one, but never by much more than a frame's: where the phone is held up for a
                 // moment, as by the reader starting behind the book, the book waits rather than leaps.
                 if (last != 0L) {
-                    // Never by much more than about two frames of the screen, which is slower than 60 a second where it is held so.
-                    val frame = 1000f / (layer.display?.refreshRate ?: 60f).coerceAtLeast(1f)
-                    val by = if (lasts > 0f) ((now - last) / 1_000_000f).coerceAtMost(maxOf(MAX_STEP_MS, frame * 2f)) / lasts else 1f
+                    val by = if (lasts > 0f) ((now - last) / 1_000_000f).coerceAtMost(most) / lasts else 1f
                     t = if (to > from) (t + by).coerceAtMost(to) else (t - by).coerceAtLeast(to)
                     pose(t)
                 }
@@ -796,8 +773,6 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         book.translationX = lerp(x, openX, zoom)
         book.translationY = lerp(y, 0f, zoom)
     }
-
-    private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 
     /**
      * The shelf a cover that only grows comes out of (BookOpening.scene), as if looked at ever
@@ -983,8 +958,6 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
                 canvas.drawBitmap(menuPlaque, null, plaqueAt, picturePaint)
             }
         }
-
-        private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
     }
 
     /**
@@ -1158,8 +1131,12 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
             } else {
                 open(from, paperColor, kept(file, look), false, null, handoff::opened)
             }
-            handoff.whenPictured { print -> if (print != null) thread.post { opening?.print(print) } }
+            printWhenPictured(handoff)
         }
+
+        /** Has the page the reader sets out behind the book opening ([handoff]) come onto it once it is pictured. */
+        private fun printWhenPictured(handoff: Handoff) =
+            handoff.whenPictured { print -> if (print != null) thread.post { opening?.print(print) } }
 
         /** Opens the book whose cover is shown by [from], as [BookOpening.open] does; [then] is called on the main thread. */
         fun open(
@@ -1181,7 +1158,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
          */
         fun slide(paperColor: Int, file: File, look: String, handoff: Handoff) {
             play(handoff::opened) { o, done -> o.slideIn(paperColor, kept(file, look), done) }
-            handoff.whenPictured { print -> if (print != null) thread.post { opening?.print(print) } }
+            printWhenPictured(handoff)
         }
 
         /**

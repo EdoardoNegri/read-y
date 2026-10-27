@@ -65,6 +65,48 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
     private val r = RectF()
     private val face = Path()
 
+    /**
+     * The gradients of the plate, of its shine and of the shade at its ends, made for the bounds
+     * and the metal they were last drawn with ([shadedFor]), rather than anew whenever the plate is
+     * drawn: the shelf draws one for every book that scrolls into sight.
+     */
+    private var plateShader: Shader? = null
+    private var glossShader: Shader? = null
+    private var sideShader: Shader? = null
+    private var shadedFor: Metal? = null
+
+    /** The domes of a screw and of a star, about their middles: they are drawn moved to where they stand. */
+    private val screwDome = (SCREW_RADIUS * d).let {
+        RadialGradient(
+            -it * 0.35f, -it * 0.4f, it * 1.5f,
+            intArrayOf(0xFFFFF8D0.toInt(), 0xFFC9A038.toInt(), 0xFF6E5210.toInt()), DOME_STOPS, Shader.TileMode.CLAMP,
+        )
+    }
+    private val starDome = (STAR_RADIUS * d).let {
+        RadialGradient(
+            -it * 0.3f, -it * 0.35f, it * 1.4f,
+            intArrayOf(0xFFFFFBE0.toInt(), 0xFFE0B840.toInt(), 0xFF7A5A12.toInt()), DOME_STOPS, Shader.TileMode.CLAMP,
+        )
+    }
+
+    override fun onBoundsChange(bounds: Rect) {
+        super.onBoundsChange(bounds)
+        shadedFor = null
+    }
+
+    /** Makes the gradients of the plate anew if its bounds or its [metal] have changed since they were made. */
+    private fun shade(metal: Metal) {
+        if (shadedFor === metal) return
+        shadedFor = metal
+        val b = bounds
+        val top = b.top.toFloat()
+        val bottom = b.bottom - SHADOW_DP * d
+        plateShader = LinearGradient(0f, top, 0f, bottom, metal.plate, PLATE_STOPS, Shader.TileMode.CLAMP)
+        // The face of the plate, inside its rim.
+        glossShader = LinearGradient(0f, top + d, 0f, bottom - d, GLOSS_COLORS, GLOSS_STOPS, Shader.TileMode.CLAMP)
+        sideShader = LinearGradient(b.left + d, 0f, b.right - d, 0f, SIDE_COLORS, SIDE_STOPS, Shader.TileMode.CLAMP)
+    }
+
     override fun draw(c: Canvas) {
         if (ornate || favorite) {
             drawShaped(c)
@@ -86,15 +128,16 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
 
         // Dark rim, then the plate: bright where the light hits the top, darker towards the bottom.
         val metal = metal
+        shade(metal)
         paint.color = metal.rim
         r.set(left, top, right, bottom)
         c.drawRoundRect(r, 3 * d, 3 * d, paint)
-        paint.shader = LinearGradient(0f, top, 0f, bottom, metal.plate, PLATE_STOPS, Shader.TileMode.CLAMP)
+        paint.shader = plateShader
         r.inset(d, d)
         c.drawRoundRect(r, 2 * d, 2 * d, paint)
         face.rewind()
         face.addRoundRect(r, 2 * d, 2 * d, Path.Direction.CW)
-        gloss(c, face, r.left, r.top, r.right, r.bottom)
+        gloss(c, face)
 
         // Bevel: a lit upper edge and a shaded lower edge just inside the rim.
         paint.style = Paint.Style.STROKE
@@ -151,6 +194,7 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         val bottom = b.bottom - shadow
         val cy = (top + bottom) / 2
         val metal = metal
+        shade(metal)
 
         // Shadow, dark rim, then the plate, as on the plain plaque.
         paint.shader = null
@@ -159,11 +203,11 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         c.drawPath(scooped(left + d, top + shadow, right - d, bottom + shadow), paint)
         paint.color = metal.rim
         c.drawPath(scooped(left, top, right, bottom), paint)
-        paint.shader = LinearGradient(0f, top, 0f, bottom, metal.plate, PLATE_STOPS, Shader.TileMode.CLAMP)
+        paint.shader = plateShader
         c.drawPath(scooped(left + d, top + d, right - d, bottom - d), paint)
         paint.shader = null
         face.set(path)
-        gloss(c, face, left + d, top + d, right - d, bottom - d)
+        gloss(c, face)
 
         // Bevel along the straight top and bottom edges.
         paint.style = Paint.Style.STROKE
@@ -196,45 +240,44 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
      * The roundness of a polished plate, which bulges a little towards the light: a soft highlight that
      * is strongest a little under the top and dies away smoothly before the middle, the lower part
      * growing slightly darker, and the two ends a little darker too. Nothing in it has an edge.
-     * [outline] is the face of the plate, in the box [l], [t], [r], [b].
+     * [outline] is the face of the plate, which the gradients made by [shade] are made for.
      */
-    private fun gloss(c: Canvas, outline: Path, l: Float, t: Float, r: Float, b: Float) {
+    private fun gloss(c: Canvas, outline: Path) {
         paint.style = Paint.Style.FILL
-        paint.shader = LinearGradient(0f, t, 0f, b, GLOSS_COLORS, GLOSS_STOPS, Shader.TileMode.CLAMP)
+        paint.shader = glossShader
         c.drawPath(outline, paint)
-        paint.shader = LinearGradient(l, 0f, r, 0f, SIDE_COLORS, SIDE_STOPS, Shader.TileMode.CLAMP)
+        paint.shader = sideShader
         c.drawPath(outline, paint)
         paint.shader = null
     }
 
     /** A small five-pointed stud, domed like the screws. */
     private fun star(c: Canvas, x: Float, y: Float) {
-        val outer = 4.2f * d
+        val outer = STAR_RADIUS * d
         val inner = 1.8f * d
+        // About its middle, which is moved to where it stands, as its dome is.
         star.rewind()
         for (i in 0 until 10) {
             val r = if (i % 2 == 0) outer else inner
             val a = Math.PI * i / 5 - Math.PI / 2
-            val px = x + (cos(a) * r).toFloat()
-            val py = y + (sin(a) * r).toFloat()
+            val px = (cos(a) * r).toFloat()
+            val py = (sin(a) * r).toFloat()
             if (i == 0) star.moveTo(px, py) else star.lineTo(px, py)
         }
         star.close()
-        paint.style = Paint.Style.FILL
-        paint.color = 0x80302000.toInt()
-        c.withTranslation(0.4f * d, 0.6f * d) { c.drawPath(star, paint) }
-        paint.shader = RadialGradient(
-            x - outer * 0.3f, y - outer * 0.35f, outer * 1.4f,
-            intArrayOf(0xFFFFFBE0.toInt(), 0xFFE0B840.toInt(), 0xFF7A5A12.toInt()),
-            floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP,
-        )
-        c.drawPath(star, paint)
-        paint.shader = null
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 0.6f * d
-        paint.color = 0xFF3E2C06.toInt()
-        c.drawPath(star, paint)
-        paint.style = Paint.Style.FILL
+        c.withTranslation(x, y) {
+            paint.style = Paint.Style.FILL
+            paint.color = 0x80302000.toInt()
+            withTranslation(0.4f * d, 0.6f * d) { drawPath(star, paint) }
+            paint.shader = starDome
+            drawPath(star, paint)
+            paint.shader = null
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 0.6f * d
+            paint.color = 0xFF3E2C06.toInt()
+            drawPath(star, paint)
+            paint.style = Paint.Style.FILL
+        }
     }
 
     /** Sets [path] to a rectangle whose four corners are cut away by quarter circles of radius [notch]. */
@@ -256,16 +299,12 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
 
     /** A small domed screw head whose slot is turned to [angle] radians. */
     private fun screw(c: Canvas, x: Float, y: Float, angle: Float) {
-        val radius = 2.7f * d
+        val radius = SCREW_RADIUS * d
         paint.style = Paint.Style.FILL
         paint.color = 0x80302000.toInt()
         c.drawCircle(x + 0.4f * d, y + 0.6f * d, radius + 0.5f * d, paint)
-        paint.shader = RadialGradient(
-            x - radius * 0.35f, y - radius * 0.4f, radius * 1.5f,
-            intArrayOf(0xFFFFF8D0.toInt(), 0xFFC9A038.toInt(), 0xFF6E5210.toInt()),
-            floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP,
-        )
-        c.drawCircle(x, y, radius, paint)
+        paint.shader = screwDome
+        c.withTranslation(x, y) { drawCircle(0f, 0f, radius, paint) }
         paint.shader = null
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 0.9f * d
@@ -309,6 +348,11 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         private val GLOSS_STOPS = floatArrayOf(0f, 0.16f, 0.4f, 0.62f, 0.7f, 1f)
         private val SIDE_COLORS = intArrayOf(0x1A000000, 0x00000000, 0x00000000, 0x1A000000)
         private val SIDE_STOPS = floatArrayOf(0f, 0.14f, 0.86f, 1f)
+
+        /** How large a screw and a star are, in dp, and where the colours of their domes lie, from the light to the rim. */
+        private const val SCREW_RADIUS = 2.7f
+        private const val STAR_RADIUS = 4.2f
+        private val DOME_STOPS = floatArrayOf(0f, 0.55f, 1f)
 
         private val BRASS = Metal(
             rim = 0xFF5E450C.toInt(),

@@ -43,7 +43,7 @@ class ShelfDecoration(ctx: Context, private val columns: Int) : RecyclerView.Ite
             if (v.height > 0) row = v.height
             // Where the row is, not where a book sliding to another place happens to be on its way.
             val bottom = v.bottom
-            if ((0 until rows).any { bottoms[it] == bottom }) continue
+            if (seen(bottom, rows)) continue
             if (rows == bottoms.size) {
                 bottoms = bottoms.copyOf(rows * 2)
                 numbers = numbers.copyOf(rows * 2)
@@ -74,6 +74,12 @@ class ShelfDecoration(ctx: Context, private val columns: Int) : RecyclerView.Ite
         // The shadow the top rail casts into the case. Like those of the planks it falls on the
         // wall, behind what stands on the shelves and the bars that hang from the rail.
         drawShade(c, w, d, paint)
+    }
+
+    /** Whether [bottom] is among the first [rows] of [bottoms]: a plain loop, as this is asked of every book for every frame. */
+    private fun seen(bottom: Int, rows: Int): Boolean {
+        for (i in 0 until rows) if (bottoms[i] == bottom) return true
+        return false
     }
 
     override fun onDrawOver(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {

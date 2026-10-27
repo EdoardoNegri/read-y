@@ -3,7 +3,6 @@ package io.github.edoardonegri.ready
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Rect
@@ -20,10 +19,8 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupWindow
-import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.ContextCompat
-import androidx.core.graphics.drawable.toDrawable
 
 /**
  * The reader's page in small, for choosing what is shown around its text, and where: the three
@@ -215,13 +212,7 @@ class InfoLayoutPicker(ctx: Context, private val s: ReaderSettings, private val 
             }
         }
         refresh()
-        val scroll = ScrollView(context).apply {
-            isVerticalScrollBarEnabled = false
-            setBackgroundResource(R.drawable.panel_wood)
-            // The grain of the board ends at its round corners.
-            clipToOutline = true
-            addView(column)
-        }
+        val scroll = woodBoard(column)
         val wide = dp(LIST_DP).coerceAtMost(width)
         scroll.measure(MeasureSpec.makeMeasureSpec(wide, MeasureSpec.EXACTLY), MeasureSpec.UNSPECIFIED)
         // Under the place tapped, as far over as it is, kept within the page; over it where there
@@ -242,17 +233,11 @@ class InfoLayoutPicker(ctx: Context, private val s: ReaderSettings, private val 
             over >= screen.top + margin -> over
             else -> under.coerceAtMost(screen.bottom - margin - tall).coerceAtLeast(screen.top + margin)
         }
-        list = PopupWindow(scroll, wide, tall, true).apply {
-            setBackgroundDrawable(Color.TRANSPARENT.toDrawable())
-            elevation = 8 * d
-            isOutsideTouchable = true
-            setOnDismissListener {
-                list = null
-                touched = -1
-                invalidate()
-            }
-            showAtLocation(this@InfoLayoutPicker, Gravity.NO_GRAVITY, x, y)
-        }
+        list = boardWindow(scroll, wide, tall) {
+            list = null
+            touched = -1
+            invalidate()
+        }.apply { showAtLocation(this@InfoLayoutPicker, Gravity.NO_GRAVITY, x, y) }
     }
 
     /** A line of the list for [item], under the place [p]. */

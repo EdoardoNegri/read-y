@@ -111,6 +111,24 @@ private const val MIN_SIDE_DP = 12f
 /** How long until the clock shows the next minute, in ms. */
 fun untilMinute() = 60_000L - System.currentTimeMillis() % 60_000L + 50
 
+/** Has [view] call [show] on every minute while the time is shown around the text, for it to be shown anew. */
+class MinuteClock(private val view: View, private val show: () -> Unit) : Runnable {
+    override fun run() {
+        show()
+        view.postDelayed(this, untilMinute())
+    }
+
+    /** Starts it, if the time is shown around the text as [s] has it, or stops it if not. */
+    fun start(s: ReaderSettings) {
+        stop()
+        if (s.showPage && s.infoAt(InfoItem.TIME) != InfoPlace.HIDDEN) view.postDelayed(this, untilMinute())
+    }
+
+    fun stop() {
+        view.removeCallbacks(this)
+    }
+}
+
 /** [minutes] as the time left to read is told: in whole minutes, and hours past the first. */
 private fun duration(ctx: Context, minutes: Float): String {
     val all = ceil(minutes.coerceAtLeast(0f)).toInt().coerceAtLeast(1)
@@ -126,9 +144,16 @@ private fun duration(ctx: Context, minutes: Float): String {
  * of them ([insets]), and the bounds of each ([holes]), in the coordinates of the page.
  */
 class Cutout(val insets: Rect = Rect(), val holes: List<Rect> = emptyList()) {
-    /** The same cutout on the screen turned a quarter to the left, as for landscape, the upright screen being [w] wide. */
-    fun turned(w: Int): Cutout {
-        // A point (x, y) of the upright screen comes to (y, w - x).
+    /**
+     * The same cutout on the screen turned a quarter to the [left], as for landscape, or to the
+     * right, as for the other landscape; the upright screen being [w] wide and [h] high.
+     */
+    fun turned(w: Int, h: Int, left: Boolean): Cutout {
+        // A point (x, y) of the upright screen comes to (y, w - x) turned to the left, to (h - y, x) to the right.
+        if (!left) return Cutout(
+            Rect(insets.bottom, insets.left, insets.top, insets.right),
+            holes.map { Rect(h - it.bottom, it.left, h - it.top, it.right) },
+        )
         return Cutout(
             Rect(insets.top, insets.right, insets.bottom, insets.left),
             holes.map { Rect(it.top, w - it.right, it.bottom, w - it.left) },

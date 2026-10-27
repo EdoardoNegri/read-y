@@ -1,6 +1,7 @@
 package io.github.edoardonegri.ready
 
 import android.animation.ValueAnimator
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -140,9 +141,17 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     var marks: List<Float> = emptyList()
         set(value) {
             field = value
+            if (numbers.size != value.size) numbers = List(value.size) { (it + 1).toString() }
             step = 0
             invalidate()
         }
+
+    /**
+     * The numbers of the chapters, and what the plate says over the cover that ends the book, as
+     * they are written: made once rather than for every frame the lens is drawn.
+     */
+    private var numbers: List<String> = emptyList()
+    private val endNumber = context.getString(R.string.the_end_short)
 
     /** The mark of the chapter being read, or -1. */
     var current by changes(-1, ::invalidate)
@@ -218,6 +227,10 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
 
     private fun sp(size: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, size, resources.displayMetrics)
 
+    /** How large the numbers are along the line, and in the lens. */
+    private val numberSize = sp(NUMBER_SP)
+    private val lensNumberSize = sp(LENS_NUMBER_SP)
+
     /** Where the numbers stand, all on one line, in the lens as outside it. */
     private val baseline get() = height - 6 * d
 
@@ -233,13 +246,13 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     private fun step(): Int {
         if (step > 0) return step
         paint.typeface = BOLD
-        paint.textSize = sp(NUMBER_SP)
+        paint.textSize = numberSize
         val gap = 5 * d
         // Past the number of chapters nothing is numbered, which always fits.
         step = generateSequence(1) { if (it == 1) 5 else it + 5 }.first { every ->
             var free = Float.NEGATIVE_INFINITY
             marks.indices.filter { (it + 1) % every == 0 }.all { i ->
-                val wide = paint.measureText((i + 1).toString()) / 2
+                val wide = paint.measureText(numbers[i]) / 2
                 val x = x(marks[i])
                 (x - wide >= free).also { free = x + wide + gap }
             }
@@ -264,7 +277,7 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         val every = step()
         val at = if (!finger.isNaN()) along(finger) else seeking
         if (!at.isNaN()) lensAt = at
-        paint.textSize = sp(NUMBER_SP)
+        paint.textSize = numberSize
         marks.forEachIndexed { i, mark ->
             val x = x(mark)
             mark(canvas, i, x, line, 1f, false)
@@ -273,7 +286,7 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
             paint.typeface = PLAIN
             // The numbers are lighter than their marks, to be read against the dark wood.
             paint.color = CREAM
-            canvas.drawText((i + 1).toString(), x, baseline, paint)
+            canvas.drawText(numbers[i], x, baseline, paint)
         }
         drawGlass(canvas)
     }
@@ -305,9 +318,9 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         val chapter = if (!seeking.isNaN()) chapterAt(seeking) else current
         val where = if (!seeking.isNaN()) seeking else place
         val plated = chapter in marks.indices
-        val number = if (hasEnd && !where.isNaN() && where >= END_AT) context.getString(R.string.the_end_short) else (chapter + 1).toString()
+        val number = if (hasEnd && !where.isNaN() && where >= END_AT) endNumber else numbers.getOrElse(chapter) { "" }
         paint.typeface = BOLD
-        paint.textSize = sp(NUMBER_SP)
+        paint.textSize = numberSize
         if (plated) {
             val x = if (where.isNaN()) x(marks[chapter]) else x(where)
             val half = paint.measureText(number) / 2 + 4 * d
@@ -343,7 +356,7 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
             if (open < 1f) restore()
         }
         if (plated && grown < 1f) {
-            paint.textSize = sp(NUMBER_SP)
+            paint.textSize = numberSize
             paint.color = NEEDLE_YELLOW
             paint.alpha = ((1 - grown) * 255).toInt()
             canvas.drawText(number, frame.centerX(), baseline, paint)
@@ -356,20 +369,18 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         paint.style = Paint.Style.FILL
     }
 
-    private fun lerp(from: Float, to: Float, by: Float) = from + (to - from) * by
-
     /** Sets out [lens] over the place [at], 0..1 along the line. */
     private fun placeLens(at: Float) {
         val wide = (LENS_DP * d).coerceAtMost(width.toFloat())
         val left = (x(at) - wide / 2).coerceIn(0f, (width - wide).coerceAtLeast(0f))
-        paint.textSize = sp(LENS_NUMBER_SP)
+        paint.textSize = lensNumberSize
         lens.set(left, baseline + paint.ascent() - 1.5f * d, left + wide, baseline + 11 * d)
     }
 
     /** What the lens set out by [placeLens] over the place [at] shows; see the class. */
     private fun drawLens(canvas: Canvas, at: Float) {
         val needle = x(at)
-        paint.textSize = sp(LENS_NUMBER_SP)
+        paint.textSize = lensNumberSize
         paint.typeface = BOLD
         // As many times larger as lets the chapters be told apart where they lie as close as on average.
         val apart = (x(marks.last()) - x(marks.first())) / (marks.size - 1).coerceAtLeast(1)
@@ -389,7 +400,7 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         }
         // Only the chapter the place is in is numbered, over its mark, or at the edge of the
         // glass where its mark lies beyond it.
-        val number = if (hasEnd && at >= END_AT) context.getString(R.string.the_end_short) else (chapter + 1).toString()
+        val number = if (hasEnd && at >= END_AT) endNumber else numbers[chapter]
         val half = paint.measureText(number) / 2 + LENS_PAD_DP * d
         paint.color = BRIGHT
         canvas.drawText(number, inLens(x(marks[chapter])).coerceIn(lens.left + half, lens.right - half), baseline, paint)
@@ -640,20 +651,26 @@ class SpineCrease(ctx: Context) : View(ctx) {
         set(value) {
             if (field == value) return
             field = value
-            paint.shader = null
+            shade()
             invalidate()
         }
 
     private val paint = Paint()
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        paint.shader = null
+        shade()
+    }
+
+    /** Makes the shadow for the width and the [color] the crease has now, rather than as it is drawn. */
+    private fun shade() {
+        val mid = width / 2f
+        val reach = reach(mid)
+        paint.shader = if (reach > 0f) LinearGradient(mid - reach, 0f, mid + reach, 0f, colors(color), STOPS, Shader.TileMode.CLAMP) else null
     }
 
     override fun onDraw(canvas: Canvas) {
         val mid = width / 2f
         val reach = reach(mid)
-        if (paint.shader == null) paint.shader = LinearGradient(mid - reach, 0f, mid + reach, 0f, colors(color), STOPS, Shader.TileMode.CLAMP)
         canvas.drawRect(mid - reach, 0f, mid + reach, height.toFloat(), paint)
     }
 
@@ -681,6 +698,7 @@ class SpineCrease(ctx: Context) : View(ctx) {
  * Without one, it is the [paper] the book opened on. A [page] seen upright, with no [turned], is
  * turned as the screen is once it is on its side, to be seen as it was.
  */
+@SuppressLint("ViewConstructor")
 class SidewaysPage(ctx: Context, private val page: Bitmap?, private val turned: Float?, paper: Int) : View(ctx) {
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
     private val to = RectF()
@@ -710,3 +728,6 @@ class SidewaysPage(ctx: Context, private val page: Bitmap?, private val turned: 
  * shelf does: a quarter, the way the screen is turned.
  */
 fun uprightTurn(display: Display?) = if (display?.rotation == Surface.ROTATION_270) -90f else 90f
+
+/** The value [by] of the way from [from] to [to], 0 to 1. */
+fun lerp(from: Float, to: Float, by: Float) = from + (to - from) * by
