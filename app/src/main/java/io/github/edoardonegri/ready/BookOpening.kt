@@ -33,6 +33,7 @@ import androidx.appcompat.widget.AppCompatImageView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.get
 import androidx.core.graphics.withClip
+import androidx.core.graphics.withMatrix
 import androidx.core.view.doOnLayout
 import androidx.core.view.doOnPreDraw
 import androidx.core.view.ViewCompat
@@ -331,14 +332,19 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
     /**
      * Shuts the book over [left], the page it was at as it is seen, over the whole screen: the page
      * shrinks into the cover standing at [spot], which swings shut over it, as the book closes on
-     * the shelf. The layer is taken away once it is shut, and [then] is called.
+     * the shelf. Two pages side by side ([spread]) are shut as an open book is: the right one is the
+     * book, and the left one lies on the inside of the cover, open flat beside it; the book shrinks,
+     * and the left page swings over the right one on the crease between them. The layer is taken
+     * away once it is shut, and [then] is called.
      */
-    fun shut(spot: Spot, left: Bitmap, paperColor: Int, then: () -> Unit) {
+    fun shut(spot: Spot, left: Bitmap, paperColor: Int, spread: Boolean = false, then: () -> Unit) {
         ticker = null
         sliding = false
+        this.spread = spread
         paper(false, paperColor)
         page.animate().cancel()
         page.setImageBitmap(left)
+        edge.leaf(if (spread) left else null)
         page.setPadding(0, 0, 0, 0)
         page.alpha = 1f
         grown = false
@@ -354,6 +360,16 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         edge.visibility = View.VISIBLE
         sized {
             if (!place(spot)) return@sized then()
+            if (spread) {
+                // The page of the book is the right half of the two, as large as the screen, as the book is.
+                val f = frame
+                page.scaleType = ImageView.ScaleType.MATRIX
+                page.imageMatrix = Matrix().apply {
+                    setScale(2f * f.width / left.width, f.height.toFloat() / left.height)
+                    postTranslate(-f.width.toFloat(), 0f)
+                }
+                page.clipBounds = Rect(0, 0, f.width, f.height)
+            }
             pose(1f)
             show()
             run(1f, 0f) {
@@ -362,6 +378,12 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
             }
         }
     }
+
+    /**
+     * Whether two pages side by side are being shut (see [shut]): the book is the right one, as
+     * large as half the screen, its cover open flat.
+     */
+    private var spread = false
 
     /**
      * Slides the page in from the right until it fills the screen, without a book around it: on paper
@@ -486,6 +508,11 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         layer.visibility = View.GONE
         page.setImageBitmap(null)
         cover.setImageDrawable(null)
+        // Two pages that were shut leave the page whole again, and the inside of the cover bare.
+        spread = false
+        page.scaleType = ImageView.ScaleType.FIT_XY
+        page.clipBounds = null
+        edge.leaf(null)
     }
 
     private fun show() {
@@ -762,9 +789,11 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         // A shelf that was never shown has no size yet to make the book smaller by: it comes back
         // under a book that was opened elsewhere, whose page fills it whatever its size will be.
         val sized = f.width > 0 && f.height > 0
-        book.scaleX = if (sized) lerp(w / f.width, 1f, zoom) else 1f
+        // Open, the book fills the screen; of two pages side by side, the right half of it.
+        val openX = if (spread) f.width / 2f else 0f
+        book.scaleX = if (sized) lerp(w / f.width, (f.width - openX) / f.width, zoom) else 1f
         book.scaleY = if (sized) lerp(h / f.height, 1f, zoom) else 1f
-        book.translationX = lerp(x, 0f, zoom)
+        book.translationX = lerp(x, openX, zoom)
         book.translationY = lerp(y, 0f, zoom)
     }
 
@@ -985,6 +1014,23 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
             invalidate()
         }
 
+        /** Two pages side by side, whose left one lies on the inside of the board (see shut); null for none. */
+        private var leaf: Bitmap? = null
+        private val leafFrom = Rect()
+        private val leafTo = RectF()
+        private val flat = FloatArray(8)
+        private val seenAt = FloatArray(8)
+        private val warp = Matrix()
+        private val leafPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+        private val dusk = Paint()
+
+        /** Lays the left of the two pages side by side in [pages] on the inside of the board; null leaves it bare. */
+        fun leaf(pages: Bitmap?) {
+            leaf = pages
+            pages?.let { leafFrom.set(0, 0, it.width / 2, it.height) }
+            invalidate()
+        }
+
         /** Turns the board on its spine as View.rotationY does. */
         fun turn(degrees: Float) {
             if (turned == degrees) return
@@ -1011,6 +1057,30 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
             band.close()
             canvas.drawPath(band, paint)
             if (turned >= -90f) return
+            val leaf = leaf
+            if (leaf != null) {
+                // The left page, from the back of the board at the spine to its outer edge, as the
+                // eye sees it there: flat beside the right one at first, as the screen showed them,
+                // and darker the more it turns from the eye.
+                seen(backX, backZ, -1f, 0)
+                seen(-thick * sin, thick * cos, -1f, 2)
+                seen(-thick * sin, thick * cos, 1f, 4)
+                seen(backX, backZ, 1f, 6)
+                val h = height.toFloat()
+                flat[0] = 0f; flat[1] = 0f; flat[2] = w; flat[3] = 0f
+                flat[4] = w; flat[5] = h; flat[6] = 0f; flat[7] = h
+                warp.setPolyToPoly(flat, 0, seenAt, 0, 4)
+                leafTo.set(0f, 0f, w, h)
+                dusk.color = Color.BLACK
+                dusk.alpha = ((1 - INSIDE_DARK) * (1 + cos) * 255).toInt().coerceIn(0, 255)
+                canvas.withClip(-SPREAD * w, -SPREAD * height, 0f, SPREAD * height) {
+                    withMatrix(warp) {
+                        drawBitmap(leaf, leafFrom, leafTo, leafPaint)
+                        if (dusk.alpha > 0) drawRect(leafTo, dusk)
+                    }
+                }
+                return
+            }
             // The inside, from the back of the board at the spine to its outer edge, lit the more
             // the more it faces the eye. It lies beside the page, never over it: what of it would,
             // so near the spine, is the board's thickness, which the page hides.
@@ -1026,16 +1096,21 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
 
         /** Adds to the band the point [x] along and [z] away from the spine, at its top (-1) or bottom ([end] 1), as the eye sees it. */
         private fun corner(x: Float, z: Float, end: Float, first: Boolean) {
+            seen(x, z, end, 0)
+            if (first) band.moveTo(seenAt[0], seenAt[1]) else band.lineTo(seenAt[0], seenAt[1])
+        }
+
+        /** Where the eye sees the point [x] along and [z] away from the spine, at its top (-1) or bottom ([end] 1): into seenAt at [at]. */
+        private fun seen(x: Float, z: Float, end: Float, at: Int) {
             val near = eye / (eye + z)
             val half = height / 2f
-            val px = x * near
-            val py = half + end * half * near
-            if (first) band.moveTo(px, py) else band.lineTo(px, py)
+            seenAt[at] = x * near
+            seenAt[at + 1] = half + end * half * near
         }
     }
 
     /** How far, in degrees, the cover has swung open [t] of the way: it is open before the page has grown far. */
-    private fun angle(t: Float) = EASE.getInterpolation((t / SWING).coerceIn(0f, 1f)) * OPEN_ANGLE
+    private fun angle(t: Float) = EASE.getInterpolation((t / SWING).coerceIn(0f, 1f)) * if (spread) FLAT else OPEN_ANGLE
 
     /** How far the page has grown towards filling the screen [t] of the way, 0 to 1. */
     private fun zoom(t: Float) = EASE.getInterpolation(((t - ZOOM_FROM) / (1 - ZOOM_FROM)).coerceIn(0f, 1f))
@@ -1293,13 +1368,20 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
          */
         private var kept: Triple<String, String, Bitmap>? = null
 
-        /** Keeps [print], the page [file] was left at as it looked ([look]), see [kept]. */
-        fun keep(file: File, look: String, print: Bitmap) {
+        /** How many degrees the page [kept] was turned to stand upright on the shelf, read sideways; else 0. */
+        private var keptTurned = 0f
+
+        /** Keeps [print], the page [file] was left at as it looked ([look]), turned [turned] degrees if it was read sideways; see [kept]. */
+        fun keep(file: File, look: String, print: Bitmap, turned: Float = 0f) {
             kept = Triple(file.path, look, print)
+            keptTurned = turned
         }
 
         /** The page [file] was last left at, if it is kept and looked as it would now ([look]). */
         fun kept(file: File, look: String): Bitmap? = kept?.takeIf { it.first == file.path && it.second == look }?.third
+
+        /** How many degrees the page [kept] for [file] and [look] was turned to stand upright on the shelf. */
+        fun keptTurned(file: File, look: String): Float = if (kept(file, look) != null) keptTurned else 0f
 
         /** Lets go of the page kept, which is as large as the screen, e.g. as the phone runs short of memory. */
         fun forget() {
@@ -1325,6 +1407,9 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         private const val SWING = 0.62f
         private const val ZOOM_FROM = 0.3f
         private const val OPEN_ANGLE = 172f
+
+        /** How far the cover is open under two pages side by side (see shut): flat, the left page lying on it as the screen shows it. */
+        private const val FLAT = 180f
 
         /**
          * The part of the way after which the paper comes about a cover that only grows, and the

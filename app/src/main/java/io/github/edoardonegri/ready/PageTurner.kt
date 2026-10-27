@@ -100,12 +100,13 @@ class PageTurner(
     }
 
     /**
-     * Takes over the turn to the next page, which the engine has just shown, for it to be shown
-     * otherwise: the page being left stays in front, still, until [stop], or [turnTaken] turns it
-     * after all. Its picture; null, and nothing taken, if no page is being turned to the next one.
+     * Takes over the turn to the next page, or to the one before if [back], which the engine has
+     * just shown, for it to be shown otherwise: the page being left stays in front, still, until
+     * [stop], or [turnTaken] turns it after all. Its picture; null, and nothing taken, if no page is
+     * being turned that way.
      */
-    fun takeTurn(): Bitmap? {
-        if (turning <= 0) return null
+    fun takeTurn(back: Boolean = false): Bitmap? {
+        if (if (back) turning >= 0 else turning <= 0) return null
         val page = sheet.still ?: return null
         content.removeCallbacks(startTurn)
         content.removeCallbacks(dropTurn)

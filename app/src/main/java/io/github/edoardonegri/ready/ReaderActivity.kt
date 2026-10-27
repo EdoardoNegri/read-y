@@ -2,6 +2,7 @@ package io.github.edoardonegri.ready
 
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.graphics.Rect
@@ -13,10 +14,10 @@ import android.os.Looper
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.PixelCopy
-import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.SeekBar
 import android.widget.TextView
@@ -34,6 +35,8 @@ import androidx.core.view.doOnLayout
 import androidx.core.view.isVisible
 import java.io.File
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
@@ -43,7 +46,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     private var state = BookState()
     private var engine: ReaderEngine? = null
 
-    private lateinit var root: View
+    private lateinit var root: FrameLayout
     private lateinit var content: GestureFrame
     private lateinit var menu: View
 
@@ -106,6 +109,30 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             // Touches meanwhile are for the book opening under it, not for pages nobody sees.
             window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
         }
+        // Read sideways, a reader behind a book opening on the upright shelf turns the screen only
+        // once the book is open (see reveal): meanwhile it sets out its page on its side, as it will
+        // be seen then, and shows it turned a quarter, as it will be read once the phone is turned
+        // so. It fills the upright window that way, to be copied from the screen for the book
+        // opening on the shelf (see shown). Not a book read to its end, which opens on the cover that
+        // ends it, upright however the book is read (see orient), as the shelf grows it.
+        turnLater = handoff != null && Build.VERSION.SDK_INT >= 30 && s.orientation == ReaderSettings.LANDSCAPE &&
+            resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE &&
+            !(!s.vertical && Library.isFinished(this, File(intent.getStringExtra(EXTRA_PATH) ?: "")))
+        if (turnLater && Build.VERSION.SDK_INT >= 30) {
+            val screen = windowManager.currentWindowMetrics.bounds
+            val long = max(screen.width(), screen.height())
+            uprightWidth = min(screen.width(), screen.height())
+            root.layoutParams = root.layoutParams.apply {
+                width = long
+                height = uprightWidth
+            }
+            root.rotation = SIDEWAYS
+            root.translationX = (uprightWidth - long) / 2f
+            root.translationY = (long - uprightWidth) / 2f
+        }
+        // Read sideways, the screen turns between the upright shelf and the reader with the page
+        // filling it as it looks either way: it is not spun round, but just shown turned.
+        if (fromShelf && s.orientation == ReaderSettings.LANDSCAPE) window.attributes = window.attributes.apply { rotationAnimation = WindowManager.LayoutParams.ROTATION_ANIMATION_JUMPCUT }
         fromWidget = intent.getBooleanExtra(EXTRA_FROM_WIDGET, false)
         if (fromShelf && Build.VERSION.SDK_INT >= 34) overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
         if (fromWidget) {
@@ -128,7 +155,8 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         }
         // Draw behind the (hidden) system bars but keep text clear of a notch or camera hole.
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
-            cutout = Cutout.of(insets)
+            // Set out on its side while the window is upright, the page keeps clear of the camera where it will be then.
+            cutout = Cutout.of(insets).let { if (turnLater) it.turned(uprightWidth) else it }
             cutout.insets.let { menu.setPadding(it.left, it.top, it.right, it.bottom) }
             arrangeInfo()
             insets
@@ -139,6 +167,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
                 // The bars coming and going change the height a little; only turned over is another shape.
                 if ((r - l > b - t) != (or - ol > ob - ot)) turned()
                 arrangeInfo()
+                if (r - l < b - t) shutTurned()
             }
         }
         immersive()
@@ -238,6 +267,11 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         if (handoff != null) root.postDelayed({ pictured(null) }, SHOW_WAIT_MS)
         // Opening on its cover, a book has the menu picture ready for the cover that grows on the shelf.
         if (handoff != null && finished && opened.hasCover) pictureEndMenu(handoff, opened)
+        // Opened on the upright shelf onto the page it was left at, a book read sideways shows that
+        // page, as it was read, while the screen turns and until its own is set out. Opened on its
+        // cover, it stays upright.
+        val kept = if (fromShelf && handoff == null && s.orientation == ReaderSettings.LANDSCAPE && !(finished && opened.hasCover)) BookOpening.kept(file, s.look) else null
+        if (kept != null) showSidewaysPage(kept, BookOpening.keptTurned(file, s.look))
         if (!s.hintShown) {
             s.hintShown = true
             Toast.makeText(this, R.string.reader_hint, Toast.LENGTH_LONG).show()
@@ -334,11 +368,10 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
 
     /**
      * Whether the cover that ends the book is shown: the menu is over the foot of the screen then,
-     * and cannot be taken away, and the cover is in the room above it. Whether the menu was shown
-     * before, which it goes back to once the cover is left; and whether it was the knob of the seek bar that left it.
+     * and cannot be taken away, and the cover is in the room above it. Whether it was the knob of
+     * the seek bar that left it, which keeps the menu.
      */
     private var onCover = false
-    private var menuBeforeCover = false
     private var keepMenu = false
 
     private fun coverChanged(on: Boolean) {
@@ -348,16 +381,34 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         // The cover stands against the wall of the case, which shows round it; a page lies on its paper.
         if (on) root.background = wall else root.setBackgroundColor(s.litPalette.bg)
         if (!on) crease.box = null
-        val e = engine ?: return
+        if (!on) turnedLeft = null
+        val e = engine
+        if (e == null) return orient()
         if (on) {
-            menuBeforeCover = menu.isVisible
             behindMenu = null
             // The menu comes at once, as it does for a tap on the page. Turned to from the last page,
             // the book shuts over that page, which stays in front meanwhile, see shut. Unseen, as when
             // the book opens on its cover, the menu is only set out, to be pictured for the opening,
-            // see pictureEndMenu.
-            val left = if (!hidden && !menuBeforeCover) turner.takeTurn() else null
+            // see pictureEndMenu. Taken there with the menu open, by the knob of the seek bar, no
+            // page was turned.
+            val left = if (!hidden && !menu.isVisible) turner.takeTurn() else null
             menu.visibility = View.VISIBLE
+            // Seen sideways, the screen turns upright for the cover, which stands as it does on the
+            // shelf: the page left stays in front meanwhile, turned as it was seen, and once the
+            // screen is upright the book shuts over it as it does read upright (see shutTurned).
+            if (root.width > root.height) {
+                val degrees = uprightTurn(root.display)
+                val page = left?.let { turn(it, degrees) }
+                if (page != null) {
+                    turnedLeft = page
+                    jumpCut()
+                    showSidewaysPage(page, degrees)
+                }
+                turner.stop()
+                keepMenu = false
+                return orient()
+            }
+            orient()
             menu.doOnLayout { m ->
                 if (!onCover) {
                     if (left != null) turner.stop()
@@ -367,11 +418,22 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
                 if (left != null) shut(left)
             }
         } else {
-            // The menu goes, unless it was there before, or it was the knob of the seek bar that left the
-            // cover: once the page turned to from the cover is seen, the menu saying where it is meanwhile,
-            // over the picture of the cover being turned away, menu and all.
+            // Read sideways, the screen turns back on its side for the page: the cover stays in front
+            // meanwhile, as it was seen, rather than the page being turned over it upright.
+            if (s.orientation == ReaderSettings.LANDSCAPE && root.width < root.height) {
+                turner.takeTurn(back = true)?.let {
+                    jumpCut()
+                    showSidewaysPage(it, null)
+                    turner.stop()
+                }
+            }
+            orient()
+            // The menu goes, even if the knob of the seek bar brought the book to its cover with the menu
+            // open, unless it is the knob that leaves the cover: once the page turned to from the cover is
+            // seen, the menu saying where it is meanwhile, over the picture of the cover being turned away,
+            // menu and all.
             coverRoom(e, 0)
-            if (!menuBeforeCover && !keepMenu) {
+            if (!keepMenu) {
                 val asked = menuAsked
                 turner.afterTurn { if (!onCover && menuAsked == asked) menu.visibility = View.GONE }
             }
@@ -460,12 +522,39 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         }
         val spot = BookOpening.Spot(at[0] + box.left, at[1] + box.top, box.width(), box.height(), picture, fit, binding = true)
         shuttingNow = true
-        shutting.shut(spot, left, s.litPalette.bg) {
+        // Two pages side by side shut as an open book does, the left one over the right.
+        shutting.shut(spot, left, s.litPalette.bg, spread = s.spread && root.width > root.height) {
             shuttingNow = false
             paceScreen()
         }
         // The layer of the book takes the place of the page in front, in the same frame.
         turner.stop()
+    }
+
+    /**
+     * The last page as it was seen sideways before the cover that ends the book came under it,
+     * turned upright, for the book to shut over once the screen has turned upright for the cover; see coverChanged.
+     */
+    private var turnedLeft: Bitmap? = null
+
+    /** The screen is upright: the book shuts over the page left sideways, if any, which stood in front meanwhile. */
+    private fun shutTurned() {
+        val page = turnedLeft ?: return
+        turnedLeft = null
+        if (onCover) shut(page)
+        dropSidewaysPage()
+    }
+
+    /** The screen turns from upright to sideways or back at once, with the page standing in front as it was seen: it is not spun round. */
+    private fun jumpCut() {
+        window.attributes = window.attributes.apply { rotationAnimation = WindowManager.LayoutParams.ROTATION_ANIMATION_JUMPCUT }
+    }
+
+    /** [page] turned [degrees]; null if there is no room for that. */
+    private fun turn(page: Bitmap, degrees: Float) = try {
+        Bitmap.createBitmap(page, 0, 0, page.width, page.height, Matrix().apply { setRotate(degrees) }, true)
+    } catch (e: OutOfMemoryError) {
+        null
     }
 
     /**
@@ -525,7 +614,62 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     /** The book opening on the shelf that the reader waits for, unseen, until it has pictured its page for it. */
     private var handoff: BookOpening.Handoff? = null
 
+    /** Whether the reader is to turn the screen on its side once its book is open on the upright shelf; see onCreate. */
+    private var turnLater = false
+
+    /** How wide the screen is upright, which the page is set out on its side for while [turnLater]. */
+    private var uprightWidth = 0
+
+    /** Whether the engine has shown its first page (ReaderHost.shown). */
+    private var pageShown = false
+
+    /** The page as it was copied from the screen, turned a quarter ([SIDEWAYS]), while [turnLater]; see shown. */
+    private var turnedPrint: Bitmap? = null
+
+    /** The page a book read sideways was left at, shown until the reader has set out its own; see [SidewaysPage]. */
+    private var sidewaysPage: SidewaysPage? = null
+
+    /**
+     * Shows [kept], the page the book opened on on the upright shelf, turned [turned] degrees to stand
+     * upright there, as it was read sideways, over the whole window while the screen turns and until
+     * the reader's own page is seen; or, without one, the paper the book opened on. Null [turned]
+     * for a picture seen upright, which stays as it was seen however the screen turns (SidewaysPage).
+     */
+    private fun showSidewaysPage(kept: Bitmap?, turned: Float?) {
+        val page = SidewaysPage(this, kept, turned, s.lit(s.palette.bg))
+        sidewaysPage = page
+        addContentView(page, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        root.postDelayed(::dropSidewaysPage, SHOW_WAIT_MS)
+    }
+
+    /** Takes [sidewaysPage] away, once the reader's own page is on the screen under it: two frames on. */
+    private fun dropSidewaysPage() {
+        val page = sidewaysPage ?: return
+        sidewaysPage = null
+        twoFramesOn { (page.parent as? ViewGroup)?.removeView(page) }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (newConfig.orientation != Configuration.ORIENTATION_LANDSCAPE) return
+        // On its side at last, the reader is as large as its window again: as large as it was set out
+        // for already, unseen, so that its page is there to be seen at once.
+        val lp = root.layoutParams
+        if (lp.width != ViewGroup.LayoutParams.MATCH_PARENT) {
+            root.layoutParams = lp.apply {
+                width = ViewGroup.LayoutParams.MATCH_PARENT
+                height = ViewGroup.LayoutParams.MATCH_PARENT
+            }
+            root.rotation = 0f
+            root.translationX = 0f
+            root.translationY = 0f
+        }
+        if (pageShown) dropSidewaysPage()
+    }
+
     override fun shown() {
+        pageShown = true
+        if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) dropSidewaysPage()
         if (handoff == null || !hidden) return
         // Two frames on, the page is on the screen to be copied.
         twoFramesOn { capture(::pictured) }
@@ -537,7 +681,8 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         handoff = null
         // On the cover that ends the book, the cover alone is wanted: the book that only grows
         // becomes it as it ends (BookOpening.print), and a smaller picture is sooner made ready.
-        val box = crease.box
+        // Turned a quarter, the page is wanted whole: the crease stands elsewhere on it.
+        val box = if (turnLater) null else crease.box
         val cut = if (print != null && box != null && Rect(0, 0, print.width, print.height).contains(box)) {
             try {
                 Bitmap.createBitmap(print, box.left, box.top, box.width(), box.height())
@@ -547,7 +692,9 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         } else {
             print
         }
-        h.pictured(cut?.uploaded())
+        val up = cut?.uploaded()
+        if (turnLater) turnedPrint = up
+        h.pictured(up)
         h.ready(::reveal)
     }
 
@@ -558,9 +705,11 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
      */
     private fun capture(then: (Bitmap?) -> Unit) {
         if (Build.VERSION.SDK_INT < 26) return then(content.picture())
-        if (root.width == 0 || root.height == 0) return then(null)
+        // Turned a quarter, the page is as large as the window across, not as it is set out.
+        val shown = if (turnLater) window.decorView else root
+        if (shown.width == 0 || shown.height == 0) return then(null)
         val bmp = try {
-            createBitmap(root.width, root.height)
+            createBitmap(shown.width, shown.height)
         } catch (e: OutOfMemoryError) {
             return then(null)
         }
@@ -587,6 +736,14 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     private fun reveal() {
         if (!hidden || isFinishing) return
         hidden = false
+        if (turnLater) {
+            turnLater = false
+            // The page the book opened on stands in front, as it was read, while the screen turns.
+            val print = turnedPrint
+            turnedPrint = null
+            if (print != null) showSidewaysPage(print, SIDEWAYS) else showSidewaysPage(BookOpening.kept(file, s.look), BookOpening.keptTurned(file, s.look))
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
         readEndPictureIfNear(state.percent)
         paceScreen()
         window.attributes = window.attributes.apply { alpha = 1f }
@@ -663,16 +820,11 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
      */
     private fun upright(page: Bitmap?) {
         if (page == null || page.width < page.height) return goBack(page)
-        @Suppress("DEPRECATION")
-        val rotation = if (Build.VERSION.SDK_INT >= 30) display?.rotation else windowManager.defaultDisplay.rotation
-        val turn = Matrix().apply { setRotate(if (rotation == Surface.ROTATION_270) -90f else 90f) }
-        val turned = try {
-            Bitmap.createBitmap(page, 0, 0, page.width, page.height, turn, true)
-        } catch (e: OutOfMemoryError) {
-            null
-        }
-        // Only a page read upright is opened on again, which looks as it would be read.
-        goBack(turned, keep = false)
+        val degrees = uprightTurn(root.display)
+        val turned = turn(page, degrees)
+        // Only a page that is read sideways whenever the book is opened is opened on again,
+        // turned upright on the shelf as here: it is then shown as it will be read.
+        goBack(turned, keep = s.orientation == ReaderSettings.LANDSCAPE, turned = degrees)
     }
 
     /** Goes back to the shelf with [page], the cover that ends the book standing on the menu, and the menu pictured. */
@@ -685,12 +837,15 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     /** The reader is on its way back to the shelf, see [leave]. */
     private var leaving = false
 
-    /** Goes back to the shelf, which closes the book from [page], the page it was left at as it was seen, if there is one. */
-    private fun goBack(page: Bitmap?, keep: Boolean = true, menu: BookOpening.EndMenu? = null) {
+    /**
+     * Goes back to the shelf, which closes the book from [page], the page it was left at as it was
+     * seen, if there is one; turned [turned] degrees to stand upright there, if it was read sideways.
+     */
+    private fun goBack(page: Bitmap?, keep: Boolean = true, menu: BookOpening.EndMenu? = null, turned: Float = 0f) {
         if (page != null) {
             BookOpening.left = BookOpening.Left(file, page.uploaded(), menu = menu)
             // Opened again next, the book opens on it at once.
-            if (keep) BookOpening.keep(file, s.look, page)
+            if (keep) BookOpening.keep(file, s.look, page, turned)
         }
         // A book opened on the home screen is closed on the bookshelf all the same: on the shelf it
         // stands on, in place of whatever else was open there.
@@ -719,12 +874,24 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
 
     private fun applyBrightness() = s.light(window, mayStayOn = true)
 
-    private fun applyLayout() {
-        requestedOrientation = when (s.orientation) {
-            1 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-            2 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+    /**
+     * Turns the screen as the reader asks. The cover that ends the book stands upright, as on the
+     * shelf, however the book is read: it is shown as it is when the book is read to its end, and
+     * when it opens there.
+     */
+    private fun orient() {
+        requestedOrientation = when {
+            // Upright as the shelf under it, until the book has opened there; see reveal.
+            turnLater -> ActivityInfo.SCREEN_ORIENTATION_BEHIND
+            s.orientation == 1 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            onCover || finished && engine?.hasCover == true -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            s.orientation == 2 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
+    }
+
+    private fun applyLayout() {
+        orient()
         // The page is shown in the warm light, see ReaderSettings.litPalette; the cover that ends
         // the book is not, nor is the wall it stands against.
         if (onCover) root.background = wall else root.setBackgroundColor(s.litPalette.bg)
@@ -994,6 +1161,9 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
 
         /** The longest the book opening on the shelf waits for the reader's page, see [pictured]. */
         private const val SHOW_WAIT_MS = 2500L
+
+        /** How far a page read sideways is turned to be seen upright, as the shelf shows it (see upright): a quarter to the right. */
+        private const val SIDEWAYS = 90f
 
         /** How near the place the knob was let go the book must tell it is, and how long it has to get there. */
         private const val SEEK_NEAR = 0.03f

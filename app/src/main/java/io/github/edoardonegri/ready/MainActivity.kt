@@ -504,6 +504,17 @@ class MainActivity : AppCompatActivity() {
         // A book read to its end opens on its cover, so it is only enlarged out of its place: that
         // cover is its last page, and stands against the wall of the case.
         val grown = !slide && !settings.vertical && Library.isFinished(this, f)
+        // Read sideways, the book opens on the upright shelf onto its page turned on its side, as
+        // the reader closes it, and the screen turns only once it is open (ReaderActivity.reveal).
+        // The cover that ends a book read to its end stands upright however the book is read, so
+        // the book grows out of the shelf to it as it does read upright.
+        val sideways = settings.orientation == ReaderSettings.LANDSCAPE && !grown
+        // Where the reader cannot be started behind the opening, it starts once the book is open:
+        // started at once, it would turn the screen in the middle of it.
+        if (sideways && Build.VERSION.SDK_INT < 30) {
+            if (cover == null) return opening.slideIn(paper, BookOpening.kept(f, settings.look)) { startActivity(reader) }
+            return opening.open(cover, paper, BookOpening.kept(f, settings.look)) { startActivity(reader) }
+        }
         if (Build.VERSION.SDK_INT >= 30) {
             // The reader starts at once, unseen over the shelf, and sets out the page while the
             // book opens; see BookOpening.Handoff.

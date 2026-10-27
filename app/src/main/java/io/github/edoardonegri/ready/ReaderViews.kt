@@ -16,8 +16,10 @@ import android.graphics.Typeface
 import android.os.Build
 import android.util.AttributeSet
 import android.util.TypedValue
+import android.view.Display
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
+import android.view.Surface
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.animation.DecelerateInterpolator
@@ -26,6 +28,7 @@ import androidx.appcompat.widget.AppCompatImageButton
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.withClip
+import androidx.core.graphics.withRotation
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import java.util.Locale
@@ -670,3 +673,40 @@ class SpineCrease(ctx: Context) : View(ctx) {
         }
     }
 }
+
+/**
+ * The page a book read sideways was left at, kept on the shelf turned [turned] degrees to stand
+ * upright there (BookOpening.keep), shown over the reader as it was read until the reader has set
+ * out its own: as the screen turns on its side the page is seen as it was, rather than blank.
+ * Without one, it is the [paper] the book opened on. A [page] seen upright, with no [turned], is
+ * turned as the screen is once it is on its side, to be seen as it was.
+ */
+class SidewaysPage(ctx: Context, private val page: Bitmap?, private val turned: Float?, paper: Int) : View(ctx) {
+    private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val to = RectF()
+
+    init {
+        setBackgroundColor(paper)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val page = page ?: return
+        val w = width.toFloat()
+        val h = height.toFloat()
+        // Still upright, the screen shows the page as the shelf does.
+        if (w <= h) {
+            to.set(0f, 0f, w, h)
+            canvas.drawBitmap(page, null, to, paint)
+            return
+        }
+        // On its side, the page is turned back as it was read, about the middle of the screen.
+        to.set((w - h) / 2f, (h - w) / 2f, (w + h) / 2f, (h + w) / 2f)
+        canvas.withRotation(-(turned ?: uprightTurn(display)), w / 2f, h / 2f) { drawBitmap(page, null, to, paint) }
+    }
+}
+
+/**
+ * How far a picture of a screen seen sideways on [display] is turned to stand upright, as the
+ * shelf does: a quarter, the way the screen is turned.
+ */
+fun uprightTurn(display: Display?) = if (display?.rotation == Surface.ROTATION_270) -90f else 90f
