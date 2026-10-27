@@ -28,10 +28,44 @@ Tap your book again.</string>
     <string name="create">Create</string>
     <string name="name_taken">That name cannot be used, or something here already has it.</string>
     <string name="cannot_move">It cannot go there: something of the same name is already on that shelf.</string>
-    <plurals name="delete_many">
-        <item quantity="one">%1$d book or shelf will be deleted from the phone, with everything on it.</item>
-        <item quantity="other">%1$d books and shelves will be deleted from the phone, with everything on them.</item>
+    <!-- Shown for a few seconds after books or shelves are deleted, with a button that takes them back. -->
+    <plurals name="deleted_many">
+        <item quantity="one">%1$d item deleted</item>
+        <item quantity="other">%1$d items deleted</item>
     </plurals>
+    <string name="undo">Undo</string>
+    <!-- The tour shown when the app is first used (Tutorial): the bookshelf, then the reader and the settings. Most steps ask for something to be done. -->
+    <string name="tutorial_welcome">Welcome to Read-y! This quick tour asks you to try things as we go, so you learn by doing. It uses a test book and a test shelf, which go away at the end. You can skip it any time.</string>
+    <string name="tutorial_menu">Tap the three dots to open the menu.</string>
+    <string name="tutorial_menu_settings">Here you add books and shelves and sort them. Tap Settings to see how the reader can look.</string>
+    <string name="tutorial_menu_close">Tap outside the menu to close it.</string>
+    <string name="tutorial_search">Tap the magnifier to look for a book.</string>
+    <string name="tutorial_searching">Type a title or an author. The star shows only your favorites. When you are done, tap the cross.</string>
+    <string name="tutorial_plaque">Tap the name plate under the test book to see its details.</string>
+    <string name="tutorial_plaque_open">The author, the pages, how far you have read and where the file is. Tap outside to close it.</string>
+    <string name="tutorial_hold">Hold the test book to pick it up.</string>
+    <string name="tutorial_edit">While a book is picked up, tapping its name plate lets you change it. Try it.</string>
+    <string name="tutorial_edit_open">Change the name, the author or the cover here. Tap outside to save and close.</string>
+    <string name="tutorial_board">Now the board has a star to make it a favorite, a tick to mark it as read and a bin to delete it, which you can undo. Drop a picked book onto a shelf to move it. Tap the cross to let go.</string>
+    <string name="tutorial_shelf">Tap the test shelf to go inside it.</string>
+    <string name="tutorial_inside">You are inside the shelf now. Tap the arrow to go back.</string>
+    <string name="tutorial_open_book">Now tap the test book to open it, and I will show you how to read.</string>
+    <string name="tutorial_resume">Tap this to go on with the book you just read. Come back to the shelf when you are done.</string>
+    <string name="tutorial_end">That is the whole tour. The test book and the test shelf go away now. Enjoy your books!</string>
+    <string name="tutorial_page_tap">Tap the right side of the page, or swipe, to turn it.</string>
+    <string name="tutorial_back_tap">Good! Now tap the left side of the page to go back one page.</string>
+    <string name="tutorial_page_swipe">Swipe across the page to turn it.</string>
+    <string name="tutorial_back_swipe">Good! Now swipe the other way to go back one page.</string>
+    <string name="tutorial_menu_tap">Now tap the middle of the page to show the menu.</string>
+    <string name="tutorial_reader_menu">Here you see where you are, drag the line to jump anywhere, open the contents, and change how the page looks with the cog.</string>
+    <string name="tutorial_leave_book">Tap the arrow to go back to the shelf.</string>
+    <string name="tutorial_settings_preview">This is a page as you will read it. Everything you change below shows here at once.</string>
+    <string name="tutorial_settings_more">Scroll down and take a look at whatever you like: the light, the page, the text and more. Everything you change shows in the page above.</string>
+    <string name="tutorial_settings_leave">Everything is saved as you go. Tap the cross to leave, or the arrow to go back to the menu.</string>
+    <string name="tutorial_settings_back">Everything is saved as you go. Tap Next to go back to the menu.</string>
+    <string name="tutorial_next">Next</string>
+    <string name="tutorial_done">Got it</string>
+    <string name="tutorial_skip">Skip</string>
     <string name="about">About</string>
     <string name="about_hi">Hi, I am Edo, and I made Read-y: a reader that feels like a real bookshelf. No ads, no tracking, no account and no internet access. Your books stay in one folder on your phone.</string>
     <string name="about_feedback_ask">Is something broken, or do you have an idea?</string>
@@ -72,8 +106,8 @@ Tap your book again.</string>
     <string name="nothing_read">No book is being read</string>
     <string name="finished">Finished</string>
     <string name="delete">Delete</string>
-    <string name="delete_book">%1$s will be deleted from the phone.</string>
-    <string name="delete_shelf" tools:ignore="PluralsCandidate">The shelf %1$s will be deleted from the phone with everything on it: %2$d books and %3$d shelves.</string>
+    <string name="deleted">%1$s deleted</string>
+    <string name="cannot_restore">It could not be put back.</string>
     <string name="already_on_shelf">That book is already on your shelf.</string>
     <plurals name="already_here">
         <item quantity="one">That book was already on your shelf, so it was not added again.</item>

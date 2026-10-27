@@ -626,6 +626,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     private fun leave() {
         if (leaving) return
         leaving = true
+        tour?.happened(Tutorial.Event.READER_LEFT)
         // Left while the book shuts over its last page, it is shut at once, and left once that is seen.
         if (shuttingNow) {
             shuttingNow = false
@@ -807,7 +808,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
 
     override fun onTap(x: Float, y: Float) {
         if (menu.isVisible && !onCover) {
-            menu.visibility = View.GONE
+            closeMenu()
             return
         }
         // On the cover that ends the book the menu is shown already, and cannot be taken away.
@@ -853,6 +854,18 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         // A book of fixed pages is at the page it shows, which it counts as its chapter.
         val paged = engine is PageEngine
         turner.onPosition(chapter, fraction)
+        tourAt?.let { was ->
+            if (was.first != chapter || was.second != fraction) {
+                val forward = chapter > was.first || (chapter == was.first && fraction > was.second)
+                tourAt = chapter to fraction
+                tour?.happened(if (forward) Tutorial.Event.PAGE_FORWARD else Tutorial.Event.PAGE_BACK)
+            }
+        }
+        // The first time a book is read, once it is on its page, the reader is shown around.
+        if (tourDue && !toured && !tourQueued) {
+            tourQueued = true
+            content.postDelayed(::startTour, TOUR_WAIT_MS)
+        }
         readEndPictureIfNear(percent)
         // How long each page is read for tells how fast the reader reads, and how long the rest will take.
         if (bookPages > 0 && !seeking) pace.at(percent * bookPages, SystemClock.elapsedRealtime())
@@ -958,10 +971,55 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     /** Counts the times the menu was asked for, so that one asked for while a page turns from the cover is not taken away after. */
     private var menuAsked = 0
 
+    private fun closeMenu() {
+        menu.visibility = View.GONE
+        tour?.happened(Tutorial.Event.READER_MENU_CLOSED)
+    }
+
     private fun openMenu() {
         menuAsked++
         menu.visibility = View.VISIBLE
         behindMenu?.invoke()
+        tour?.happened(Tutorial.Event.READER_MENU_OPENED)
+    }
+
+    /** The tour of the reader while it is up, and the place in the book it began at, which a page turned leaves. */
+    private var tour: Tutorial? = null
+    private var tourAt: Pair<Int, Float>? = null
+    private var tourQueued = false
+
+    /** Whether this book is the one to show the reader round: looked up once, not at every page. */
+    private val tourDue by lazy { !toured && !tourSeen(this, Tutorial.READER) }
+
+    /** Shows the first-time tour of the reader once the book has settled on its page. */
+    private fun startTour() {
+        tourQueued = false
+        // Not on the cover that ends the book, where the menu is up already.
+        if (isFinishing || isDestroyed || menu.isVisible || toured) return
+        toured = true
+        tourAt = state.chapter to state.fraction
+        val lit = Tutorial.Touch.LIT
+        // The first steps are for the page, the last two for the menu.
+        val onPage = { hasWindowFocus() && !menu.isVisible }
+        val inMenu = { hasWindowFocus() && menu.isVisible }
+        // Where a tap turns the page, if that is asked for; else the page is only turned by swiping it, anywhere on it.
+        val tapping = s.tapToTurn
+        val forward = { Tutorial.sliceOf(content, if (tapping) 0.7f else 0f, 1f) }
+        val backward = { Tutorial.sliceOf(content, 0f, if (tapping) 0.3f else 1f) }
+        val middle = { Tutorial.sliceOf(content, 0.3f, 0.7f) }
+        // Showing the menu before it is asked for, the reader has found their way: on to what it holds.
+        val toMenu = mapOf(Tutorial.Event.READER_MENU_OPENED to 3)
+        tour = Tutorial.start(
+            this,
+            Tutorial.READER,
+            listOf(
+                Tutorial.Step(if (tapping) R.string.tutorial_page_tap else R.string.tutorial_page_swipe, forward, Tutorial.Event.PAGE_FORWARD, lit, onPage, perform = { turner.swipe(-1) }, jump = toMenu, top = true),
+                Tutorial.Step(if (tapping) R.string.tutorial_back_tap else R.string.tutorial_back_swipe, backward, Tutorial.Event.PAGE_BACK, lit, onPage, perform = { turner.swipe(1) }, jump = toMenu, top = true),
+                Tutorial.Step(R.string.tutorial_menu_tap, middle, Tutorial.Event.READER_MENU_OPENED, lit, onPage, perform = { openMenu() }, top = true),
+                Tutorial.Step(R.string.tutorial_reader_menu, { Tutorial.rectOf(findViewById(R.id.menuPlank)) }, touch = lit, ready = inMenu, top = true),
+                Tutorial.Step(R.string.tutorial_leave_book, { Tutorial.rectOf(findViewById(R.id.back)) }, Tutorial.Event.READER_LEFT, lit, inMenu, perform = { leave() }, top = true),
+            ),
+        ) { tour = null; tourAt = null }
     }
 
     /** The place in the book has changed since it was last written down, at [savedAt]. */
@@ -988,6 +1046,10 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         const val EXTRA_FROM_WIDGET = "fromWidget"
 
         private const val SAVE_EVERY_MS = 30_000L
+
+        /** Whether the reader was shown around since the app started, and how long after the first page it is, in ms. */
+        private var toured = false
+        private const val TOUR_WAIT_MS = 1500L
 
         /** How far into the book the cover that ends it is read, see endPicture. */
         private const val END_NEAR = 0.8f

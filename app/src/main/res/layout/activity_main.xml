@@ -137,6 +137,47 @@
                 android:src="@drawable/ic_close" />
         </LinearLayout>
 
+        <!-- Shown for a few seconds after books or shelves are deleted: they can be taken back until it goes. -->
+        <LinearLayout
+            android:id="@+id/undoBar"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_margin="16dp"
+            android:background="@drawable/panel_wood"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="18dp"
+            android:translationZ="3dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/undoText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="serif"
+                android:maxWidth="230dp"
+                android:singleLine="true"
+                android:textColor="@color/cream"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/undo"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:foreground="?attr/selectableItemBackground"
+                android:fontFamily="serif"
+                android:gravity="center"
+                android:minWidth="64dp"
+                android:paddingEnd="18dp"
+                android:paddingStart="18dp"
+                android:text="@string/undo"
+                android:textColor="@color/gold_light"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
         <LinearLayout
             android:id="@+id/empty"
             android:layout_width="match_parent"

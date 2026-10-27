@@ -22,6 +22,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.doOnPreDraw
 import androidx.core.view.isVisible
 import androidx.core.view.isNotEmpty
+import androidx.core.view.updateLayoutParams
 import androidx.core.widget.doAfterTextChanged
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -60,6 +61,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var up: View
     private lateinit var bin: View
     private lateinit var pickRow: View
+    private lateinit var undoBar: View
+    private lateinit var undoText: TextView
     private lateinit var pickStar: ImageButton
     private lateinit var pickRead: ImageButton
     private lateinit var searchRow: View
@@ -92,7 +95,7 @@ class MainActivity : AppCompatActivity() {
                 override fun outside(): File? = this@MainActivity.outside()
                 override fun moveAll(chosen: List<File>, to: File) = this@MainActivity.moveAll(chosen, to)
                 override fun mark(chosen: List<File>, favorite: Boolean) = this@MainActivity.mark(chosen, favorite)
-                override fun askDelete(things: List<File>) = this@MainActivity.askDelete(things)
+                override fun delete(things: List<File>) = this@MainActivity.delete(things)
                 override fun chosen(): List<File>? = this@MainActivity.chosen()
                 override fun stopPicking() = this@MainActivity.stopPicking()
                 override fun spec(): ShelfSpec = this@MainActivity.spec()
@@ -109,6 +112,7 @@ class MainActivity : AppCompatActivity() {
     private val access = FolderAccess(this) { granted ->
         if (granted) current = Library.root() else toast(R.string.cannot_use_folder)
         refresh()
+        showTutorial()
     }
 
     /** Books and shelves added to the shelf shown, from the menu. */
@@ -154,6 +158,10 @@ class MainActivity : AppCompatActivity() {
         // The bookcase covers the whole window, which need not paint its own background under it.
         window.setBackgroundDrawable(null)
 
+        details.watcher = { dialog ->
+            detailsDialog = dialog
+            tutorial?.happened(if (dialog != null) Tutorial.Event.DETAILS_OPENED else Tutorial.Event.DETAILS_CLOSED)
+        }
         shelf = findViewById(R.id.shelf)
         empty = findViewById(R.id.empty)
         emptyText = findViewById(R.id.emptyText)
@@ -178,7 +186,10 @@ class MainActivity : AppCompatActivity() {
         bin = findViewById(R.id.bin)
         pickStar.setOnClickListener { markChosen(favorite = true) }
         pickRead.setOnClickListener { markChosen(favorite = false) }
-        bin.setOnClickListener { chosen()?.let(::askDelete) }
+        bin.setOnClickListener { chosen()?.let(::delete) }
+        undoBar = findViewById(R.id.undoBar)
+        undoText = findViewById(R.id.undoText)
+        findViewById<View>(R.id.undo).setOnClickListener { undo() }
         findViewById<View>(R.id.closePick).setOnClickListener { stopPicking() }
         grant.background = PlaqueDrawable(resources.displayMetrics.density)
         // The grain of the board ends at its round corners.
@@ -261,12 +272,107 @@ class MainActivity : AppCompatActivity() {
         asked = null
         if (book == null || !showShelfOf(book)) refresh()
         checkLibrary()
+        showTutorial()
         val left = BookOpening.left
         BookOpening.left = null
         if (left != null && SystemClock.uptimeMillis() - left.at < BookOpening.LEFT_MS) closeBook(left) else opening.clear()
         detached.clear()
         val app = applicationContext
         Library.io.execute { ContinueShortcut.refresh(app) }
+    }
+
+    /** Whether the tour of the bookshelf is up, or being got ready, see [showTutorial]. */
+    private var touring = false
+
+    /** The tour while it is up: told what is done, for the steps that wait for it. */
+    private var tutorial: Tutorial? = null
+
+    /**
+     * The place of [f] on the shelf shown, if it is in view; if it is not, the shelf is scrolled to it, for
+     * it to be there in a moment.
+     */
+    private fun holderOf(f: File): ShelfAdapter.Holder? {
+        val index = adapter.indexOf(f)
+        if (index < 0) return null
+        val holder = shelf.findViewHolderForAdapterPosition(index) as? ShelfAdapter.Holder
+        if (holder == null) shelf.scrollToPosition(index)
+        return holder
+    }
+
+    /** The first time the shelf can be used, a short tour of it is shown, once, with a book and a shelf made for it. */
+    private fun showTutorial() {
+        if (touring || !Library.hasAccess()) return
+        // Looked at once: after that, shown or not, there is nothing more to look at.
+        touring = true
+        val app = applicationContext
+        if (tourSeen(this, Tutorial.SHELF)) {
+            // What a tour that was cut short left behind, the app being closed in the middle of it, goes.
+            if (tourSamplesPending(app)) Library.io.execute { TourSamples.remove(app) }
+            return
+        }
+        // The book and the shelf are made off the thread that draws, and the tour starts once they are.
+        Library.io.execute {
+            TourSamples.create(app)
+            onShelf {
+                current = Library.root()
+                refresh()
+                // After the shelf is laid out, so that what the tour points at has its place.
+                window.decorView.post { startTour() }
+            }
+        }
+    }
+
+    private fun startTour() {
+        if (isFinishing || isDestroyed) return
+        val book = TourSamples.book()
+        val folder = TourSamples.shelf()
+        val lit = Tutorial.Touch.LIT
+        // Where each step belongs: the shelf as it stands, with nothing picked up, searched or on top of it.
+        val home = { hasWindowFocus() && picked == null && !searching }
+        val atRoot = { home() && current == Library.root() }
+        val inside = { home() && current != Library.root() }
+        val bookHere = { holderOf(book) != null }
+        val folderHere = { holderOf(folder) != null }
+        val more = { Tutorial.rectOf(findViewById(R.id.more)) }
+        tutorial = Tutorial.start(
+            this,
+            Tutorial.SHELF,
+            listOf(
+                Tutorial.Step(R.string.tutorial_welcome),
+                Tutorial.Step(R.string.tutorial_menu, more, Tutorial.Event.MENU_OPENED, lit, home, perform = { showMenu() }),
+                Tutorial.Step(R.string.tutorial_menu_settings, awaits = Tutorial.Event.SETTINGS_OPENED, ready = { menuShowing }, glow = { menuDialog?.choiceLabelled(getString(R.string.settings)) }, perform = { menuDialog?.dismiss(); openSettings() }),
+                Tutorial.Step(R.string.tutorial_menu_close, more, Tutorial.Event.MENU_CLOSED, ready = { menuShowing }, perform = { menuDialog?.dismiss() }),
+                Tutorial.Step(R.string.tutorial_search, { Tutorial.rectOf(findViewById(R.id.search)) }, Tutorial.Event.SEARCH_OPENED, lit, home, perform = { openSearch() }),
+                Tutorial.Step(R.string.tutorial_searching, { Tutorial.rectOf(searchRow) }, Tutorial.Event.SEARCH_CLOSED, lit, { hasWindowFocus() && searching }, perform = { closeSearch() }),
+                Tutorial.Step(R.string.tutorial_plaque, { Tutorial.rectOf(holderOf(book)?.plaque) }, Tutorial.Event.DETAILS_OPENED, lit, home, available = bookHere, hopeful = { true }, perform = { onPlaque(book) }),
+                Tutorial.Step(R.string.tutorial_plaque_open, ready = { detailsDialog != null }, awaits = Tutorial.Event.DETAILS_CLOSED, available = { detailsDialog != null }, perform = { detailsDialog?.dismiss() }),
+                Tutorial.Step(R.string.tutorial_hold, { Tutorial.rectOf(holderOf(book)?.cover) }, Tutorial.Event.PICKED, lit, home, available = bookHere, hopeful = { true }, perform = { picked = linkedSetOf(book); refresh() }),
+                Tutorial.Step(R.string.tutorial_edit, { Tutorial.rectOf(holderOf(book)?.plaque) }, Tutorial.Event.DETAILS_OPENED, lit, { hasWindowFocus() && picked != null }, available = { picked != null }, perform = { onPlaque(book) }),
+                Tutorial.Step(R.string.tutorial_edit_open, ready = { detailsDialog != null }, awaits = Tutorial.Event.DETAILS_CLOSED, available = { detailsDialog != null }, perform = { detailsDialog?.dismiss() }),
+                Tutorial.Step(R.string.tutorial_board, { Tutorial.rectOf(pickRow) }, Tutorial.Event.LET_GO, lit, { hasWindowFocus() && picked != null }, available = { picked != null }, perform = { stopPicking() }),
+                Tutorial.Step(R.string.tutorial_shelf, { Tutorial.rectOf(holderOf(folder)?.cover) }, Tutorial.Event.ENTERED, lit, atRoot, available = folderHere, hopeful = { true }, perform = { holderOf(folder)?.let { enter(folder, it.itemView) } }),
+                Tutorial.Step(R.string.tutorial_inside, { Tutorial.rectOf(up) }, Tutorial.Event.LEFT_SHELF, lit, inside, available = { current != Library.root() }, perform = { goUp() }),
+                Tutorial.Step(R.string.tutorial_open_book, { Tutorial.rectOf(holderOf(book)?.cover) }, Tutorial.Event.BOOK_OPENED, lit, atRoot, available = bookHere, hopeful = { true }, perform = { holderOf(book)?.let { read(book, it.cover) } }),
+                Tutorial.Step(R.string.tutorial_resume, { Tutorial.rectOf(findViewById(R.id.resume)) }, Tutorial.Event.BOOK_RESUMED, lit, atRoot, perform = { resume() }),
+                Tutorial.Step(R.string.tutorial_end),
+            ),
+        ) {
+            tutorial = null
+            removeSamples()
+        }
+    }
+
+    /** The book and the shelf made for the tour are taken away, however it ended. */
+    private fun removeSamples() {
+        picked = null
+        val app = applicationContext
+        Library.io.execute {
+            TourSamples.remove(app)
+            onShelf {
+                if (current == TourSamples.shelf()) current = Library.root()
+                refresh()
+            }
+        }
     }
 
     /**
@@ -345,6 +451,12 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         Library.backUp(this)
         super.onPause()
+    }
+
+    override fun onDestroy() {
+        // Leaving for good, there is no notice left to take it back by.
+        if (isFinishing) settleDeleted()
+        super.onDestroy()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -453,6 +565,7 @@ class MainActivity : AppCompatActivity() {
         // once for that: the shelf closes into it.
         if (dragging.dragged != null && shelf.width > 0) Library.folderPreview(this, left, spec())
         refresh()
+        tutorial?.happened(Tutorial.Event.LEFT_SHELF)
         val index = adapter.indexOf(left)
         if (snapshot == null || index < 0) return
         // Keep showing the shelf being left until the parent is laid out, its miniature can be
@@ -493,6 +606,7 @@ class MainActivity : AppCompatActivity() {
      * or, to [slide], with its page sliding in from the right, without the book opening.
      */
     private fun read(f: File, cover: View?, slide: Boolean = false) {
+        tutorial?.happened(Tutorial.Event.BOOK_OPENED)
         // The book is read in the background meanwhile, rather than by the reader as it starts.
         BookPrep.prepare(f)
         val reader = Intent(this, ReaderActivity::class.java).putExtra(ReaderActivity.EXTRA_PATH, f.path)
@@ -539,6 +653,7 @@ class MainActivity : AppCompatActivity() {
             val last = Library.lastRead(app)
             onShelf {
                 if (last == null) return@onShelf toast(R.string.nothing_read)
+                tutorial?.happened(Tutorial.Event.BOOK_RESUMED)
                 read(last, null, slide = true)
             }
         }
@@ -585,6 +700,7 @@ class MainActivity : AppCompatActivity() {
         current = dir
         refresh()
         shelf.scrollToPosition(0)
+        tutorial?.happened(Tutorial.Event.ENTERED)
         // Start only once the folder's books are laid out and show their covers, so no frame shows
         // the old shelf shrunk or an empty place; the shelf being left stays in view until then.
         if (miniature != null && snapshot != null) {
@@ -602,6 +718,20 @@ class MainActivity : AppCompatActivity() {
 
     // ---- menu: adding books and shelves, sorting, settings ----
 
+    /** The menu is up, and whether a choice was made from it, which is not the same as it being closed; see [showMenu]. */
+    private var menuShowing = false
+    private var menuChosen = false
+    private var menuDialog: ShelfDialog? = null
+
+    /** The dialog about a book or a shelf, while it is open. */
+    private var detailsDialog: ShelfDialog? = null
+
+    /** Opens the settings, which the tour of the bookshelf, if it is still going on, goes on to show the way round of. */
+    private fun openSettings() {
+        tutorial?.happened(Tutorial.Event.SETTINGS_OPENED)
+        settings.launch(Intent(this, SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_TOUR, tutorial?.active == true))
+    }
+
     private fun showMenu() {
         val choices = ArrayList<Pair<String, () -> Unit>>()
         if (Library.hasAccess()) {
@@ -609,10 +739,22 @@ class MainActivity : AppCompatActivity() {
             choices += getString(R.string.add_shelf) to adding::askAddShelf
         }
         choices += getString(R.string.sort_by) to ::askSort
-        choices += getString(R.string.settings) to { settings.launch(Intent(this, SettingsActivity::class.java)) }
+        choices += getString(R.string.settings) to ::openSettings
         choices += getString(R.string.about) to { AboutDialog(this, ::showMenu).show() }
         // It is closed by a tap beside it; the dialogs it leads to have an arrow back to it.
-        ShelfDialog(this).title(getString(R.string.menu)).uncrossed().options(choices).show()
+        menuShowing = true
+        menuChosen = false
+        val dialog = ShelfDialog(this).title(getString(R.string.menu)).uncrossed()
+            .options(choices.map { (label, action) -> label to { menuChosen = true; action() } })
+            .onClose {
+                menuShowing = false
+                menuDialog = null
+                // A choice runs right after the menu closes: only what is closed with none made is closed for the tour.
+                if (tutorial != null) window.decorView.post { if (!menuChosen) tutorial?.happened(Tutorial.Event.MENU_CLOSED) }
+            }
+        menuDialog = dialog
+        dialog.show()
+        tutorial?.happened(Tutorial.Event.MENU_OPENED)
     }
 
     /** The settings, which lead back to the menu if they are left by their arrow. */
@@ -628,6 +770,11 @@ class MainActivity : AppCompatActivity() {
      * press carries all of it as one. Back lets go of everything.
      */
     private var picked: MutableSet<File>? = null
+        set(value) {
+            val was = field != null
+            field = value
+            if ((value != null) != was) tutorial?.happened(if (value != null) Tutorial.Event.PICKED else Tutorial.Event.LET_GO)
+        }
 
     private fun stopPicking() {
         shelf.removeCallbacks(tappedOnce)
@@ -716,6 +863,7 @@ class MainActivity : AppCompatActivity() {
         query.requestFocus()
         getSystemService(InputMethodManager::class.java).showSoftInput(query, 0)
         refresh()
+        tutorial?.happened(Tutorial.Event.SEARCH_OPENED)
     }
 
     private fun closeSearch() {
@@ -725,6 +873,7 @@ class MainActivity : AppCompatActivity() {
         getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(query.windowToken, 0)
         // Clearing the field ends the search, see search().
         if (query.text.isEmpty()) search("") else query.text.clear()
+        tutorial?.happened(Tutorial.Event.SEARCH_CLOSED)
     }
 
     private val typed = Runnable { search(query.text.toString()) }
@@ -803,36 +952,88 @@ class MainActivity : AppCompatActivity() {
     /** The name a book or a shelf goes by. */
     private fun nameOf(f: File) = if (f.isFolder) f.name else Library.cachedMeta(this, f)?.title ?: f.nameWithoutExtension
 
-    /** Deleting takes the files off the phone, so it is asked about first. */
-    private fun askDelete(things: List<File>) {
+    /**
+     * What was deleted last, each with the shelf it stood on: it lies in the bin until [settleDeleted]
+     * has it deleted for good, which is a few seconds after, unless [undo] takes it back first.
+     */
+    private var deleted: List<Pair<File, File>> = emptyList()
+
+    private val settle = Runnable { settleDeleted() }
+
+    /** Deleting leaves the shelf at once, with a notice for a few seconds that has it taken back. */
+    private fun delete(things: List<File>) {
         if (things.isEmpty()) return
+        // Only the last thing deleted can be taken back: what was deleted before is gone for good now.
+        settleDeleted()
         val only = things.singleOrNull()
-        val warning = when {
-            only == null -> resources.getQuantityString(R.plurals.delete_many, things.size, things.size)
-            only.isFolder -> {
-                val inside = Store.walk(only, fresh = false).filter { it != only && !it.name.startsWith(".") }.toList()
-                getString(R.string.delete_shelf, only.name, inside.count(Library::isBook), inside.count { it.isFolder })
-            }
-            else -> getString(R.string.delete_book, nameOf(only))
-        }
-        ShelfDialog(this).title(getString(R.string.delete)).message(warning)
-            .primary(R.string.delete) {
-                // They leave the shelf at once; the files themselves are deleted in the background.
-                val gone = things.mapNotNull { Library.delete(this, it) }
-                if (gone.size < things.size) toast(R.string.cannot_delete)
-                val app = applicationContext
-                Library.io.execute { for (f in gone) Library.purge(app, f) }
-                stopPicking()
-                // What a search found is looked for anew, without what is gone.
-                if (found != null) search(query.text.toString())
-            }
-            .show()
+        val notice = if (only != null) getString(R.string.deleted, nameOf(only)) else resources.getQuantityString(R.plurals.deleted_many, things.size, things.size)
+        val gone = things.mapNotNull { f -> Library.delete(this, f)?.let { it to (f.parentFile ?: Library.root()) } }
+        if (gone.size < things.size) toast(R.string.cannot_delete)
+        stopPicking()
+        // What a search found is looked for anew, without what is gone.
+        if (found != null) search(query.text.toString())
+        if (gone.isEmpty()) return
+        deleted = gone
+        undoText.text = notice
+        // It stands above the bottom of the phone, where the shelf stops short of it as well.
+        undoBar.updateLayoutParams<FrameLayout.LayoutParams> { bottomMargin = shelf.paddingBottom + (16 * resources.displayMetrics.density).toInt() }
+        showNotice()
+        undoBar.postDelayed(settle, UNDO_MS)
+    }
+
+    /** The notice that what was deleted can be taken back comes in softly, and goes out the same way. */
+    private fun showNotice() {
+        undoBar.animate().cancel()
+        if (!undoBar.isVisible) undoBar.alpha = 0f
+        undoBar.visibility = View.VISIBLE
+        undoBar.animate().alpha(1f).setDuration(NOTICE_FADE_MS).start()
+    }
+
+    private fun hideNotice() {
+        if (!undoBar.isVisible) return
+        undoBar.animate().cancel()
+        // Another deletion may have called the notice back by the time this one is out.
+        undoBar.animate().alpha(0f).setDuration(NOTICE_FADE_MS).withEndAction { if (deleted.isEmpty()) undoBar.visibility = View.GONE }.start()
+    }
+
+    /** Deletes for good what was deleted last, in the background, and takes the notice away. */
+    private fun settleDeleted() {
+        undoBar.removeCallbacks(settle)
+        hideNotice()
+        val gone = deleted.map { it.first }
+        deleted = emptyList()
+        if (gone.isEmpty()) return
+        val app = applicationContext
+        Library.io.execute { for (f in gone) Library.purge(app, f) }
+    }
+
+    /** Puts back on its shelf what was deleted last. */
+    private fun undo() {
+        undoBar.removeCallbacks(settle)
+        hideNotice()
+        val back = deleted
+        deleted = emptyList()
+        // The last to go is the first to come back: a shelf comes before what stood on it.
+        val failed = back.asReversed().count { (binned, shelf) -> !Library.move(this, binned, shelf) }
+        // Something of the same name may stand there now: what could not come back is deleted for good,
+        // and the places it lay in are cleared away whatever came of it.
+        if (failed > 0) toast(R.string.cannot_restore)
+        val app = applicationContext
+        Library.io.execute { for ((f, _) in back) Library.purge(app, f) }
+        refresh()
+        if (found != null) search(query.text.toString())
     }
 
     companion object {
         private const val KEY_DIR = "dir"
         private const val KEY_COVER = "cover"
         private const val TYPING_MS = 200L
+
+        /** How long what was deleted can be taken back, in ms. */
+        private const val UNDO_MS = 5000L
+
+        /** How long the notice takes to fade in and out, in ms. */
+        private const val NOTICE_FADE_MS = 200L
 
         /** How long the web view of the reader is left alone after the shelf is shown, see warmUpReader. */
         private const val WARM_READER_MS = 2500L
