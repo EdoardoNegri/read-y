@@ -299,27 +299,61 @@ class MainActivity : AppCompatActivity() {
         return holder
     }
 
-    /** The first time the shelf can be used, a short tour of it is shown, once, with a book and a shelf made for it. */
+    /**
+     * The first time the shelf can be used, a short tour of it is shown, once, with a book and a shelf
+     * made for it as it comes to them (see [makeSample]).
+     */
     private fun showTutorial() {
         if (touring || !Library.hasAccess()) return
         // Looked at once: after that, shown or not, there is nothing more to look at.
         touring = true
         val app = applicationContext
+        val leftOver = tourSamplesPending(app)
         if (tourSeen(this, Tutorial.SHELF)) {
             // What a tour that was cut short left behind, the app being closed in the middle of it, goes.
-            if (tourSamplesPending(app)) Library.io.execute { TourSamples.remove(app) }
+            if (leftOver) Library.io.execute { TourSamples.remove(app) }
             return
         }
-        // The book and the shelf are made off the thread that draws, and the tour starts once they are.
+        if (!leftOver) {
+            current = Library.root()
+            refresh()
+            // After the shelf is laid out, so that what the tour points at has its place.
+            window.decorView.post { startTour() }
+            return
+        }
+        // The tour starts on the reader's own shelf, without what a tour cut short left on it.
         Library.io.execute {
-            TourSamples.create(app)
+            TourSamples.remove(app)
             onShelf {
                 current = Library.root()
                 refresh()
-                // After the shelf is laid out, so that what the tour points at has its place.
                 window.decorView.post { startTour() }
             }
         }
+    }
+
+    /** The book and the shelf made for the tour that are there, and those being made; see [makeSample]. */
+    private val samplesMade = HashSet<File>()
+    private val samplesMaking = HashSet<File>()
+
+    /**
+     * Makes [sample], the book or the shelf of the tour, for the step about it, if it is not there
+     * yet; whether it is still being made. One made after the tour ended, as it can be when the tour is
+     * skipped meanwhile, is taken away again at once.
+     */
+    private fun makeSample(sample: File): Boolean {
+        if (sample in samplesMade) return false
+        if (!samplesMaking.add(sample)) return true
+        val app = applicationContext
+        Library.io.execute {
+            TourSamples.create(app, sample)
+            onShelf {
+                samplesMaking.remove(sample)
+                samplesMade.add(sample)
+                if (tutorial?.active != true) removeSamples() else if (current == Library.root()) refresh()
+            }
+        }
+        return true
     }
 
     private fun startTour() {
@@ -333,6 +367,8 @@ class MainActivity : AppCompatActivity() {
         val inside = { home() && current != Library.root() }
         val bookHere = { holderOf(book) != null }
         val folderHere = { holderOf(folder) != null }
+        val makeBook = { makeSample(book) }
+        val makeFolder = { makeSample(folder) }
         val more = { Tutorial.rectOf(findViewById(R.id.more)) }
         tutorial = Tutorial.start(
             this,
@@ -344,15 +380,15 @@ class MainActivity : AppCompatActivity() {
                 Tutorial.Step(R.string.tutorial_menu_close, more, Tutorial.Event.MENU_CLOSED, ready = { menuShowing }, perform = { menuDialog?.dismiss() }),
                 Tutorial.Step(R.string.tutorial_search, { Tutorial.rectOf(findViewById(R.id.search)) }, Tutorial.Event.SEARCH_OPENED, lit, home, perform = { openSearch() }),
                 Tutorial.Step(R.string.tutorial_searching, { Tutorial.rectOf(searchRow) }, Tutorial.Event.SEARCH_CLOSED, lit, { hasWindowFocus() && searching }, perform = { closeSearch() }),
-                Tutorial.Step(R.string.tutorial_plaque, { Tutorial.rectOf(holderOf(book)?.plaque) }, Tutorial.Event.DETAILS_OPENED, lit, home, available = bookHere, hopeful = { true }, perform = { onPlaque(book) }),
+                Tutorial.Step(R.string.tutorial_plaque, { Tutorial.rectOf(holderOf(book)?.plaque) }, Tutorial.Event.DETAILS_OPENED, lit, home, available = bookHere, hopeful = { true }, perform = { onPlaque(book) }, prepare = makeBook),
                 Tutorial.Step(R.string.tutorial_plaque_open, ready = { detailsDialog != null }, awaits = Tutorial.Event.DETAILS_CLOSED, available = { detailsDialog != null }, perform = { detailsDialog?.dismiss() }),
-                Tutorial.Step(R.string.tutorial_hold, { Tutorial.rectOf(holderOf(book)?.cover) }, Tutorial.Event.PICKED, lit, home, available = bookHere, hopeful = { true }, perform = { picked = linkedSetOf(book); refresh() }),
+                Tutorial.Step(R.string.tutorial_hold, { Tutorial.rectOf(holderOf(book)?.cover) }, Tutorial.Event.PICKED, lit, home, available = bookHere, hopeful = { true }, perform = { picked = linkedSetOf(book); refresh() }, prepare = makeBook),
                 Tutorial.Step(R.string.tutorial_edit, { Tutorial.rectOf(holderOf(book)?.plaque) }, Tutorial.Event.DETAILS_OPENED, lit, { hasWindowFocus() && picked != null }, available = { picked != null }, perform = { onPlaque(book) }),
                 Tutorial.Step(R.string.tutorial_edit_open, ready = { detailsDialog != null }, awaits = Tutorial.Event.DETAILS_CLOSED, available = { detailsDialog != null }, perform = { detailsDialog?.dismiss() }),
                 Tutorial.Step(R.string.tutorial_board, { Tutorial.rectOf(pickRow) }, Tutorial.Event.LET_GO, lit, { hasWindowFocus() && picked != null }, available = { picked != null }, perform = { stopPicking() }),
-                Tutorial.Step(R.string.tutorial_shelf, { Tutorial.rectOf(holderOf(folder)?.cover) }, Tutorial.Event.ENTERED, lit, atRoot, available = folderHere, hopeful = { true }, perform = { holderOf(folder)?.let { enter(folder, it.itemView) } }),
+                Tutorial.Step(R.string.tutorial_shelf, { Tutorial.rectOf(holderOf(folder)?.cover) }, Tutorial.Event.ENTERED, lit, atRoot, available = folderHere, hopeful = { true }, perform = { holderOf(folder)?.let { enter(folder, it.itemView) } }, prepare = makeFolder),
                 Tutorial.Step(R.string.tutorial_inside, { Tutorial.rectOf(up) }, Tutorial.Event.LEFT_SHELF, lit, inside, available = { current != Library.root() }, perform = { goUp() }),
-                Tutorial.Step(R.string.tutorial_open_book, { Tutorial.rectOf(holderOf(book)?.cover) }, Tutorial.Event.BOOK_OPENED, lit, atRoot, available = bookHere, hopeful = { true }, perform = { holderOf(book)?.let { read(book, it.cover) } }),
+                Tutorial.Step(R.string.tutorial_open_book, { Tutorial.rectOf(holderOf(book)?.cover) }, Tutorial.Event.BOOK_OPENED, lit, atRoot, available = bookHere, hopeful = { true }, perform = { holderOf(book)?.let { read(book, it.cover) } }, prepare = makeBook),
                 Tutorial.Step(R.string.tutorial_resume, { Tutorial.rectOf(findViewById(R.id.resume)) }, Tutorial.Event.BOOK_RESUMED, lit, atRoot, perform = { resume() }),
                 Tutorial.Step(R.string.tutorial_end),
             ),
@@ -364,6 +400,7 @@ class MainActivity : AppCompatActivity() {
 
     /** The book and the shelf made for the tour are taken away, however it ended. */
     private fun removeSamples() {
+        samplesMade.clear()
         picked = null
         val app = applicationContext
         Library.io.execute {

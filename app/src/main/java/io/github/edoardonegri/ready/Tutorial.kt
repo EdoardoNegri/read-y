@@ -68,6 +68,9 @@ class Tutorial private constructor(
      * event other than the one waited for takes the tour to, e.g. when the reader finds the menu before it is asked for.
      * The board stands at the top of the screen if the step is [top], where the screen has something at its foot the
      * reader needs to see. [glow] gives a view, in a window above the tour's, that is ringed in place of a lit part.
+     * [prepare] makes what the step is about, if it is not there yet, e.g. the book it has the reader open, as the
+     * step comes rather than when the tour starts; it says whether that is still being made, which the step waits
+     * for however long it takes, before it is waited for as a [hopeful] one is.
      */
     class Step(
         val text: Int,
@@ -82,6 +85,7 @@ class Tutorial private constructor(
         val jump: Map<Event, Int>? = null,
         val top: Boolean = false,
         val glow: (() -> View?)? = null,
+        val prepare: (() -> Boolean)? = null,
     )
 
     private val d = act.resources.displayMetrics.density
@@ -284,9 +288,10 @@ class Tutorial private constructor(
     private fun arrive(from: Int, waited: Int = 0) {
         if (done || at != from || act.isFinishing || act.isDestroyed) return
         val first = steps.getOrNull(from) ?: return finish()
+        val making = first.prepare?.invoke() == true
         if (!first.available()) {
-            if (first.hopeful?.invoke() == true && waited < PATIENCE) {
-                overlay.postDelayed({ arrive(from, waited + 1) }, PATIENCE_MS)
+            if (making || first.hopeful?.invoke() == true && waited < PATIENCE) {
+                overlay.postDelayed({ arrive(from, if (making) waited else waited + 1) }, PATIENCE_MS)
                 return
             }
             // Nothing to do for this one: on to the next.

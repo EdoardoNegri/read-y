@@ -5,8 +5,8 @@ import java.io.File
 
 /**
  * The book and the shelf made for the tour of the bookshelf (Tutorial), to do what it asks on without
- * touching the reader's own: they stand in the library while the tour goes on, and are taken away
- * when it ends, however it ends. All of it blocks, and is done off the thread that draws.
+ * touching the reader's own: each is made as the tour comes to the first step about it, and both are
+ * taken away when it ends, however it ends. All of it blocks, and is done off the thread that draws.
  */
 object TourSamples {
     private const val BOOK = "Test book.txt"
@@ -29,18 +29,17 @@ object TourSamples {
         }
     }
 
-    /** Makes them, new, whatever was left of an earlier tour; false if either could not be made. */
-    fun create(ctx: Context): Boolean {
-        remove(ctx)
+    /** Makes [file], which is [book] or [shelf], if it is not there yet; false if it could not be made. */
+    fun create(ctx: Context, file: File): Boolean {
         setTourSamplesPending(ctx, true)
-        val made = Library.createShelf(Library.root(), SHELF)
-        val wrote = try {
-            Store.writeText(book(), TEXT)
+        if (Store.exists(file)) return true
+        if (file == shelf()) return Library.createShelf(Library.root(), SHELF)
+        return try {
+            Store.writeText(file, TEXT)
             true
         } catch (e: Exception) {
             false
         }
-        return made && wrote
     }
 
     /** Takes them away for good, if they are there. */
