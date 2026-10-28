@@ -29,6 +29,12 @@ class WidgetOpenActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Made anew after it handed the book to the reader, it has nothing more to do: starting the
+        // reader again would take the one there away and open the book anew.
+        if (savedInstanceState?.getBoolean(DONE) == true) {
+            finish()
+            return
+        }
         // It is simply there: some home screens would have it slide or grow into place.
         appearAtOnce()
         // The whole screen is its own, so that a place on the screen is the same place in it.
@@ -187,6 +193,11 @@ class WidgetOpenActivity : AppCompatActivity() {
         // The page stays until the reader has taken its place, see onStop.
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(DONE, done)
+    }
+
     override fun onStop() {
         super.onStop()
         if (done) finish()
@@ -210,6 +221,9 @@ class WidgetOpenActivity : AppCompatActivity() {
          * jump to its place and size.
          */
         private const val ARRIVAL_MS = 1500L
+
+        /** Whether the book was handed to the reader already, kept for the activity made anew. */
+        private const val DONE = "done"
     }
 }
 

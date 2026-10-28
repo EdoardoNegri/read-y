@@ -1475,7 +1475,7 @@ object Library {
     fun warmUp(ctx: Context) {
         io.execute {
             // Opening the preferences starts reading them from storage, on a thread of their own.
-            for (name in arrayOf("library", "state", "meta", "reader", "widget")) ctx.getSharedPreferences(name, Context.MODE_PRIVATE)
+            for (name in arrayOf("library", "state", "meta", "reader", "widget", "tutorial")) ctx.getSharedPreferences(name, Context.MODE_PRIVATE)
             upgrade(ctx)
             withStates(ctx) {}
             if (hasAccess()) {

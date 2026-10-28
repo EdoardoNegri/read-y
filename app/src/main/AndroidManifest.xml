@@ -128,9 +128,12 @@
 
         <!-- What a tap on the widget opens: see-through, over the home screen, where a tapped
              book opens before the reader shows it. It is no part of the bookshelf's task, which
-             would otherwise come to the front with it. -->
+             would otherwise come to the front with it. It is still there, under the reader, as a
+             book read sideways turns the screen: made anew for that, it would start the reader
+             again. -->
         <activity
             android:name=".WidgetOpenActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode"
             android:excludeFromRecents="true"
             android:exported="false"
             android:noHistory="true"

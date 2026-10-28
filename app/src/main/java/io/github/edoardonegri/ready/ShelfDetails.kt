@@ -31,6 +31,15 @@ class ShelfDetails(
     private val rename: (File, String) -> Unit,
 ) {
 
+    /** Told the dialog about a book or a shelf when it opens, and null when it closes; the tour of the bookshelf follows it. */
+    var watcher: ((ShelfDialog?) -> Unit)? = null
+
+    private fun display(dialog: ShelfDialog) {
+        dialog.onClose { watcher?.invoke(null) }
+        dialog.show()
+        watcher?.invoke(dialog)
+    }
+
     /** Shows what there is to say about the book or the shelf [f]. */
     fun show(f: File) {
         if (f.isFolder) {
@@ -47,7 +56,7 @@ class ShelfDetails(
                 rows += act.getString(R.string.info_folders) to "$folders"
                 rows += act.getString(R.string.finished) to "$finished"
                 rows += act.getString(R.string.info_location) to place(f)
-                onShelf { ShelfDialog(act).details(rows, byColumn = true).uncrossed().title(f.name).show() }
+                onShelf { display(ShelfDialog(act).details(rows, byColumn = true).uncrossed().title(f.name)) }
             }
             return
         }
@@ -73,7 +82,7 @@ class ShelfDetails(
         val name = dialog.field(R.string.field_name, dir.name)
         showShelfPicture(dialog, dir)
         dialog.onClose { renamed(dir, dir.name, name) }
-        dialog.show()
+        display(dialog)
     }
 
     /** Shows the shelf [dir] in [dialog] the way its miniature shows it on the shelf. */
@@ -158,7 +167,7 @@ class ShelfDetails(
             renamed(f, m.title, name)
             changed()
         }
-        dialog.show()
+        display(dialog)
     }
 
     /** Renames [f] to what [field] holds, if that is not empty and not still [old]. */
@@ -246,7 +255,7 @@ class ShelfDetails(
         rows += act.getString(R.string.info_format) to f.extension.uppercase()
         f.parentFile?.let { rows += act.getString(R.string.info_folder) to place(it) }
 
-        ShelfDialog(act).details(rows).uncrossed().title(m.title).plaque(Library.isFavorite(act, f), Library.isFinished(act, f)).show()
+        display(ShelfDialog(act).details(rows).uncrossed().title(m.title).plaque(Library.isFavorite(act, f), Library.isFinished(act, f)))
     }
 
     /** The date [BookMeta.published] gives, with no more of it than is known. */

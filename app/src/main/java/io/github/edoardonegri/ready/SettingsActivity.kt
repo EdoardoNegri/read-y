@@ -23,6 +23,9 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var s: ReaderSettings
     private lateinit var preview: PagePreview
 
+    /** The tour of this screen while it is up. */
+    private var tour: Tutorial? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         s = ReaderSettings(this)
@@ -61,6 +64,34 @@ class SettingsActivity : AppCompatActivity() {
         }.build(epub = true, ::applyBrightness, ::applyPage)
         preview.open(this, s)
         applyBrightness()
+        // The first time, or when the tour of the bookshelf has led here, the settings are shown round.
+        if (intent.getBooleanExtra(EXTRA_TOUR, false) || (!toured && !tourSeen(this, Tutorial.SETTINGS))) {
+            toured = true
+            preview.postDelayed(::startTour, TOUR_WAIT_MS)
+        }
+    }
+
+    private fun startTour() {
+        if (isFinishing || isDestroyed) return
+        val lit = Tutorial.Touch.LIT
+        // Led here by the tour of the bookshelf, the last step goes back to the menu it came from.
+        val fromTour = intent.getBooleanExtra(EXTRA_TOUR, false)
+        tour = Tutorial.start(
+            this,
+            Tutorial.SETTINGS,
+            listOf(
+                Tutorial.Step(R.string.tutorial_settings_preview, { Tutorial.rectOf(preview) }),
+                Tutorial.Step(R.string.tutorial_settings_more, { Tutorial.rectOf(findViewById<View>(R.id.options).parent as? View) }, touch = lit),
+                if (fromTour) {
+                    Tutorial.Step(R.string.tutorial_settings_back, { Tutorial.rectOf(findViewById(R.id.more)) }, touch = lit, next = R.string.tutorial_next, perform = {
+                        setResult(RESULT_OK)
+                        finish()
+                    })
+                } else {
+                    Tutorial.Step(R.string.tutorial_settings_leave, { Tutorial.rectOf(findViewById(R.id.more)) }, touch = lit)
+                },
+            ),
+        ) { tour = null }
     }
 
     override fun onResume() {
@@ -116,7 +147,13 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun applyPage() = preview.apply()
 
-    private companion object {
+    companion object {
+        /** Set by the tour of the bookshelf, which has led here, for this screen to be shown round too. */
+        const val EXTRA_TOUR = "tour"
+
+        /** Whether the settings were shown round since the app started, and how long after they open that is, in ms. */
+        private var toured = false
+        private const val TOUR_WAIT_MS = 600L
         /** How often the window is told another brightness while the slider is dragged, in ms. */
         const val BRIGHTNESS_EVERY_MS = 100L
 

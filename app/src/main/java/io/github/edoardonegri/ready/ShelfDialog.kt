@@ -320,11 +320,17 @@ class ShelfDialog(private val ctx: Context) {
     /** How many buttons the column has, which is what makes it scroll; the words between them do not count. */
     private var buttons = 0
 
+    /** The brass buttons of the column of choices, by the words on them; the tour points at one (Tutorial). */
+    private val choices = ArrayList<TextView>()
+
+    fun choiceLabelled(label: String): View? = choices.firstOrNull { it.text == label }
+
     private fun option(label: String): TextView {
         showColumn(++buttons)
         val button = TextView(ContextThemeWrapper(ctx, R.style.BrassButton), null, 0, R.style.BrassButton)
         button.text = label
         button.background = PlaqueDrawable(d)
+        choices += button
         column.addView(
             button,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40))
@@ -354,6 +360,9 @@ class ShelfDialog(private val ctx: Context) {
             done.also { if (it) button.performClick() }
         }
     }
+
+    /** Closes the dialog, as a tap beside it does. */
+    fun dismiss() = dialog.dismiss()
 
     fun show() {
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)

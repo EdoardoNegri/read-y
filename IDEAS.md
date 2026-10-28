@@ -11,6 +11,8 @@ Notes for later, in no strict order. Tick a box when it is done. The file has tw
 - [ ] **Look up a selected word.** Android can do this with `ACTION_PROCESS_TEXT`: the word is handed to the system dictionary or translate app. Small to build, and the app stays offline.
 - [ ] **Reading stats.** Books finished this year, or time read, on a plaque in the same wood-and-brass style. It fits the theme better than a generic stats screen.
 - [ ] **Text to speech and a sleep timer.** Reading aloud with Android's built-in voice, offline, plus a sleep timer for bedtime reading.
+- [ ] **An X button on the top right when the menu is up.** A way to close the reader menu without tapping the page.
+- [ ] **Start the app in portrait only, not auto.** The reader's screen rotation setting should begin on Portrait, not Auto.
 
 ## Bookshelf
 

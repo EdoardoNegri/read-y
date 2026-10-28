@@ -50,7 +50,7 @@ class ShelfDragging(
         fun outside(): File?
         fun moveAll(chosen: List<File>, to: File)
         fun mark(chosen: List<File>, favorite: Boolean)
-        fun askDelete(things: List<File>)
+        fun delete(things: List<File>)
         fun chosen(): List<File>?
         fun stopPicking()
         fun spec(): ShelfSpec
@@ -252,7 +252,7 @@ class ShelfDragging(
             DragEvent.ACTION_DRAG_EXITED -> aim(null)
             DragEvent.ACTION_DROP -> if (over == bin) {
                 acted = true
-                host.askDelete(carried(f))
+                host.delete(carried(f))
             } else if (over != null) {
                 acted = true
                 host.mark(carried(f), favorite = over == pickStar)
