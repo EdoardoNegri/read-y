@@ -9,6 +9,14 @@
     <!-- No storage permission: the library is the one folder the reader grants through the
          system folder picker (see Store), and the app sees nothing else. -->
 
+    <!-- The apps that look up a word held in the reader, a dictionary or a translator (ReaderActivity.lookUp). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
+
     <application
         android:name=".ReadyApp"
         android:allowBackup="true"

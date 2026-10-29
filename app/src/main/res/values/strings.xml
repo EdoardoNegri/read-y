@@ -146,6 +146,8 @@ Tap below and choose that file: Read-y will remove it, so that the book is kept 
     <string name="book_missing">This book is no longer in the library.</string>
     <string name="book_unreadable">Cannot open %1$s</string>
     <string name="reader_hint">Tap the middle of the screen for the menu</string>
+    <string name="look_up">Look up “%1$s”</string>
+    <string name="no_look_up">No app on this phone can look up words. A dictionary or translator app can.</string>
     <string name="percent_read">%1$d%%</string>
     <string name="part_n">Part %1$d</string>
     <string name="unknown">Unknown</string>

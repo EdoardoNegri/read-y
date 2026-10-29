@@ -1,5 +1,6 @@
 package io.github.edoardonegri.ready
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
@@ -13,6 +14,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.text.TextUtils
+import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.PixelCopy
@@ -1041,6 +1043,37 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         if (menuOpen && !onCover) return closeMenu()
         // On the cover that ends the book the menu is shown already, and cannot be taken away.
         turner.tap(x, y) { if (!onCover) openMenu() }
+    }
+
+    override fun onLongPress(x: Float, y: Float) {
+        if (menuOpen || onCover) return
+        engine?.word(x - content.paddingLeft, y - content.paddingTop) { word -> if (word != null) lookUp(word) }
+    }
+
+    /**
+     * Hands [word] to an app of the phone's that looks words up, a dictionary or a translator, as
+     * selecting it in any other app would: the reader itself stays offline. With several, the
+     * reader is asked which.
+     */
+    private fun lookUp(word: String) {
+        val ask = Intent(Intent.ACTION_PROCESS_TEXT).setType("text/plain")
+            .putExtra(Intent.EXTRA_PROCESS_TEXT, word)
+            .putExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, true)
+        val apps = packageManager.queryIntentActivities(ask, 0)
+        if (apps.isEmpty()) {
+            Toast.makeText(this, R.string.no_look_up, Toast.LENGTH_LONG).show()
+            return
+        }
+        content.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        val one = apps.singleOrNull()?.activityInfo
+        try {
+            startActivity(
+                if (one != null) ask.setClassName(one.packageName, one.name)
+                else Intent.createChooser(ask, getString(R.string.look_up, word)),
+            )
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, R.string.no_look_up, Toast.LENGTH_LONG).show()
+        }
     }
 
     override fun canZoom() = engine?.zoomable == true && !menuOpen

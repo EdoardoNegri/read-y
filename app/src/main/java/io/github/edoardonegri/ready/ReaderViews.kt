@@ -471,7 +471,7 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     }
 }
 
-/** Container that reports taps and horizontal swipes, optionally hiding all touches from its children. */
+/** Container that reports taps, long presses and horizontal swipes, optionally hiding all touches from its children. */
 class GestureFrame @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = null) :
     FrameLayout(ctx, attrs) {
 
@@ -480,6 +480,12 @@ class GestureFrame @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
 
         /** [direction] is +1 when the finger moved to the right, -1 to the left. */
         fun onSwipe(direction: Int)
+
+        /**
+         * A finger was held still at ([x], [y]). Only told while the children see no touches
+         * ([consumeAll]): otherwise they have the long press, as a web view selects text with it.
+         */
+        fun onLongPress(x: Float, y: Float) {}
 
         /** Whether the page can be pinched larger, and whether it is, in which case fingers move it about. */
         fun canZoom(): Boolean = false
@@ -509,10 +515,18 @@ class GestureFrame @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     /** Whether the page was pinched since the finger went down: nothing then is a tap or a swipe. */
     private var pinched = false
 
+    /** Whether the finger down now was held long enough to be a long press: nothing then is a tap or a swipe. */
+    private var held = false
+    private val longPress = Runnable {
+        held = true
+        listener?.onLongPress(downX, downY)
+    }
+
     private val pinch = ScaleGestureDetector(ctx, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
             pinched = true
             moved = true
+            removeCallbacks(longPress)
             // What lay under the fingers is not scrolled along with them.
             val cancel = MotionEvent.obtain(0L, 0L, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
             super@GestureFrame.dispatchTouchEvent(cancel)
@@ -549,14 +563,23 @@ class GestureFrame @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
                 lastY = ev.y
                 moved = false
                 pinched = false
+                held = false
+                removeCallbacks(longPress)
+                if (consumeAll) postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
             }
             MotionEvent.ACTION_MOVE -> {
-                if (abs(ev.x - downX) > slop || abs(ev.y - downY) > slop) moved = true
+                if (abs(ev.x - downX) > slop || abs(ev.y - downY) > slop) {
+                    moved = true
+                    removeCallbacks(longPress)
+                }
                 if (zoomable && l.zoomed() && ev.pointerCount == 1 && moved) l.onPan(ev.x - lastX, ev.y - lastY)
                 lastX = ev.x
                 lastY = ev.y
             }
-            MotionEvent.ACTION_POINTER_DOWN -> moved = true
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                moved = true
+                removeCallbacks(longPress)
+            }
             MotionEvent.ACTION_POINTER_UP -> {
                 // The finger left behind goes on from where it is, not from where the pinch was.
                 val index = if (ev.actionIndex == 0) 1 else 0
@@ -564,16 +587,18 @@ class GestureFrame @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
                 lastY = ev.getY(index)
             }
             MotionEvent.ACTION_UP -> {
+                removeCallbacks(longPress)
                 val dx = ev.x - downX
                 val dy = ev.y - downY
-                if (pinched) {
-                    // Nothing to do: the fingers were only moving the page.
+                if (pinched || held) {
+                    // Nothing to do: the fingers were only moving the page, or the long press was told already.
                 } else if (!moved && ev.eventTime - ev.downTime < 400) {
                     l?.onTap(ev.x, ev.y)
                 } else if (ev.pointerCount == 1 && !(zoomable && l.zoomed()) && abs(dx) > swipeMin && abs(dx) > abs(dy) * 1.5f) {
                     l?.onSwipe(if (dx > 0) 1 else -1)
                 }
             }
+            MotionEvent.ACTION_CANCEL -> removeCallbacks(longPress)
         }
         // An enlarged page is moved about by the fingers, not scrolled by itself under them.
         return consumeAll || zoomable && l?.zoomed() == true || super.dispatchTouchEvent(ev) || true

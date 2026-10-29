@@ -19,6 +19,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.core.net.toUri
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -813,6 +814,15 @@ class FlowEngine(
         web.evaluateJavascript("window.__r?__r.$ask(${(x - tx) / d},${(y - ty) / d}):false") { done(it == "true") }
     }
 
+    override fun word(x: Float, y: Float, done: (String?) -> Unit) {
+        if (!ready || atCover) return done(null)
+        val d = act.resources.displayMetrics.density * zoom
+        // The word comes back as a JSON string, or null.
+        web.evaluateJavascript("window.__r?__r.word(${(x - tx) / d},${(y - ty) / d}):null") {
+            done(JSONArray("[$it]").opt(0) as? String)
+        }
+    }
+
     override fun close() {
         closed = true
         web.stopLoading()
@@ -1281,6 +1291,41 @@ class FlowEngine(
       el = el.parentNode;
     }
     return false;
+  };
+
+  // The word whose letters are under the point, for it to be looked up; null between the lines,
+  // in a margin or on a picture. A soft hyphen the book put in it is left out.
+  R.word = function (x, y) {
+    var at = document.caretRangeFromPoint && document.caretRangeFromPoint(x, y);
+    if (!at || at.startContainer.nodeType !== 3) return null;
+    var node = at.startContainer, text = node.data;
+    // The caret stands between two letters: the one under the point is either before it or after.
+    function under(i) {
+      if (i < 0 || i >= text.length) return false;
+      var r = document.createRange();
+      r.setStart(node, i);
+      r.setEnd(node, i + 1);
+      var b = r.getBoundingClientRect();
+      return x >= b.left && x <= b.right && y >= b.top && y <= b.bottom;
+    }
+    var i = under(at.startOffset) ? at.startOffset : under(at.startOffset - 1) ? at.startOffset - 1 : -1;
+    if (i < 0) return null;
+    var word = null;
+    if (window.Intl && Intl.Segmenter) {
+      var seg = new Intl.Segmenter(document.documentElement.lang || undefined, { granularity: 'word' })
+        .segment(text).containing(i);
+      if (seg && seg.isWordLike) word = seg.segment;
+    } else {
+      var letter = /[\p{L}\p{M}\p{N}\u00AD'’]/u, a = i, b = i + 1;
+      if (letter.test(text[i])) {
+        while (a > 0 && letter.test(text[a - 1])) a--;
+        while (b < text.length && letter.test(text[b])) b++;
+        word = text.substring(a, b);
+      }
+    }
+    if (!word) return null;
+    word = word.replace(/\u00AD/g, '').replace(/^['’]+|['’]+$/g, '');
+    return word || null;
   };
 
   var scrollTimer = null;

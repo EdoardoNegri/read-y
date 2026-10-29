@@ -98,6 +98,9 @@ interface ReaderEngine {
     /** Gives the content a chance to handle a tap (e.g. a link) before it turns the page. */
     fun tap(x: Float, y: Float, done: (handled: Boolean) -> Unit) = done(false)
 
+    /** The word of the text at ([x], [y]), to be looked up; null if there is none, as on a picture or a page with no text. */
+    fun word(x: Float, y: Float, done: (String?) -> Unit) = done(null)
+
     /**
      * How much room, in pixels, the engine leaves free at the top and the bottom of its view by
      * itself, as the margins of the text: what is shown around the text may go there.
