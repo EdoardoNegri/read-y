@@ -3,7 +3,6 @@ package io.github.edoardonegri.ready
 import android.app.Activity
 import android.content.Intent
 import android.os.Build
-import android.widget.Toast
 import androidx.core.net.toUri
 
 /**
@@ -45,7 +44,7 @@ class AboutDialog(private val act: Activity, private val back: () -> Unit) {
         try {
             act.startActivity(intent)
         } catch (e: Exception) {
-            toast(R.string.about_no_mail)
+            act.toast(R.string.about_no_mail)
         }
     }
 
@@ -62,11 +61,9 @@ class AboutDialog(private val act: Activity, private val back: () -> Unit) {
         try {
             act.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
         } catch (e: Exception) {
-            toast(R.string.about_no_browser)
+            act.toast(R.string.about_no_browser)
         }
     }
-
-    private fun toast(text: Int) = Toast.makeText(act, text, Toast.LENGTH_SHORT).show()
 
     private companion object {
         const val CONTACT = "edon.negri@gmail.com"

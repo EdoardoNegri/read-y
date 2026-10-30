@@ -15,13 +15,12 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.TextView
-import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.doOnPreDraw
-import androidx.core.view.isVisible
 import androidx.core.view.isNotEmpty
+import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.core.widget.doAfterTextChanged
 import androidx.recyclerview.widget.GridLayoutManager
@@ -49,7 +48,7 @@ import java.io.File
  * shelves in ShelfDragging, and going into a
  * shelf and out of it in ShelfZoom.
  */
-class MainActivity : AppCompatActivity() {
+class MainActivity : ComponentActivity() {
 
     private lateinit var current: File
     private lateinit var shelf: RecyclerView
@@ -127,8 +126,8 @@ class MainActivity : AppCompatActivity() {
     /** The star beside the search field is on: only the favorites are shown and searched. */
     private var starred = false
 
-    /** Counts the searches started, so that a slow one cannot overwrite a later one. */
-    private var searches = 0
+    /** The searches started, so that a slow one cannot overwrite a later one. */
+    private val searches = Searches(this)
 
     private val searching get() = searchRow.isVisible
 
@@ -173,7 +172,7 @@ class MainActivity : AppCompatActivity() {
         star.setOnClickListener { showStarred(!starred) }
         query = findViewById(R.id.query)
         bar = findViewById(R.id.bar)
-        barTitle.background = PlaqueDrawable(resources.displayMetrics.density, ornate = true)
+        barTitle.background = PlaqueDrawable(resources.density, ornate = true)
         pickRow =findViewById(R.id.pickRow)
         findViewById<View>(R.id.resume).apply {
             visibility = View.VISIBLE
@@ -191,7 +190,7 @@ class MainActivity : AppCompatActivity() {
         undoText = findViewById(R.id.undoText)
         findViewById<View>(R.id.undo).setOnClickListener { undo() }
         findViewById<View>(R.id.closePick).setOnClickListener { stopPicking() }
-        grant.background = PlaqueDrawable(resources.displayMetrics.density)
+        grant.background = PlaqueDrawable(resources.density)
         // The grain of the board ends at its round corners.
         empty.clipToOutline = true
 
@@ -202,7 +201,7 @@ class MainActivity : AppCompatActivity() {
         decoration = ShelfDecoration(this, columns)
         shelf.addItemDecoration(decoration)
         // Leave room for the bookcase's side posts.
-        ShelfSpec(0, columns, resources.displayMetrics.density).let {
+        ShelfSpec(0, columns, resources.density).let {
             shelf.setPadding(it.side, shelf.paddingTop, it.side, shelf.paddingBottom)
         }
         shelf.adapter = adapter
@@ -324,7 +323,7 @@ class MainActivity : AppCompatActivity() {
         // The tour starts on the reader's own shelf, without what a tour cut short left on it.
         Library.io.execute {
             TourSamples.remove(app)
-            onShelf {
+            whileOpen {
                 current = Library.root()
                 refresh()
                 window.decorView.post { startTour() }
@@ -347,7 +346,7 @@ class MainActivity : AppCompatActivity() {
         val app = applicationContext
         Library.io.execute {
             TourSamples.create(app, sample)
-            onShelf {
+            whileOpen {
                 samplesMaking.remove(sample)
                 samplesMade.add(sample)
                 if (tutorial?.active != true) removeSamples() else if (current == Library.root()) refresh()
@@ -357,7 +356,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startTour() {
-        if (isFinishing || isDestroyed) return
+        if (closing) return
         val book = TourSamples.book()
         val folder = TourSamples.shelf()
         val lit = Tutorial.Touch.LIT
@@ -405,7 +404,7 @@ class MainActivity : AppCompatActivity() {
         val app = applicationContext
         Library.io.execute {
             TourSamples.remove(app)
-            onShelf {
+            whileOpen {
                 if (current == TourSamples.shelf()) current = Library.root()
                 refresh()
             }
@@ -477,7 +476,7 @@ class MainActivity : AppCompatActivity() {
         Library.io.execute {
             if (!Store.isLost()) return@execute
             Store.drop()
-            onShelf {
+            whileOpen {
                 askedForFolder = false
                 current = Library.root()
                 refresh()
@@ -541,7 +540,7 @@ class MainActivity : AppCompatActivity() {
             val app = applicationContext
             Library.io.execute {
                 Library.shelf(app, dir)
-                onShelf { refresh(relist = false) }
+                whileOpen { refresh(relist = false) }
             }
             return
         }
@@ -699,8 +698,8 @@ class MainActivity : AppCompatActivity() {
         val app = applicationContext
         Library.io.execute {
             val last = Library.lastRead(app)
-            onShelf {
-                if (last == null) return@onShelf toast(R.string.nothing_read)
+            whileOpen {
+                if (last == null) return@whileOpen toast(R.string.nothing_read)
                 tutorial?.happened(Tutorial.Event.BOOK_RESUMED)
                 read(last, null, slide = true)
             }
@@ -714,9 +713,9 @@ class MainActivity : AppCompatActivity() {
      */
     private fun warmUpReader() {
         shelf.postDelayed({
-            if (isFinishing || isDestroyed) return@postDelayed
+            if (closing) return@postDelayed
             Looper.myQueue().addIdleHandler {
-                if (!isFinishing && !isDestroyed) FlowEngine.prepare(this)
+                if (!closing) FlowEngine.prepare(this)
                 false
             }
         }, WARM_READER_MS)
@@ -759,10 +758,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun shelfName(f: File): String = if (f == Library.root()) getString(R.string.app_name) else f.name
 
-    private fun toast(text: Int) = Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
-
-    /** Does [action] on the thread that draws the shelf, unless the shelf is gone by then. */
-    private fun onShelf(action: () -> Unit) = runOnUiThread { if (!isFinishing && !isDestroyed) action() }
 
     // ---- menu: adding books and shelves, sorting, settings ----
 
@@ -938,7 +933,7 @@ class MainActivity : AppCompatActivity() {
      * while the star is on. Nothing typed shows the shelf again, or all the favorites.
      */
     private fun search(text: String) {
-        val run = ++searches
+        val run = searches.start()
         if (text.isBlank() && !starred) {
             found = null
             refresh()
@@ -951,14 +946,12 @@ class MainActivity : AppCompatActivity() {
             // Answered at once from the folders as they were last listed; the first search after the
             // search bar opens looks through them anew too, for what other apps have changed.
             val known = Library.search(applicationContext, dir, text, favorites, fresh = false)
-            runOnUiThread { if (run == searches && !isDestroyed) show(known) }
+            searches.ifLatest(run) { show(known) }
             if (listed) return@execute
             val hits = Library.search(applicationContext, dir, text, favorites, fresh = true)
-            runOnUiThread {
-                if (run == searches && !isDestroyed) {
-                    searchListed = true
-                    if (hits != found) show(hits)
-                }
+            searches.ifLatest(run) {
+                searchListed = true
+                if (hits != found) show(hits)
             }
         }
     }
@@ -975,7 +968,7 @@ class MainActivity : AppCompatActivity() {
     /** The shelf this one stands on, or null for the first shelf of the library. */
     private fun outside(): File? = if (current == Library.root()) null else current.parentFile
 
-    private fun spec() = ShelfSpec(shelf.width, columns, resources.displayMetrics.density)
+    private fun spec() = ShelfSpec(shelf.width, columns, resources.density)
 
     // ---- details, shown by tapping a plaque ----
 
@@ -1024,7 +1017,7 @@ class MainActivity : AppCompatActivity() {
         deleted = gone
         undoText.text = notice
         // It stands above the bottom of the phone, where the shelf stops short of it as well.
-        undoBar.updateLayoutParams<FrameLayout.LayoutParams> { bottomMargin = shelf.paddingBottom + (16 * resources.displayMetrics.density).toInt() }
+        undoBar.updateLayoutParams<FrameLayout.LayoutParams> { bottomMargin = shelf.paddingBottom + (16 * resources.density).toInt() }
         showNotice()
         undoBar.postDelayed(settle, UNDO_MS)
     }

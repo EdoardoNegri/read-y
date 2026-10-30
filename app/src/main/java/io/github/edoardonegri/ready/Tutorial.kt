@@ -88,7 +88,7 @@ class Tutorial private constructor(
         val prepare: (() -> Boolean)? = null,
     )
 
-    private val d = act.resources.displayMetrics.density
+    private val d = act.resources.density
     private val overlay = Overlay(act)
     private val panel = LinearLayout(act)
     private val text = TextView(act)
@@ -110,23 +110,21 @@ class Tutorial private constructor(
     /** How much of the foot of the window the keyboard takes, which the board stands above. */
     private var imeBottom = 0
 
-    private fun dp(v: Int) = (v * d).toInt()
-
     /** How far the board stands from the foot of the window. */
-    private fun lift() = if (onTop) topInset() + dp(BOARD_LIFT_DP) else imeBottom + dp(BOARD_LIFT_DP)
+    private fun lift() = if (onTop) topInset() + act.dp(BOARD_LIFT_DP) else imeBottom + act.dp(BOARD_LIFT_DP)
 
     /** Whether the board stands at the top of the screen, as the step now shown has it. */
     private var onTop = false
 
     /** How much of the top of the window the status bar and the camera take. */
     private fun topInset() = ViewCompat.getRootWindowInsets(overlay)
-        ?.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())?.top ?: dp(24)
+        ?.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())?.top ?: act.dp(24)
 
     init {
         panel.orientation = LinearLayout.VERTICAL
         panel.background = ContextCompat.getDrawable(act, R.drawable.panel_wood)
         panel.clipToOutline = true
-        panel.setPadding(dp(20), dp(18), dp(20), dp(14))
+        panel.setPadding(act.dp(20), act.dp(18), act.dp(20), act.dp(14))
         text.apply {
             typeface = Typeface.SERIF
             setTextColor(ContextCompat.getColor(act, R.color.cream))
@@ -135,7 +133,7 @@ class Tutorial private constructor(
         }
         next.apply {
             background = PlaqueDrawable(d)
-            setPadding(dp(24), 0, dp(24), dp(2))
+            setPadding(act.dp(24), 0, act.dp(24), act.dp(2))
             setOnClickListener { advance() }
         }
         skip.apply {
@@ -144,7 +142,7 @@ class Tutorial private constructor(
             setTextColor(ContextCompat.getColor(act, R.color.gold))
             textSize = 14f
             gravity = Gravity.CENTER
-            setPadding(dp(4), dp(8), dp(14), dp(8))
+            setPadding(act.dp(4), act.dp(8), act.dp(14), act.dp(8))
             setOnClickListener { finish() }
         }
         // Skip on the left and Next on the right, whatever the step.
@@ -152,10 +150,10 @@ class Tutorial private constructor(
             gravity = Gravity.CENTER_VERTICAL
             addView(skip)
             addView(View(act), LinearLayout.LayoutParams(0, 0, 1f))
-            addView(next, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(40)))
+            addView(next, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, act.dp(40)))
         }
         panel.addView(text)
-        panel.addView(buttons, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(14) })
+        panel.addView(buttons, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = act.dp(14) })
         ViewCompat.setOnApplyWindowInsetsListener(overlay) { _, insets ->
             val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
             if (ime != imeBottom) {
@@ -286,7 +284,7 @@ class Tutorial private constructor(
     }
 
     private fun arrive(from: Int, waited: Int = 0) {
-        if (done || at != from || act.isFinishing || act.isDestroyed) return
+        if (done || at != from || act.closing) return
         val first = steps.getOrNull(from) ?: return finish()
         val making = first.prepare?.invoke() == true
         if (!first.available()) {
@@ -313,7 +311,7 @@ class Tutorial private constructor(
         skip.visibility = if (i == steps.lastIndex && step.next == null) View.INVISIBLE else View.VISIBLE
         // Reached while the reader is elsewhere, it waits out of sight until they are where it belongs.
         if (!isReady(i)) return conceal()
-        val width = minOf(overlay.width - dp(40), dp(BOARD_MAX_DP))
+        val width = minOf(overlay.width - act.dp(40), act.dp(BOARD_MAX_DP))
         panel.measure(
             View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
@@ -338,7 +336,7 @@ class Tutorial private constructor(
     /** Lights [step]'s target, leaving out what the board would hide. */
     private fun light(step: Step) {
         val room = IntArray(2).also(overlay::getLocationInWindow)
-        val pad = dp(6)
+        val pad = act.dp(6)
         val lit = step.target?.invoke()?.let {
             RectF(
                 (it.left - room[0] - pad).toFloat(), (it.top - room[1] - pad).toFloat(),
@@ -348,13 +346,13 @@ class Tutorial private constructor(
         if (lit != null) {
             // What stands at the edge of the screen is lit up to the edge, not past it, and not under the board.
             if (onTop) {
-                val shown = (boardTo + dp(10)).toFloat()
-                if (lit.top < shown && lit.bottom > shown + dp(40)) lit.top = shown
+                val shown = (boardTo + act.dp(10)).toFloat()
+                if (lit.top < shown && lit.bottom > shown + act.dp(40)) lit.top = shown
             } else {
-                val shown = (boardFrom - dp(10)).toFloat()
-                if (lit.bottom > shown && lit.top < shown - dp(40)) lit.bottom = shown
+                val shown = (boardFrom - act.dp(10)).toFloat()
+                if (lit.bottom > shown && lit.top < shown - act.dp(40)) lit.bottom = shown
             }
-            lit.intersect(dp(3).toFloat(), dp(3).toFloat(), (overlay.width - dp(3)).toFloat(), (overlay.height - dp(3)).toFloat())
+            lit.intersect(act.dp(3).toFloat(), act.dp(3).toFloat(), (overlay.width - act.dp(3)).toFloat(), (overlay.height - act.dp(3)).toFloat())
         }
         // Nothing is drawn again for what has not moved.
         if (lit != overlay.lit) {
@@ -398,7 +396,7 @@ class Tutorial private constructor(
     private fun ring(view: View) {
         val token = view.windowToken ?: return
         val at = IntArray(2).also(view::getLocationOnScreen)
-        val pad = dp(6)
+        val pad = act.dp(6)
         val around = RectF(
             (at[0] - pad).toFloat(), (at[1] - pad).toFloat(),
             (at[0] + view.width + pad).toFloat(), (at[1] + view.height + pad).toFloat(),
@@ -434,8 +432,11 @@ class Tutorial private constructor(
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             color = ContextCompat.getColor(ctx, R.color.gold_light)
-            strokeWidth = 3 * resources.displayMetrics.density
+            strokeWidth = 3 * resources.density
         }
+        private val round = 14 * resources.density
+        /** Where the view is on the screen, kept rather than made anew for every frame it is drawn. */
+        private val at = IntArray(2)
         private val breathe = ValueAnimator.ofInt(110, 255).apply {
             duration = 800
             repeatMode = ValueAnimator.REVERSE
@@ -458,9 +459,8 @@ class Tutorial private constructor(
 
         override fun onDraw(canvas: Canvas) {
             // The window may not start at the corner of the screen.
-            val at = IntArray(2).also(::getLocationOnScreen)
+            getLocationOnScreen(at)
             canvas.translate(-at[0].toFloat(), -at[1].toFloat())
-            val round = 14 * resources.displayMetrics.density
             canvas.drawRoundRect(around, round, round, paint)
         }
     }
@@ -502,7 +502,7 @@ class Tutorial private constructor(
         private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             color = ContextCompat.getColor(ctx, R.color.gold_light)
-            strokeWidth = 2.5f * resources.displayMetrics.density
+            strokeWidth = 2.5f * resources.density
         }
 
         /** The ring round what is lit breathes, to show that it is what is to be touched: 0..1. */
@@ -567,7 +567,7 @@ class Tutorial private constructor(
             if (r == null && touch == Touch.ALL) return
             canvas.drawPaint(dim)
             if (r == null) return
-            val round = 14 * resources.displayMetrics.density
+            val round = 14 * resources.density
             canvas.drawRoundRect(r, round, round, hole)
             ring.alpha = (110 + 145 * glow).toInt()
             canvas.drawRoundRect(r, round, round, ring)
@@ -606,7 +606,7 @@ class Tutorial private constructor(
             val at = IntArray(2).also(view::getLocationInWindow)
             if (view is RailButton) {
                 // Its picture is off the middle of the button (see top_bar.xml): what is lit is round the picture.
-                val half = (view.resources.displayMetrics.density * 20).toInt()
+                val half = (view.resources.density * 20).toInt()
                 val x = at[0] + (view.paddingLeft + view.width - view.paddingRight) / 2
                 val y = at[1] + (view.paddingTop + view.height - view.paddingBottom) / 2
                 return Rect(x - half, y - half, x + half, y + half)

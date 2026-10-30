@@ -5,9 +5,8 @@ import android.os.SystemClock
 import android.view.View
 import android.widget.ImageButton
 import android.widget.TextView
-import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import java.io.File
@@ -18,7 +17,7 @@ import java.io.File
  * them; the arrow leads back to the menu they were opened from, which the one who opened them is
  * told through the result (RESULT_OK).
  */
-class SettingsActivity : AppCompatActivity() {
+class SettingsActivity : ComponentActivity() {
 
     private lateinit var s: ReaderSettings
     private lateinit var preview: PagePreview
@@ -42,7 +41,7 @@ class SettingsActivity : AppCompatActivity() {
         }
         findViewById<TextView>(R.id.barTitle).apply {
             setText(R.string.settings)
-            background = PlaqueDrawable(resources.displayMetrics.density, ornate = true)
+            background = PlaqueDrawable(resources.density, ornate = true)
         }
         findViewById<View>(R.id.search).visibility = View.INVISIBLE
         // The cross stands at the very right, where the bookshelf has its menu.
@@ -72,7 +71,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun startTour() {
-        if (isFinishing || isDestroyed) return
+        if (closing) return
         val lit = Tutorial.Touch.LIT
         // Led here by the tour of the bookshelf, the last step goes back to the menu it came from.
         val fromTour = intent.getBooleanExtra(EXTRA_TOUR, false)
@@ -121,7 +120,7 @@ class SettingsActivity : AppCompatActivity() {
         Library.io.execute {
             val font = ReaderSettings.importFont(app, uri)
             runOnUiThread {
-                if (font == null) Toast.makeText(this, R.string.cannot_read_font, Toast.LENGTH_LONG).show()
+                if (font == null) toast(R.string.cannot_read_font, long = true)
                 done(font)
             }
         }

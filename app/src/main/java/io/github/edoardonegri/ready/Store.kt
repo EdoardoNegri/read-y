@@ -66,7 +66,7 @@ object Store {
     /** The application, which lives as long as the app does: keeping it is no leak. */
     lateinit var app: Application
 
-    private fun prefs() = app.getSharedPreferences("store", Context.MODE_PRIVATE)
+    private fun prefs() = app.prefs(Prefs.STORE)
 
     /** The folder the reader granted, as the picker gave it; null until then. */
     private val tree: Uri? get() = prefs().getString(TREE, null)?.let(Uri::parse)
@@ -179,11 +179,9 @@ object Store {
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
                 Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,
         )
-        if (Build.VERSION.SDK_INT >= 26) {
-            val dir = found ?: suggested()
-            val start = if (dir.isDirectory) dir else dir.parentFile
-            i.putExtra(DocumentsContract.EXTRA_INITIAL_URI, DocumentsContract.buildDocumentUri(AUTHORITY, idOf(start)))
-        }
+        val dir = found ?: suggested()
+        val start = if (dir.isDirectory) dir else dir.parentFile
+        i.putExtra(DocumentsContract.EXTRA_INITIAL_URI, DocumentsContract.buildDocumentUri(AUTHORITY, idOf(start)))
         return i
     }
 
@@ -493,13 +491,10 @@ object Store {
      * by the app, which is how books are moved into the library rather than copied.
      */
     fun pickIntent(several: Boolean): Intent {
-        val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+        return Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, several)
-        if (Build.VERSION.SDK_INT >= 26) {
-            i.putExtra(DocumentsContract.EXTRA_INITIAL_URI, DocumentsContract.buildDocumentUri(AUTHORITY, "primary:${Environment.DIRECTORY_DOWNLOADS}"))
-        }
-        return i
+            .putExtra(DocumentsContract.EXTRA_INITIAL_URI, DocumentsContract.buildDocumentUri(AUTHORITY, "primary:${Environment.DIRECTORY_DOWNLOADS}"))
     }
 
     /**

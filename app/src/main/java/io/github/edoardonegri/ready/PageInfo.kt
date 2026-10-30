@@ -104,7 +104,7 @@ fun ReaderSettings.infoUsed(): BooleanArray {
  * the text, in a book of flowing text, and never right at the edge.
  */
 fun infoSide(s: ReaderSettings, flowing: Boolean, res: Resources): Int =
-    (max(if (flowing) s.marginH.toFloat() else 0f, MIN_SIDE_DP) * res.displayMetrics.density).roundToInt()
+    (max(if (flowing) s.marginH.toFloat() else 0f, MIN_SIDE_DP) * res.density).roundToInt()
 
 private const val MIN_SIDE_DP = 12f
 
@@ -179,7 +179,7 @@ class Cutout(val insets: Rect = Rect(), val holes: List<Rect> = emptyList()) {
  */
 class PageInfoView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = null) : View(ctx, attrs) {
 
-    private val d = resources.displayMetrics.density
+    private val d = resources.density
     private val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.SERIF
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, TEXT_SP, resources.displayMetrics)
@@ -344,7 +344,7 @@ class PageInfoView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
  * text those of the printed book, whatever size the letters are.
  */
 class ReadingPace(ctx: Context, private val kind: String) {
-    private val p = ctx.applicationContext.getSharedPreferences("reader", Context.MODE_PRIVATE)
+    private val p = ctx.prefs(Prefs.READER)
 
     /** Pages a minute, as learnt so far; until then about what most read. */
     private var perMinute = p.getFloat(KEY + kind, DEFAULTS[kind] ?: 1f)

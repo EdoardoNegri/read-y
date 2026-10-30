@@ -6,7 +6,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
-import android.os.Build
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.createBitmap
@@ -65,7 +64,7 @@ object ContinueShortcut {
      * shortcut: in the middle of it, where every launcher shows it, whatever shape it cuts the icon to.
      */
     private fun icon(ctx: Context, book: File): IconCompat {
-        val side = (ICON_DP * ctx.resources.displayMetrics.density).roundToInt()
+        val side = (ICON_DP * ctx.resources.density).roundToInt()
         val bmp = createBitmap(side, side, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         ShelfArt.wall(ctx).apply { setBounds(0, 0, side, side) }.draw(c)
@@ -77,7 +76,7 @@ object ContinueShortcut {
         c.drawRect(area, paint)
         val cover = Library.cover(ctx, book)
         // A picture the drawing hardware keeps cannot be drawn here, but a copy of it can.
-        val drawable = if (cover != null && Build.VERSION.SDK_INT >= 26 && cover.config == Bitmap.Config.HARDWARE) cover.copy(Bitmap.Config.ARGB_8888, false) else cover
+        val drawable = if (cover != null && cover.config == Bitmap.Config.HARDWARE) cover.copy(Bitmap.Config.ARGB_8888, false) else cover
         if (drawable != null) ShelfArt.drawBound(c, drawable, area, paint) else ShelfArt.drawBinding(c, area, paint)
         return IconCompat.createWithAdaptiveBitmap(bmp)
     }

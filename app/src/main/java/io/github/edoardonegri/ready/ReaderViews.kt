@@ -25,8 +25,8 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
-import androidx.appcompat.widget.AppCompatImageButton
-import androidx.appcompat.widget.AppCompatImageView
+import android.widget.ImageButton
+import android.widget.ImageView
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.withClip
 import androidx.core.graphics.withRotation
@@ -77,7 +77,7 @@ fun View.snapshot(): Bitmap? {
  * the book opening would hold it up. Itself where it cannot be.
  */
 fun Bitmap.uploaded(cover: Boolean = false): Bitmap {
-    if (Build.VERSION.SDK_INT < 26 || config == Bitmap.Config.HARDWARE) return this
+    if (config == Bitmap.Config.HARDWARE) return this
     val up = copy(Bitmap.Config.HARDWARE, false) ?: return this
     // A cover is shown with its crease, whose colours are those of its edge, which cannot be looked into once it is kept there.
     if (cover) ShelfArt.keepBookEdge(this, up)
@@ -89,7 +89,7 @@ fun <T> changes(initial: T, then: () -> Unit) = Delegates.observable(initial) { 
 
 /** Image view whose height is always [ratio] times its width. */
 class RatioImageView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = null) :
-    AppCompatImageView(ctx, attrs) {
+    ImageView(ctx, attrs) {
 
     var ratio by changes(1.5f, ::requestLayout)
 
@@ -119,7 +119,7 @@ class RatioImageView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet
         if (binding) bound.begin(canvas, area)
         super.onDraw(canvas)
         if (binding) bound.end(canvas, area)
-        if (cased) ShelfArt.drawDepth(canvas, area, resources.displayMetrics.density, shade)
+        if (cased) ShelfArt.drawDepth(canvas, area, resources.density, shade)
     }
 }
 
@@ -185,7 +185,7 @@ class ChapterMarks @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     /** Told the mark a finger is on, or -1 when it has left without choosing one. */
     var onPreview: ((Int) -> Unit)? = null
 
-    private val d = resources.displayMetrics.density
+    private val d = resources.density
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
     private val shape = RectF()
     private val lens = RectF()
@@ -505,7 +505,7 @@ class GestureFrame @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     var consumeAll = false
 
     private val slop = ViewConfiguration.get(ctx).scaledTouchSlop
-    private val swipeMin = 48 * resources.displayMetrics.density
+    private val swipeMin = 48 * resources.density
     private var downX = 0f
     private var downY = 0f
     private var lastX = 0f
@@ -610,7 +610,7 @@ class GestureFrame @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
  * height, and what is on it stands a little above the middle of the wood under the status bar.
  */
 fun View.padRail(top: Int) {
-    val lift = (6 * resources.displayMetrics.density).toInt().coerceAtMost(top)
+    val lift = (6 * resources.density).toInt().coerceAtMost(top)
     setPadding(0, top - lift, 0, lift)
 }
 
@@ -632,7 +632,7 @@ fun fitBookcase(root: View, bar: View, shelf: View) {
  * A button of the top rail, whose paddings put its picture off its middle (see top_bar.xml). The
  * ring that shows it being pressed is centred on the picture all the same.
  */
-class RailButton(ctx: Context, attrs: AttributeSet?) : AppCompatImageButton(ctx, attrs) {
+class RailButton(ctx: Context, attrs: AttributeSet?) : ImageButton(ctx, attrs) {
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
         val x = (paddingLeft + width - paddingRight) / 2

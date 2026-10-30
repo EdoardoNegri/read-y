@@ -4,12 +4,11 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Point
-import android.os.Build
 import android.os.SystemClock
 import android.view.DragEvent
 import android.view.View
 import android.view.ViewGroup
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
 import androidx.recyclerview.widget.RecyclerView
 import java.io.File
 
@@ -20,7 +19,7 @@ import java.io.File
  * What the bookshelf itself does with what is dropped is [Host]'s.
  */
 class ShelfDragging(
-    private val act: AppCompatActivity,
+    private val act: ComponentActivity,
     private val host: Host,
     private val shelf: RecyclerView,
     private val adapter: ShelfAdapter,
@@ -161,7 +160,7 @@ class ShelfDragging(
         override fun onDrawShadow(canvas: Canvas) {
             // A picture the drawing hardware keeps can only be drawn by it; a phone that draws
             // the shadow without it is given a copy.
-            val hardware = Build.VERSION.SDK_INT >= 26 && picture.config == Bitmap.Config.HARDWARE
+            val hardware = picture.config == Bitmap.Config.HARDWARE
             val drawn = if (hardware && !canvas.isHardwareAccelerated) {
                 picture.copy(Bitmap.Config.ARGB_8888, false) ?: return
             } else {

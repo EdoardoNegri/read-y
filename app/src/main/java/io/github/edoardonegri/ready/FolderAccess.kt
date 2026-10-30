@@ -1,6 +1,5 @@
 package io.github.edoardonegri.ready
 
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 
@@ -20,7 +19,7 @@ class FolderAccess(private val act: ComponentActivity, private val granted: (Boo
         try {
             pickFolder.launch(Store.askIntent())
         } catch (e: Exception) {
-            Toast.makeText(act, R.string.cannot_use_folder, Toast.LENGTH_SHORT).show()
+            act.toast(R.string.cannot_use_folder)
         }
     }
 }

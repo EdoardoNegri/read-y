@@ -8,9 +8,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.SeekBar
+import android.widget.Switch
 import android.widget.TextView
-import android.widget.Toast
-import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 import java.io.File
 import kotlin.math.abs
@@ -64,7 +63,7 @@ class OptionsPanel(
         toggle(t(R.string.opt_do_not_disturb), s.doNotDisturb) {
             s.doNotDisturb = it
             if (it && !DoNotDisturb.allowed(ctx)) {
-                Toast.makeText(ctx, R.string.do_not_disturb_ask, Toast.LENGTH_LONG).show()
+                ctx.toast(R.string.do_not_disturb_ask, long = true)
                 DoNotDisturb.ask(ctx)
             }
         }
@@ -106,8 +105,8 @@ class OptionsPanel(
         section.addView(around)
         around.addView(
             InfoLayoutPicker(ctx, s, onLayout),
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(InfoLayoutPicker.HEIGHT_DP))
-                .apply { setMargins(0, dp(8), 0, dp(8)) },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(InfoLayoutPicker.HEIGHT_DP))
+                .apply { setMargins(0, ctx.dp(8), 0, ctx.dp(8)) },
         )
         toggle(t(R.string.opt_trim_margins), s.trimMargins) {
             s.trimMargins = it
@@ -138,7 +137,7 @@ class OptionsPanel(
             }
             label(t(R.string.opt_font))
             fonts = BrassDropdown(ctx) { pickFont(it, onLayout) }
-            section.addView(fonts, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)).apply { topMargin = dp(4) })
+            section.addView(fonts, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(40)).apply { topMargin = ctx.dp(4) })
             showFonts()
         }
 
@@ -173,8 +172,6 @@ class OptionsPanel(
         )
     }
 
-    private fun dp(v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
-
     private fun color(id: Int) = ContextCompat.getColor(ctx, id)
 
     /** Starts a section: a wooden panel with [name] as its heading over a brass line. */
@@ -184,14 +181,14 @@ class OptionsPanel(
             setBackgroundResource(R.drawable.panel_wood)
             // The grain of the board ends at its round corners.
             clipToOutline = true
-            setPadding(dp(16), dp(12), dp(16), dp(10))
+            setPadding(ctx.dp(16), ctx.dp(12), ctx.dp(16), ctx.dp(10))
             // The knobs of the sliders reach a little into the padding.
             clipToPadding = false
         }
         options.addView(
             section,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                .apply { topMargin = dp(16) },
+                .apply { topMargin = ctx.dp(16) },
         )
         section.addView(TextView(ctx).apply {
             text = name
@@ -201,7 +198,7 @@ class OptionsPanel(
         })
         section.addView(
             View(ctx).apply { setBackgroundColor(color(R.color.gold_dark)) },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply { topMargin = dp(6) },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(1)).apply { topMargin = ctx.dp(6) },
         )
     }
 
@@ -217,7 +214,7 @@ class OptionsPanel(
     /** The name of a setting on the left and, for a slider, what it is set to on the right. */
     private fun label(name: String, value: String = ""): TextView {
         val row = LinearLayout(ctx)
-        row.setPadding(0, dp(12), 0, dp(2))
+        row.setPadding(0, ctx.dp(12), 0, ctx.dp(2))
         addName(row, name)
         val shown = TextView(ctx).apply {
             text = value
@@ -258,8 +255,8 @@ class OptionsPanel(
         // The line of the bar starts and ends under the label.
         section.addView(
             bar,
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(32))
-                .apply { setMargins(dp(4) - bar.paddingLeft, 0, dp(4) - bar.paddingRight, 0) },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(32))
+                .apply { setMargins(ctx.dp(4) - bar.paddingLeft, 0, ctx.dp(4) - bar.paddingRight, 0) },
         )
     }
 
@@ -270,16 +267,16 @@ class OptionsPanel(
     private fun buttons(name: String, items: List<String>, selected: Int, onChange: (Int) -> Unit) {
         label(name)
         val row = LinearLayout(ctx)
-        row.setPadding(0, dp(4), 0, dp(2))
+        row.setPadding(0, ctx.dp(4), 0, ctx.dp(2))
         val all = items.mapIndexed { i, text ->
             TextView(ContextThemeWrapper(ctx, R.style.BrassButton), null, 0, R.style.BrassButton).apply {
                 this.text = text
-                background = PlaqueDrawable(ctx.resources.displayMetrics.density)
+                background = PlaqueDrawable(ctx.resources.density)
                 // Three to a row leave less room between the screws of each.
                 if (items.size > 2) textSize = 13f
                 row.addView(
                     this,
-                    LinearLayout.LayoutParams(0, dp(40), 1f).apply { if (i > 0) marginStart = dp(10) },
+                    LinearLayout.LayoutParams(0, ctx.dp(40), 1f).apply { if (i > 0) marginStart = ctx.dp(10) },
                 )
             }
         }
@@ -334,7 +331,7 @@ class OptionsPanel(
     }
 
     private fun toggle(name: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-        val sw = SwitchCompat(ctx)
+        val sw = Switch(ctx)
         val on = intArrayOf(android.R.attr.state_checked)
         sw.thumbTintList = ColorStateList(arrayOf(on, intArrayOf()), intArrayOf(color(R.color.gold), color(R.color.switch_thumb_off)))
         sw.trackTintList = ColorStateList(arrayOf(on, intArrayOf()), intArrayOf(color(R.color.switch_track_on), color(R.color.switch_track_off)))
@@ -344,7 +341,7 @@ class OptionsPanel(
         sw.setTextColor(color(R.color.cream))
         sw.isChecked = checked
         sw.setOnCheckedChangeListener { _, on -> onChange(on) }
-        section.addView(sw, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)).apply { topMargin = dp(4) })
+        section.addView(sw, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(46)).apply { topMargin = ctx.dp(4) })
     }
 
     private companion object {

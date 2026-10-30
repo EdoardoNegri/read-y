@@ -27,8 +27,6 @@ import android.util.LruCache
 import androidx.core.content.edit
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.withTranslation
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
@@ -42,6 +40,8 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.ceil
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * What a book says about itself. [published] is a day, a month or a year, as 2011-05-17, 2011-05 or 2011; empty if unknown.
@@ -320,7 +320,7 @@ object Library {
 
     // The preferences are opened on the application, which already knows where they are kept; a
     // screen asking for them first looks at the storage for that.
-    private fun libraryPrefs(ctx: Context) = ctx.applicationContext.getSharedPreferences("library", Context.MODE_PRIVATE)
+    private fun libraryPrefs(ctx: Context) = ctx.prefs(Prefs.LIBRARY)
 
     /**
      * Changes whenever something changes on all the shelves at once, such as the order they are
@@ -579,7 +579,7 @@ object Library {
             for ((kind, saved) in byPath) if (key.startsWith(kind)) saved.put(key.removePrefix(kind).removePrefix(base), value)
         }
         val settings = JSONObject()
-        for ((key, value) in ctx.applicationContext.getSharedPreferences("reader", Context.MODE_PRIVATE).all) {
+        for ((key, value) in ctx.prefs(Prefs.READER).all) {
             if (value is Int || value is Boolean) settings.put(key, value)
         }
         val o = JSONObject().put("version", 1).put("positions", positions).put("favorites", set(FAVORITES))
@@ -620,7 +620,7 @@ object Library {
             putInt(SORT, o.optInt("sort"))
             if (o.has("descending")) putBoolean(DESCENDING, o.optBoolean("descending")) else remove(DESCENDING)
         }
-        ctx.applicationContext.getSharedPreferences("reader", Context.MODE_PRIVATE).edit {
+        ctx.prefs(Prefs.READER).edit {
             o.optJSONObject("settings")?.let {
                 for (key in it.keys()) when (val value = it.get(key)) {
                     is Boolean -> putBoolean(key, value)
@@ -763,8 +763,8 @@ object Library {
 
     // ---- metadata & covers ----
 
-    private fun metaPrefs(ctx: Context) = ctx.applicationContext.getSharedPreferences("meta", Context.MODE_PRIVATE)
-    private fun statePrefs(ctx: Context) = ctx.applicationContext.getSharedPreferences("state", Context.MODE_PRIVATE)
+    private fun metaPrefs(ctx: Context) = ctx.prefs(Prefs.META)
+    private fun statePrefs(ctx: Context) = ctx.prefs(Prefs.STATE)
 
     private fun sig(f: File) = "${Store.lastModified(f)}_${Store.length(f)}"
 
@@ -924,7 +924,7 @@ object Library {
      * which is more than the miniatures need. Blocking.
      */
     private fun coverToDraw(ctx: Context, f: File): Bitmap? =
-        cachedCover(f)?.takeIf { Build.VERSION.SDK_INT < 26 || it.config != Bitmap.Config.HARDWARE }
+        cachedCover(f)?.takeIf { it.config != Bitmap.Config.HARDWARE }
             ?: decodeCover(ctx, f, BitmapFactory.Options().apply { inSampleSize = 2 })
 
     /**
@@ -1119,7 +1119,7 @@ object Library {
         }
     }
 
-    private fun endMenuPrefs(ctx: Context) = ctx.applicationContext.getSharedPreferences("endmenu", Context.MODE_PRIVATE)
+    private fun endMenuPrefs(ctx: Context) = ctx.prefs(Prefs.END_MENU)
 
     /**
      * What is chosen on the shelves, to be carried or marked together. The miniature of a shelf
@@ -1475,7 +1475,7 @@ object Library {
     fun warmUp(ctx: Context) {
         io.execute {
             // Opening the preferences starts reading them from storage, on a thread of their own.
-            for (name in arrayOf("library", "state", "meta", "reader", "widget", "tutorial")) ctx.getSharedPreferences(name, Context.MODE_PRIVATE)
+            for (name in arrayOf(Prefs.LIBRARY, Prefs.STATE, Prefs.META, Prefs.READER, Prefs.WIDGET, Prefs.TOUR)) ctx.prefs(name)
             upgrade(ctx)
             withStates(ctx) {}
             if (hasAccess()) {

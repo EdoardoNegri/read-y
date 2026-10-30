@@ -7,8 +7,8 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.TextView
+import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
 import androidx.core.widget.doAfterTextChanged
 import androidx.recyclerview.widget.GridLayoutManager
@@ -24,7 +24,7 @@ import java.io.File
  * star beside what is typed leaves only the favorites. It is a task of its own, so that
  * leaving it leads back to the home screen.
  */
-class WidgetBooksActivity : AppCompatActivity() {
+class WidgetBooksActivity : ComponentActivity() {
 
     private lateinit var shelf: RecyclerView
     private lateinit var searchRow: View
@@ -37,8 +37,8 @@ class WidgetBooksActivity : AppCompatActivity() {
     /** The books being shown, in the order of the library; [show] puts those on the widget first. */
     private var listed: List<File> = emptyList()
 
-    /** Counts the lists asked for, so that a slow one cannot overwrite a later one. */
-    private var searches = 0
+    /** The lists asked for, so that a slow one cannot overwrite a later one. */
+    private val searches = Searches(this)
 
     private val back = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() = closeSearch()
@@ -100,7 +100,7 @@ class WidgetBooksActivity : AppCompatActivity() {
         fitBookcase(findViewById(R.id.root), findViewById(R.id.bar), shelf)
         findViewById<TextView>(R.id.barTitle).apply {
             setText(R.string.widget_books)
-            background = PlaqueDrawable(resources.displayMetrics.density, ornate = true)
+            background = PlaqueDrawable(resources.density, ornate = true)
         }
         // The lens stands at the very right here, where the bookshelf has its menu.
         findViewById<View>(R.id.search).visibility = View.INVISIBLE
@@ -164,14 +164,14 @@ class WidgetBooksActivity : AppCompatActivity() {
      * favorites among them while the star is on.
      */
     private fun list(text: String) {
-        val run = ++searches
+        val run = searches.start()
         val app = applicationContext
         val favorites = starred
         Library.io.execute {
             val books =
                 if (text.isBlank() && !favorites) Library.books().toList() else Library.search(app, Library.root(), text, favorites)
             val sorted = Library.arrange(app, null, books)
-            runOnUiThread { if (run == searches && !isDestroyed) show(sorted) }
+            searches.ifLatest(run) { show(sorted) }
         }
     }
 
@@ -215,7 +215,7 @@ class WidgetBooksActivity : AppCompatActivity() {
         Library.setWidgetOrder(this, Library.widgetBooks(this).map { if (it in moving) shown.removeFirst() else it })
     }
 
-    private fun spec() = ShelfSpec(shelf.width, columns, resources.displayMetrics.density)
+    private fun spec() = ShelfSpec(shelf.width, columns, resources.density)
 
     private companion object {
         const val TYPING_MS = 200L

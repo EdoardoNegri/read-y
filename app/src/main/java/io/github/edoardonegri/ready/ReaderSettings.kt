@@ -24,7 +24,7 @@ class Palette(val bg: Int, val fg: Int, val link: Int)
 /** Reader preferences, shared by all books. */
 class ReaderSettings(ctx: Context) {
     private val app = ctx.applicationContext
-    private val p = app.getSharedPreferences("reader", Context.MODE_PRIVATE).also(::upgrade)
+    private val p = app.prefs(Prefs.READER).also(::upgrade)
 
     /** A setting kept under [key], or the name of the property if there is none, read by [get] and written by [put]. */
     private fun <T> setting(
@@ -287,7 +287,7 @@ class ReaderSettings(ctx: Context) {
 
         /** The typeface in the font file [f]; null if it holds none that can be used. */
         fun fontFace(f: File): Typeface? = try {
-            if (Build.VERSION.SDK_INT >= 26) Typeface.Builder(f).build() else Typeface.createFromFile(f)
+            Typeface.Builder(f).build()
         } catch (e: RuntimeException) {
             null
         }

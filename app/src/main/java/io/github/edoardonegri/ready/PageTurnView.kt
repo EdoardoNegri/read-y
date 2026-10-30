@@ -10,7 +10,6 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
@@ -57,7 +56,7 @@ class PageTurnView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
     private var fold = 0f
     private var animator: ValueAnimator? = null
     private val faint = Paint().apply { alpha = 46 }
-    private val d = resources.displayMetrics.density
+    private val d = resources.density
 
     // The shadows the lifted sheet casts: on the page it uncovers, across its own back, and on the page it comes down on.
     private val uncovered = shade(GradientDrawable.Orientation.LEFT_RIGHT, 0x59000000, 0)
@@ -77,7 +76,7 @@ class PageTurnView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
      * Hides the page behind a picture of it as it is seen now, until [turn] or [drop], and then
      * calls [then]. The picture is copied from the screen, which takes the drawing hardware next
      * to nothing and this thread nothing at all, and enlarged to the size of this view where the
-     * screen shows it smaller (PagePreview); where it cannot be (before Android 8, or with part
+     * screen shows it smaller (PagePreview); where it cannot be (with part
      * of it out of sight), [draw] draws the page anew into the bitmap it is given, or a new one.
      * [place] says where in the book the page is, and how it is laid out, see [turn]; null if a
      * picture of it is not to be shown again.
@@ -89,7 +88,7 @@ class PageTurnView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? 
         // over the picture before that.
         val slot = 1 - shown
         places[slot] = null
-        if (Build.VERSION.SDK_INT >= 26 && width > 0 && height > 0) {
+        if (width > 0 && height > 0) {
             val bmp = pictures[slot]?.takeIf { it.width == width && it.height == height } ?: try {
                 createBitmap(width, height)
             } catch (e: OutOfMemoryError) {

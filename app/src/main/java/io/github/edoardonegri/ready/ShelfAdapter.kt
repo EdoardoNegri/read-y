@@ -182,7 +182,7 @@ class ShelfAdapter(
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
         Holder(LayoutInflater.from(parent.context).inflate(R.layout.item_book, parent, false)).also {
-            it.plaque.background = PlaqueDrawable(parent.resources.displayMetrics.density)
+            it.plaque.background = PlaqueDrawable(parent.resources.density)
             readyToOpen(it, ViewConfiguration.get(parent.context).scaledTouchSlop)
         }
 

@@ -16,7 +16,6 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
-import android.os.Build
 import android.widget.ImageView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.createBitmap
@@ -493,7 +492,7 @@ object ShelfArt {
 
     private fun read(b: Bitmap, seen: RectF): Bitmap? {
         // A picture the drawing hardware keeps cannot be looked into, but a copy of it can.
-        val readable = if (Build.VERSION.SDK_INT >= 26 && b.config == Bitmap.Config.HARDWARE) {
+        val readable = if (b.config == Bitmap.Config.HARDWARE) {
             try {
                 b.copy(Bitmap.Config.ARGB_8888, false) ?: return null
             } catch (e: OutOfMemoryError) {

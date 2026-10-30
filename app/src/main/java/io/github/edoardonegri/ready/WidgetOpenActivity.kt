@@ -8,7 +8,7 @@ import android.os.Bundle
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.ImageView
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.doOnLayout
 import java.io.File
@@ -23,7 +23,7 @@ import kotlin.math.roundToInt
  * icon that goes on with the book read last (ContinueShortcut) opens it here too, its page sliding
  * in from the right over the home screen ([EXTRA_SLIDE]).
  */
-class WidgetOpenActivity : AppCompatActivity() {
+class WidgetOpenActivity : ComponentActivity() {
 
     private var done = false
 
@@ -182,7 +182,7 @@ class WidgetOpenActivity : AppCompatActivity() {
      */
     private fun read(book: File, handoff: BookOpening.Handoff? = null) {
         // Not if the opening was left before the book lay open.
-        if (done || isFinishing || isDestroyed) return
+        if (done || closing) return
         done = true
         val reader = if (handoff != null) OpeningReaderActivity::class.java else ReaderActivity::class.java
         startActivity(

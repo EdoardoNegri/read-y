@@ -1,8 +1,8 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- The bookshelf is always dark wood, whatever the system theme. -->
-    <style name="Theme.Ready" parent="Theme.AppCompat.NoActionBar">
-        <item name="colorPrimary">@color/gold</item>
-        <item name="colorAccent">@color/gold</item>
+    <style name="Theme.Ready" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">@color/gold</item>
+        <item name="android:colorAccent">@color/gold</item>
         <item name="android:windowBackground">@color/wood_dark</item>
     </style>
 
@@ -16,7 +16,7 @@
         <item name="android:textSize">15sp</item>
         <item name="android:textColor">@color/plaque_text</item>
         <item name="android:singleLine">true</item>
-        <item name="android:foreground">?attr/selectableItemBackground</item>
+        <item name="android:foreground">?android:attr/selectableItemBackground</item>
     </style>
 
     <!-- The plate that names the bookcase on its top rail, and every dialog; its background is an
@@ -38,10 +38,10 @@
         <item name="android:textSize" tools:ignore="SpUsage">18dp</item>
         <item name="android:textColor">@color/plaque_text</item>
         <item name="android:maxLines">2</item>
-        <item name="autoSizeTextType">uniform</item>
-        <item name="autoSizeMinTextSize">12dp</item>
-        <item name="autoSizeMaxTextSize">18dp</item>
-        <item name="autoSizeStepGranularity">1dp</item>
+        <item name="android:autoSizeTextType">uniform</item>
+        <item name="android:autoSizeMinTextSize">12dp</item>
+        <item name="android:autoSizeMaxTextSize">18dp</item>
+        <item name="android:autoSizeStepGranularity">1dp</item>
         <item name="android:lineSpacingMultiplier">0.85</item>
         <item name="android:includeFontPadding">false</item>
         <item name="android:ellipsize">end</item>

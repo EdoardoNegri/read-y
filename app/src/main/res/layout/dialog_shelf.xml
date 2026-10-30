@@ -39,7 +39,7 @@
                 android:layout_height="44dp"
                 android:paddingStart="0dp"
                 android:paddingEnd="14dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/back"
                 android:src="@drawable/ic_back"
                 android:visibility="gone" />
@@ -69,7 +69,7 @@
                 android:layout_height="44dp"
                 android:paddingStart="14dp"
                 android:paddingEnd="0dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/close"
                 android:src="@drawable/ic_close" />
         </LinearLayout>

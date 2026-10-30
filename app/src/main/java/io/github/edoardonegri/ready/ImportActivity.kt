@@ -5,7 +5,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.widget.Toast
 import java.io.File
 
 /**
@@ -35,7 +34,7 @@ class ImportActivity : Activity() {
         val uri = intent.data ?: shared()
         if (uri == null || !Library.hasAccess()) {
             // Without access to the library folder the book cannot be kept; the shelf asks for it.
-            if (uri != null) Toast.makeText(this, R.string.import_needs_access, Toast.LENGTH_LONG).show()
+            if (uri != null) toast(R.string.import_needs_access, long = true)
             startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             finish()
             return
@@ -51,10 +50,10 @@ class ImportActivity : Activity() {
             // The file it came from goes, now that the library has the book.
             val kept = imported?.moved == true && !Store.removeOriginal(uri)
             runOnUiThread {
-                if (imported?.duplicate == true) Toast.makeText(this, R.string.already_on_shelf, Toast.LENGTH_SHORT).show()
+                if (imported?.duplicate == true) toast(R.string.already_on_shelf)
                 when {
                     imported == null -> {
-                        Toast.makeText(this, R.string.cannot_import, Toast.LENGTH_LONG).show()
+                        toast(R.string.cannot_import, long = true)
                         finish()
                     }
                     kept -> {
@@ -105,11 +104,7 @@ class ImportActivity : Activity() {
             val same = name != null && name == originalName && size >= 0 && size == Store.length(book)
             val removed = same && Store.removeOriginal(picked)
             runOnUiThread {
-                Toast.makeText(
-                    this,
-                    if (removed) R.string.original_removed else if (same) R.string.cannot_delete else R.string.original_other,
-                    Toast.LENGTH_LONG,
-                ).show()
+                toast(if (removed) R.string.original_removed else if (same) R.string.cannot_delete else R.string.original_other, long = true)
                 open(book)
             }
         }

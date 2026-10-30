@@ -6,7 +6,6 @@
      side the dots stand about 27dp from the border, and the lens about 23dp from the dots and
      from the plate: the two are narrower than the arrow and the book together. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/bar"
     android:layout_width="match_parent"
@@ -19,7 +18,7 @@
         android:id="@+id/up"
         android:layout_width="46dp"
         android:layout_height="48dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
         android:contentDescription="@string/back"
         android:paddingStart="9dp"
         android:paddingEnd="0dp"
@@ -32,7 +31,7 @@
         android:id="@+id/resume"
         android:layout_width="46dp"
         android:layout_height="48dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
         android:contentDescription="@string/resume"
         android:paddingStart="0dp"
         android:paddingEnd="7dp"
@@ -50,7 +49,7 @@
             style="@style/TitlePlate"
             android:layout_height="50dp"
             android:textSize="21dp"
-            app:autoSizeMaxTextSize="21dp"
+            android:autoSizeMaxTextSize="21dp"
             tools:ignore="SpUsage" />
     </FrameLayout>
 
@@ -58,7 +57,7 @@
         android:id="@+id/search"
         android:layout_width="46dp"
         android:layout_height="48dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
         android:paddingStart="12dp"
         android:paddingEnd="0dp"
         android:contentDescription="@string/search"
@@ -68,7 +67,7 @@
         android:id="@+id/more"
         android:layout_width="46dp"
         android:layout_height="48dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
         android:paddingStart="0dp"
         android:paddingEnd="13dp"
         android:contentDescription="@string/more"

@@ -29,15 +29,14 @@ import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
-import androidx.appcompat.widget.AppCompatImageView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.get
 import androidx.core.graphics.withClip
 import androidx.core.graphics.withMatrix
-import androidx.core.view.doOnLayout
-import androidx.core.view.doOnPreDraw
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.doOnLayout
+import androidx.core.view.doOnPreDraw
 import androidx.recyclerview.widget.RecyclerView
 import java.io.File
 import kotlin.math.abs
@@ -140,7 +139,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
      * A cover with the [binding] the shelf draws with it (ShelfArt.drawBound), which goes with it
      * as it swings open, or grows; it is as large as the cover makes it.
      */
-    private class Cover(ctx: Activity) : AppCompatImageView(ctx) {
+    private class Cover(ctx: Activity) : ImageView(ctx) {
         private val area = RectF()
         private val bound = ViewBinding(this)
         var binding by changes(false, ::invalidate)
@@ -562,7 +561,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
             // The cover as it is, whole, where the reader shows the cover that ends the book:
             // standing on the menu, if there is one to be raised under it, as on its shelf.
             val top = ViewCompat.getRootWindowInsets(f)?.getInsets(WindowInsetsCompat.Type.displayCutout())?.top ?: 0
-            ShelfArt.endCover(f.width, f.height, top, menuHeight, act.resources.displayMetrics.density, growFrom)
+            ShelfArt.endCover(f.width, f.height, top, menuHeight, act.resources.density, growFrom)
             // In the shape it has on the shelf, as the reader shows it.
             cover.scaleType = ImageView.ScaleType.CENTER_CROP
             cover.setPadding(growFrom.left, growFrom.top, f.width - growFrom.right, f.height - growFrom.bottom)
@@ -594,7 +593,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
                 plaqueFrom.set(row.plaqueAt)
                 plaqueFrom.offset(-origin[0].toFloat(), -origin[1].toFloat())
             } else {
-                plankFrom.set(x.toInt(), (y + h).toInt(), (x + w).toInt(), (y + h + ShelfDecoration.PLANK * act.resources.displayMetrics.density).toInt())
+                plankFrom.set(x.toInt(), (y + h).toInt(), (x + w).toInt(), (y + h + ShelfDecoration.PLANK * act.resources.density).toInt())
                 plaqueFrom.setEmpty()
             }
             // The shelf around it, as it is, until it is looked at closer.
@@ -621,7 +620,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         // The cover turns on its spine, seen from far enough for it not to loom over the shelf.
         cover.pivotX = 0f
         cover.pivotY = f.height / 2f
-        cover.cameraDistance = f.width * CAMERA * act.resources.displayMetrics.density
+        cover.cameraDistance = f.width * CAMERA * act.resources.density
         cover.binding = spot.binding
         cover.setImageBitmap(picture)
         cover.invalidate()
@@ -844,7 +843,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
      * moved there: laid out anew, as when the layer is first shown, it would be put back.
      */
     private class RisingPlank(ctx: Activity) : View(ctx) {
-        private val d = ctx.resources.displayMetrics.density
+        private val d = ctx.resources.density
         private val board = ContextCompat.getDrawable(ctx, R.drawable.shelf_plank)!!.mutate()
         private val plate = PlaqueDrawable(d)
         private val words = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -1446,7 +1445,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
             var b = 0
             try {
                 // A picture the drawing hardware keeps cannot be looked into, but a copy of it can.
-                val picture = if (Build.VERSION.SDK_INT >= 26 && spot.picture.config == Bitmap.Config.HARDWARE) {
+                val picture = if (spot.picture.config == Bitmap.Config.HARDWARE) {
                     spot.picture.copy(Bitmap.Config.ARGB_8888, false) ?: return EDGE
                 } else {
                     spot.picture
@@ -1522,7 +1521,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
             if (parent !is RecyclerView) return null
             val plaque = place.findViewById<TextView>(R.id.plaque) ?: return null
             val top = at[1] + from.height
-            val face = (ShelfDecoration.PLANK * from.resources.displayMetrics.density).toInt()
+            val face = (ShelfDecoration.PLANK * from.resources.density).toInt()
             val plaqueAt = IntArray(2)
             plaque.getLocationOnScreen(plaqueAt)
             val plate = plaque.background as? PlaqueDrawable

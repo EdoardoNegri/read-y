@@ -57,7 +57,7 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     private val rim = Paint().apply {
         style = Paint.Style.STROKE
         color = ContextCompat.getColor(ctx, R.color.gold_dark)
-        strokeWidth = RIM_DP * resources.displayMetrics.density
+        strokeWidth = RIM_DP * resources.density
     }
 
     init {
@@ -151,7 +151,7 @@ class PagePreview @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         setMeasuredDimension(w, h)
         if (!::s.isInitialized || w == 0 || h == 0) return
         val (sw, sh) = screenSize()
-        val room = RIM_DP * 2 * resources.displayMetrics.density
+        val room = RIM_DP * 2 * resources.density
         // As wide as the screen, shown smaller if there is not room for that; all of it if it
         // fits so, else as much of it as there is room for, from the top.
         scale = min(1f, (w - room) / sw)

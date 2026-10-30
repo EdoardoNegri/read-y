@@ -20,8 +20,8 @@ import android.view.View
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 import androidx.core.content.edit
-import androidx.core.os.HandlerCompat
 import androidx.core.graphics.createBitmap
+import androidx.core.os.HandlerCompat
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -293,7 +293,7 @@ private class WidgetShelf(ctx: Context, manager: AppWidgetManager, id: Int) {
         private const val FOUR = "four"
         private const val PAIR = "pair"
 
-        private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences("widget", Context.MODE_PRIVATE)
+        private fun prefs(ctx: Context) = ctx.prefs(Prefs.WIDGET)
 
         fun forget(ctx: Context, ids: IntArray) {
             prefs(ctx).edit { for (id in ids) remove(TWO + id).remove(FOUR + id).remove(PAIR + id) }

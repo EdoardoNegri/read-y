@@ -22,7 +22,7 @@ import androidx.recyclerview.widget.RecyclerView
  * are kept ([Planks], [Posts]) and moved to where they are needed.
  */
 class ShelfDecoration(ctx: Context, private val columns: Int) : RecyclerView.ItemDecoration() {
-    private val d = ctx.resources.displayMetrics.density
+    private val d = ctx.resources.density
     private val paint = Paint()
 
     init {

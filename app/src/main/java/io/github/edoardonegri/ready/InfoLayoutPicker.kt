@@ -30,7 +30,7 @@ import androidx.core.content.ContextCompat
  */
 @SuppressLint("ViewConstructor")
 class InfoLayoutPicker(ctx: Context, private val s: ReaderSettings, private val onChange: () -> Unit) : View(ctx) {
-    private val d = resources.displayMetrics.density
+    private val d = resources.density
 
     private val sheet = RectF()
     private val slots = Array(InfoPlace.COUNT) { RectF() }
@@ -293,8 +293,6 @@ class InfoLayoutPicker(ctx: Context, private val s: ReaderSettings, private val 
         setStroke(dp(1).coerceAtLeast(2), ContextCompat.getColor(context, R.color.gold_dark))
         setSize(dp(19), dp(19))
     }
-
-    private fun dp(v: Int) = (v * d).toInt()
 
     override fun onDetachedFromWindow() {
         list?.dismiss()

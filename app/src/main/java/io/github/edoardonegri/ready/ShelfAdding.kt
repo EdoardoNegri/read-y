@@ -1,8 +1,7 @@
 package io.github.edoardonegri.ready
 
-import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import java.io.File
 
 /**
@@ -12,7 +11,7 @@ import java.io.File
  * Made with the activity [act], before it starts.
  */
 class ShelfAdding(
-    private val act: AppCompatActivity,
+    private val act: ComponentActivity,
     private val shelf: () -> File,
     private val added: () -> Unit,
     private val back: () -> Unit,
@@ -45,12 +44,12 @@ class ShelfAdding(
                     if (move && imported.moved && !Store.removeOriginal(uri)) kept++
                 }
             }
-            onShelf {
+            act.whileOpen {
                 added()
-                if (unreadable > 0) toast(R.string.cannot_import)
-                else if (kept > 0) toast(R.string.cannot_delete)
+                if (unreadable > 0) act.toast(R.string.cannot_import)
+                else if (kept > 0) act.toast(R.string.cannot_delete)
                 else if (duplicates > 0) {
-                    Toast.makeText(act, act.resources.getQuantityString(R.plurals.already_here, duplicates, duplicates), Toast.LENGTH_LONG).show()
+                    act.toast(act.resources.getQuantityString(R.plurals.already_here, duplicates, duplicates), long = true)
                 }
             }
         }
@@ -75,7 +74,7 @@ class ShelfAdding(
         try {
             pickBooks.launch(Store.pickIntent(several = true))
         } catch (e: Exception) {
-            toast(R.string.cannot_import)
+            act.toast(R.string.cannot_import)
         }
     }
 
@@ -89,7 +88,7 @@ class ShelfAdding(
     private fun askNewShelf() {
         val dialog = ShelfDialog(act).title(act.getString(R.string.new_shelf)).back(::askAddShelf).input(R.string.shelf_name)
         dialog.primary(R.string.create) {
-            if (Library.createShelf(shelf(), dialog.text)) added() else toast(R.string.name_taken)
+            if (Library.createShelf(shelf(), dialog.text)) added() else act.toast(R.string.name_taken)
         }.show()
     }
 
@@ -102,7 +101,7 @@ class ShelfAdding(
         try {
             pickBooksFolder.launch(null)
         } catch (e: Exception) {
-            toast(R.string.cannot_read_folder)
+            act.toast(R.string.cannot_read_folder)
         }
     }
 
@@ -111,28 +110,24 @@ class ShelfAdding(
         val app = act.applicationContext
         val dir = shelf()
         val name = Store.describe(tree).first ?: tree.lastPathSegment?.substringAfterLast(':')?.substringAfterLast('/').orEmpty()
-        Toast.makeText(act, act.getString(R.string.adding_folder, name), Toast.LENGTH_SHORT).show()
+        act.toast(act.getString(R.string.adding_folder, name))
         Library.io.execute {
             val done = BookImport.importFolder(app, tree, dir)
-            onShelf {
+            act.whileOpen {
                 added()
                 when {
-                    done == null -> toast(R.string.cannot_read_folder)
-                    done.inLibrary -> toast(R.string.folder_in_library)
-                    done.added == 0 && done.unreadable > 0 -> toast(R.string.cannot_import)
+                    done == null -> act.toast(R.string.cannot_read_folder)
+                    done.inLibrary -> act.toast(R.string.folder_in_library)
+                    done.added == 0 && done.unreadable > 0 -> act.toast(R.string.cannot_import)
                     done.added == 0 && done.duplicates > 0 ->
-                        Toast.makeText(act, act.resources.getQuantityString(R.plurals.already_here, done.duplicates, done.duplicates), Toast.LENGTH_LONG).show()
-                    done.added == 0 -> toast(R.string.folder_empty)
-                    else -> Toast.makeText(
-                        act, act.resources.getQuantityString(R.plurals.folder_added, done.added, done.added, done.shelf?.name.orEmpty()), Toast.LENGTH_LONG,
-                    ).show()
+                        act.toast(act.resources.getQuantityString(R.plurals.already_here, done.duplicates, done.duplicates), long = true)
+                    done.added == 0 -> act.toast(R.string.folder_empty)
+                    else -> act.toast(
+                        act.resources.getQuantityString(R.plurals.folder_added, done.added, done.added, done.shelf?.name.orEmpty()), long = true,
+                    )
                 }
             }
         }
     }
 
-    private fun toast(text: Int) = Toast.makeText(act, text, Toast.LENGTH_SHORT).show()
-
-    /** Does [action] on the thread that draws the shelf, unless the shelf is gone by then. */
-    private fun onShelf(action: () -> Unit) = act.runOnUiThread { if (!act.isFinishing && !act.isDestroyed) action() }
 }

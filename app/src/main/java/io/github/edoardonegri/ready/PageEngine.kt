@@ -4,10 +4,10 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Rect
 import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.ColorMatrixColorFilter
+import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
 import android.util.LruCache
@@ -87,7 +87,7 @@ class PageEngine(
     private val crease = SpineCrease(act)
     private val list = RecyclerView(act)
     private val lm = LinearLayoutManager(act)
-    private val gap = (4 * act.resources.displayMetrics.density).toInt()
+    private val gap = (4 * act.resources.density).toInt()
     override val view: View get() = frame
 
     private class Holder(val img: RatioImageView) : RecyclerView.ViewHolder(img)

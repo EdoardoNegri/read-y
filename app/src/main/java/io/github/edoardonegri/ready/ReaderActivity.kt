@@ -1,5 +1,6 @@
 package io.github.edoardonegri.ready
 
+import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -27,10 +28,9 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.SeekBar
 import android.widget.TextView
-import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.createBitmap
 import androidx.core.view.ViewCompat
@@ -45,7 +45,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listener {
+open class ReaderActivity : ComponentActivity(), ReaderHost, GestureFrame.Listener {
 
     private lateinit var s: ReaderSettings
     private lateinit var file: File
@@ -199,7 +199,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
 
         file = File(intent.getStringExtra(EXTRA_PATH) ?: "")
         if (!file.isDoc) {
-            Toast.makeText(this, R.string.book_missing, Toast.LENGTH_LONG).show()
+            toast(R.string.book_missing, long = true)
             leave()
             return
         }
@@ -219,7 +219,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
 
         title = findViewById(R.id.bookTitle)
         // On a plaque as the book has it on the shelf: of bronze once it is read to the end, with stars for a favorite.
-        title.background = PlaqueDrawable(resources.displayMetrics.density).apply {
+        title.background = PlaqueDrawable(resources.density).apply {
             favorite = Library.isFavorite(this@ReaderActivity, file)
             finished = this@ReaderActivity.finished
         }
@@ -299,7 +299,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         if (kept != null) showSidewaysPage(kept, BookOpening.keptTurned(file, s.look))
         if (!s.hintShown) {
             s.hintShown = true
-            Toast.makeText(this, R.string.reader_hint, Toast.LENGTH_LONG).show()
+            toast(R.string.reader_hint, long = true)
         }
     }
 
@@ -486,7 +486,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
      * foot of the screen (ShelfArt.endCover), where the book opening on the shelf puts it too.
      */
     private fun coverRoom(e: ReaderEngine, menu: Int) {
-        ShelfArt.endCover(root.width, root.height, cutout.insets.top, menu, resources.displayMetrics.density, room)
+        ShelfArt.endCover(root.width, root.height, cutout.insets.top, menu, resources.density, room)
         // With the crease along its spine, as on the shelf.
         crease.box = if (onCover) room else null
         // In the engine's own view, which lies inside the margins of the page.
@@ -759,7 +759,6 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
      * gets. Null if one cannot be had.
      */
     private fun capture(then: (Bitmap?) -> Unit) {
-        if (Build.VERSION.SDK_INT < 26) return then(content.picture())
         // Turned a quarter, the page is as large as the window across, not as it is set out.
         val shown = if (turnLater) window.decorView else root
         if (shown.width == 0 || shown.height == 0) return then(null)
@@ -827,7 +826,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
 
     /** Says that the book cannot be read, and leaves it. */
     private fun unreadable() {
-        Toast.makeText(this, getString(R.string.book_unreadable, file.name), Toast.LENGTH_LONG).show()
+        toast(getString(R.string.book_unreadable, file.name), long = true)
         leave()
     }
 
@@ -1061,7 +1060,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
             .putExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, true)
         val apps = packageManager.queryIntentActivities(ask, 0)
         if (apps.isEmpty()) {
-            Toast.makeText(this, R.string.no_look_up, Toast.LENGTH_LONG).show()
+            toast(R.string.no_look_up, long = true)
             return
         }
         content.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
@@ -1072,7 +1071,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
                 else Intent.createChooser(ask, getString(R.string.look_up, word)),
             )
         } catch (_: ActivityNotFoundException) {
-            Toast.makeText(this, R.string.no_look_up, Toast.LENGTH_LONG).show()
+            toast(R.string.no_look_up, long = true)
         }
     }
 
@@ -1096,6 +1095,9 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
         turner.swipe(direction)
     }
 
+    // Activity.dispatchKeyEvent is public; lint only objects because androidx's ComponentActivity
+    // marks its own override of it as internal to the library.
+    @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val forward = when (event.keyCode) {
             KeyEvent.KEYCODE_VOLUME_UP -> s.volumeUpNext
@@ -1251,7 +1253,7 @@ open class ReaderActivity : AppCompatActivity(), ReaderHost, GestureFrame.Listen
     private fun startTour() {
         tourQueued = false
         // Not on the cover that ends the book, where the menu is up already.
-        if (isFinishing || isDestroyed || menuOpen || toured) return
+        if (closing || menuOpen || toured) return
         toured = true
         tourAt = state.chapter to state.fraction
         val lit = Tutorial.Touch.LIT

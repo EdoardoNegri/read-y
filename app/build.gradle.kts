@@ -11,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "com.edoardonegri.readY"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 37
         versionCode = 5
         versionName = "1.0"
@@ -50,7 +50,7 @@ android {
 }
 
 dependencies {
-    implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.activity)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.recyclerview)
     // Installs the baseline profile (baselineprofile/) on phones that do not get it from Google Play.

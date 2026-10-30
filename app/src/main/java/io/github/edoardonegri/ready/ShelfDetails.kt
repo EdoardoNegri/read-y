@@ -5,10 +5,9 @@ import android.net.Uri
 import android.view.View
 import android.widget.EditText
 import android.widget.ImageView
-import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import java.io.File
 import java.text.DateFormat
 import java.text.SimpleDateFormat
@@ -25,7 +24,7 @@ import kotlin.math.roundToInt
  * renames a book or a shelf. Made with the activity [act], before it starts.
  */
 class ShelfDetails(
-    private val act: AppCompatActivity,
+    private val act: ComponentActivity,
     private val spec: () -> ShelfSpec,
     private val changed: () -> Unit,
     private val rename: (File, String) -> Unit,
@@ -56,13 +55,13 @@ class ShelfDetails(
                 rows += act.getString(R.string.info_folders) to "$folders"
                 rows += act.getString(R.string.finished) to "$finished"
                 rows += act.getString(R.string.info_location) to place(f)
-                onShelf { display(ShelfDialog(act).details(rows, byColumn = true).uncrossed().title(f.name)) }
+                act.whileOpen { display(ShelfDialog(act).details(rows, byColumn = true).uncrossed().title(f.name)) }
             }
             return
         }
         Library.io.execute {
             val meta = Library.meta(act.applicationContext, f)
-            onShelf { showBook(f, meta) }
+            act.whileOpen { showBook(f, meta) }
         }
     }
 
@@ -72,7 +71,7 @@ class ShelfDetails(
         val app = act.applicationContext
         Library.io.execute {
             val meta = Library.meta(app, f)
-            onShelf { editBook(f, meta) }
+            act.whileOpen { editBook(f, meta) }
         }
     }
 
@@ -225,7 +224,7 @@ class ShelfDetails(
             val done = Library.setCover(app, f, uri)
             act.runOnUiThread {
                 if (act.isDestroyed) return@runOnUiThread
-                if (!done) Toast.makeText(act, R.string.cannot_read_picture, Toast.LENGTH_SHORT).show()
+                if (!done) act.toast(R.string.cannot_read_picture)
                 showCover(f)
                 changed()
             }
@@ -271,6 +270,4 @@ class ShelfDetails(
             .format(day)
     }
 
-    /** Does [action] on the thread that draws the shelf, unless the shelf is gone by then. */
-    private fun onShelf(action: () -> Unit) = act.runOnUiThread { if (!act.isFinishing && !act.isDestroyed) action() }
 }
