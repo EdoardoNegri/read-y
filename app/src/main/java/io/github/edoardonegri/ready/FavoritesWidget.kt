@@ -20,6 +20,7 @@ import android.util.SizeF
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
+import androidx.annotation.RequiresApi
 import androidx.core.content.edit
 import androidx.core.os.BundleCompat
 import androidx.core.graphics.createBitmap
@@ -337,6 +338,7 @@ private class WidgetShelf(
          * mostly stays upright while this app may not, and its widget is laid out [upright] alone,
          * under null.
          */
+        @RequiresApi(31)
         fun bySize(ctx: Context, manager: AppWidgetManager, id: Int): Map<SizeF?, WidgetShelf> {
             val o = manager.getAppWidgetOptions(id)
             val sizes = BundleCompat.getParcelableArrayList(o, AppWidgetManager.OPTION_APPWIDGET_SIZES, SizeF::class.java)

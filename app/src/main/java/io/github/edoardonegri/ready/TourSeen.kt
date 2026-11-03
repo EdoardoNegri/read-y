@@ -15,8 +15,19 @@ fun tourSeen(ctx: Context, key: String) = ctx.prefs(Prefs.TOUR).getBoolean(key, 
 fun tourDone(ctx: Context, key: String) = ctx.prefs(Prefs.TOUR).edit { putBoolean(key, true) }
 
 private const val SAMPLES = "samples"
+private const val MADE = "samples_made"
 
 /** Whether the book and the shelf made for the tour (see TourSamples) may still be there. */
 fun tourSamplesPending(ctx: Context) = ctx.prefs(Prefs.TOUR).getBoolean(SAMPLES, false)
 
-fun setTourSamplesPending(ctx: Context, pending: Boolean) = ctx.prefs(Prefs.TOUR).edit { putBoolean(SAMPLES, pending) }
+/**
+ * The names of the book and the shelf the tour made itself, which are the only ones it takes away:
+ * the reader's own of the same name are left. Null where a tour of before this was noted left them.
+ */
+fun tourSamplesMade(ctx: Context): Set<String>? = ctx.prefs(Prefs.TOUR).getStringSet(MADE, null)
+
+/** Notes [made] as what the tour made itself, which may still be there while it is not empty. */
+fun setTourSamplesMade(ctx: Context, made: Set<String>) = ctx.prefs(Prefs.TOUR).edit {
+    putStringSet(MADE, HashSet(made))
+    putBoolean(SAMPLES, made.isNotEmpty())
+}

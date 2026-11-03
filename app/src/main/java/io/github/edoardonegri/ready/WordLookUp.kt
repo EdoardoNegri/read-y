@@ -21,10 +21,13 @@ class WordLookUp(
     /** The app it is of. */
     val pkg: String,
     val label: CharSequence,
-    val icon: Drawable,
+    /** Its picture, loaded only when it is shown: of all the apps, most are not. */
+    loadIcon: () -> Drawable,
     /** What opens it on a word. */
     private val open: (String) -> Intent,
 ) {
+    val icon: Drawable by lazy(loadIcon)
+
     fun intent(word: String) = open(word)
 
     /** A picture of it of its own, for a view to show, or to tint, while others show [icon] too. */
@@ -40,14 +43,14 @@ class WordLookUp(
         fun all(ctx: Context): List<WordLookUp> {
             val pm = ctx.packageManager
             val words = pm.queryIntentActivities(processText(""), 0).map { it.activityInfo }.map { a ->
-                WordLookUp("text:${a.packageName}/${a.name}", a.packageName, a.loadLabel(pm), a.loadIcon(pm)) { word ->
+                WordLookUp("text:${a.packageName}/${a.name}", a.packageName, a.loadLabel(pm), { a.loadIcon(pm) }) { word ->
                     processText(word).setClassName(a.packageName, a.name)
                 }
             }.sortedBy { it.label.toString().lowercase() }
             val searching = (pm.queryIntentActivities(Intent(Intent.ACTION_WEB_SEARCH), 0) + pm.queryIntentActivities(browsing(), PackageManager.MATCH_ALL))
                 .map { it.activityInfo }.distinctBy { it.packageName }.map { a ->
                     val app = a.applicationInfo
-                    WordLookUp("$WEB${a.packageName}", a.packageName, app.loadLabel(pm), app.loadIcon(pm)) { word -> search(pm, a.packageName, word) }
+                    WordLookUp("$WEB${a.packageName}", a.packageName, app.loadLabel(pm), { app.loadIcon(pm) }) { word -> search(pm, a.packageName, word) }
                 }.sortedBy { it.label.toString().lowercase() }
             return words + searching
         }

@@ -366,10 +366,20 @@
     }
     var i = under(at.startOffset) ? at.startOffset : under(at.startOffset - 1) ? at.startOffset - 1 : -1;
     if (i < 0) return null;
-    var word = null;
+    var word = null, words = null;
     if (window.Intl && Intl.Segmenter) {
-      var seg = new Intl.Segmenter(document.documentElement.lang || undefined, { granularity: 'word' })
-        .segment(text).containing(i);
+      // The language the book is in, as XHTML gives it, or as HTML does. A book may give one the
+      // browser does not take, such as en_US, and the words are then told apart as by default.
+      var html = document.documentElement;
+      var lang = html.getAttributeNS('http://www.w3.org/XML/1998/namespace', 'lang') || html.lang || undefined;
+      try {
+        words = new Intl.Segmenter(lang, { granularity: 'word' });
+      } catch (e) {
+        words = new Intl.Segmenter(undefined, { granularity: 'word' });
+      }
+    }
+    if (words) {
+      var seg = words.segment(text).containing(i);
       if (seg && seg.isWordLike) word = seg.segment;
     } else {
       var letter = /[\p{L}\p{M}\p{N}\u00AD'’]/u, a = i, b = i + 1;
