@@ -9,11 +9,20 @@
     <!-- No storage permission: the library is the one folder the reader grants through the
          system folder picker (see Store), and the app sees nothing else. -->
 
-    <!-- The apps that look up a word held in the reader, a dictionary or a translator (ReaderActivity.lookUp). -->
+    <!-- The apps that look up a word held in the reader, a dictionary, a translator or a browser
+         that searches the web for it (WordLookUp). -->
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />
             <data android:mimeType="text/plain" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.WEB_SEARCH" />
         </intent>
     </queries>
 

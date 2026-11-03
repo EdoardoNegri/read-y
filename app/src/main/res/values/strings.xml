@@ -220,6 +220,11 @@ Tap below and choose that file: Read-y will remove it, so that the book is kept 
     <string name="hyphenation_2">Moderate</string>
     <string name="hyphenation_3">Strong</string>
     <string name="hyphenation_4">Maximum</string>
+    <string name="opt_look_up">Looking up words</string>
+    <string name="opt_look_up_note">Hold a word on the page to look it up in one of these apps.</string>
+    <string name="look_up_none_on">No app is switched on for looking up words. Switch one on in the settings.</string>
+    <string name="look_up_off">Switched off</string>
+    <string name="look_up_title">Search: ‘%1$s’</string>
     <string name="opt_turning">Turning pages</string>
     <string name="opt_like_paper">Turn the pages like paper</string>
     <string name="opt_tap_sides">Tap the sides to turn pages</string>

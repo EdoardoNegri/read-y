@@ -143,6 +143,15 @@ class ReaderSettings(ctx: Context) {
 
     /** Silences the phone while a book is open, see DoNotDisturb. */
     var doNotDisturb by bool(false)
+
+    /**
+     * The apps a word held on the page is looked up in, by their WordLookUp.key, in the order they
+     * were chosen; null until the reader chooses, when the phone's search engine alone is (WordLookUp.chosen).
+     */
+    var lookUpApps: List<String>?
+        get() = p.getString(LOOK_UP_APPS, null)?.split(' ')?.filter { it.isNotEmpty() }
+        set(value) = p.edit { putString(LOOK_UP_APPS, value?.joinToString(" ")) }
+
     var hintShown by bool(false)
 
     /** The colours of the page in white light. */
@@ -234,6 +243,7 @@ class ReaderSettings(ctx: Context) {
         }
 
         private const val INFO = "info_"
+        private const val LOOK_UP_APPS = "lookUpApps"
 
         /** [orientation] for landscape. */
         const val LANDSCAPE = 2

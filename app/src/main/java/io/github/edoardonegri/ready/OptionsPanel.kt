@@ -2,15 +2,22 @@ package io.github.edoardonegri.ready
 
 import android.app.Activity
 import android.content.res.ColorStateList
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Typeface
+import android.text.TextUtils
+import android.util.TypedValue
 import android.view.ContextThemeWrapper
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import java.io.File
 import kotlin.math.abs
 
@@ -139,6 +146,8 @@ class OptionsPanel(
             fonts = BrassDropdown(ctx) { pickFont(it, onLayout) }
             section.addView(fonts, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(40)).apply { topMargin = ctx.dp(4) })
             showFonts()
+
+            lookUp()
         }
 
         section(t(R.string.opt_turning))
@@ -330,21 +339,149 @@ class OptionsPanel(
         onLayout()
     }
 
+    /**
+     * The apps a word held on the page is looked up in, each by its picture and name with a switch
+     * on the right. Those switched on are always in view, in the order they were chosen; the others
+     * are under a brass drop-down plate that says they are switched off, which opens and closes
+     * them in place, faded, those that search the web first, as they are what most look words up in. Switching one on or
+     * off moves it from the one list to the other, once its switch has slid across.
+     */
+    private fun lookUp() {
+        section(t(R.string.opt_look_up))
+        val all = WordLookUp.all(ctx)
+        note(t(if (all.isEmpty()) R.string.no_look_up else R.string.opt_look_up_note))
+        if (all.isEmpty()) return
+        val on = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        val plate = PlaqueDrawable(ctx.resources.density).apply { arrows = 1 }
+        val more = switchedOff(plate)
+        val off = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        section.addView(on)
+        section.addView(
+            more,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(40)).apply {
+                topMargin = ctx.dp(10)
+                bottomMargin = ctx.dp(4)
+            },
+        )
+        section.addView(off)
+        var opened = false
+        lateinit var again: Runnable
+        fun switched(app: WordLookUp, now: Boolean) {
+            val keys = WordLookUp.chosenKeys(ctx, s, all) - app.key
+            s.lookUpApps = if (now) keys + app.key else keys
+            on.removeCallbacks(again)
+            on.postDelayed(again, SWITCH_MS)
+        }
+        fun show() {
+            on.removeAllViews()
+            off.removeAllViews()
+            val chosen = WordLookUp.chosen(ctx, s, all)
+            for (app in chosen) on.addView(appSwitch(app, true) { switched(app, it) })
+            val others = all.filter { it !in chosen }.sortedBy { if (it.searchesWeb) 0 else 1 }
+            for (app in others) off.addView(appSwitch(app, false) { switched(app, it) })
+            if (others.isEmpty()) opened = false
+            more.visibility = if (others.isEmpty()) View.GONE else View.VISIBLE
+            off.visibility = if (opened) View.VISIBLE else View.GONE
+            plate.arrows = if (opened) -1 else 1
+        }
+        again = Runnable { show() }
+        more.setOnClickListener {
+            opened = !opened
+            show()
+        }
+        show()
+    }
+
+    /**
+     * A row of the apps words are looked up in: [app] by its picture and name, and a switch, [on] or
+     * not, whose turning [onChange] is told. One switched off is faded, its picture grey.
+     */
+    private fun appSwitch(app: WordLookUp, on: Boolean, onChange: (Boolean) -> Unit) = LinearLayout(ctx).apply {
+        gravity = Gravity.CENTER_VERTICAL
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(48)).apply { topMargin = ctx.dp(4) }
+        val icon = ImageView(ctx).apply {
+            setImageDrawable(app.picture())
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        addView(if (on) icon else grey(icon), LinearLayout.LayoutParams(ctx.dp(28), ctx.dp(28)))
+        addView(
+            brassSwitch(app.label, on, onChange).apply {
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                if (!on) setTextColor(ColorUtils.setAlphaComponent(color(R.color.cream), OFF_TEXT_ALPHA))
+            },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply { marginStart = ctx.dp(12) },
+        )
+    }
+
+    /** Shows the picture in [view] grey and faded, as of an app switched off. */
+    private fun grey(view: ImageView) = view.apply {
+        colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
+        imageAlpha = OFF_ICON_ALPHA
+    }
+
+    /**
+     * The brass plate under the apps switched on that opens and closes the others under it: the
+     * whole width of the panel, with "Switched off" on it and an arrow engraved at either end, as
+     * on a drop-down menu.
+     */
+    private fun switchedOff(plate: PlaqueDrawable) = TextView(ctx).apply {
+        background = plate
+        foreground = ctx.getDrawable(TypedValue().also {
+            ctx.theme.resolveAttribute(android.R.attr.selectableItemBackground, it, true)
+        }.resourceId)
+        text = t(R.string.look_up_off)
+        gravity = Gravity.CENTER
+        isSingleLine = true
+        ellipsize = TextUtils.TruncateAt.END
+        textSize = 15f
+        typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+        setTextColor(color(R.color.plaque_text))
+        // Clear of the arrows at its ends, as BrassDropdown is; its shadow is at its foot.
+        val side = ctx.dp(PlaqueDrawable.ARROW_X_DP.toInt() + 10)
+        setPadding(side, 0, side, ctx.dp(PlaqueDrawable.SHADOW_DP))
+    }
+
+    /** A few words about the settings below them. */
+    private fun note(text: String) {
+        section.addView(TextView(ctx).apply {
+            this.text = text
+            textSize = 13f
+            typeface = Typeface.SERIF
+            setTextColor(color(R.color.cream))
+            alpha = 0.8f
+            setPadding(0, ctx.dp(10), 0, ctx.dp(2))
+        })
+    }
+
     private fun toggle(name: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-        val sw = Switch(ctx)
+        section.addView(
+            brassSwitch(name, checked, onChange),
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(46)).apply { topMargin = ctx.dp(4) },
+        )
+    }
+
+    /** A switch with [name] on its left, [checked] or not, in the gold of the settings; [onChange] is told when it is turned. */
+    private fun brassSwitch(name: CharSequence, checked: Boolean, onChange: (Boolean) -> Unit) = Switch(ctx).apply {
         val on = intArrayOf(android.R.attr.state_checked)
-        sw.thumbTintList = ColorStateList(arrayOf(on, intArrayOf()), intArrayOf(color(R.color.gold), color(R.color.switch_thumb_off)))
-        sw.trackTintList = ColorStateList(arrayOf(on, intArrayOf()), intArrayOf(color(R.color.switch_track_on), color(R.color.switch_track_off)))
-        sw.text = name
-        sw.textSize = 15f
-        sw.typeface = Typeface.SERIF
-        sw.setTextColor(color(R.color.cream))
-        sw.isChecked = checked
-        sw.setOnCheckedChangeListener { _, on -> onChange(on) }
-        section.addView(sw, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(46)).apply { topMargin = ctx.dp(4) })
+        thumbTintList = ColorStateList(arrayOf(on, intArrayOf()), intArrayOf(color(R.color.gold), color(R.color.switch_thumb_off)))
+        trackTintList = ColorStateList(arrayOf(on, intArrayOf()), intArrayOf(color(R.color.switch_track_on), color(R.color.switch_track_off)))
+        text = name
+        textSize = 15f
+        typeface = Typeface.SERIF
+        setTextColor(color(R.color.cream))
+        isChecked = checked
+        setOnCheckedChangeListener { _, now -> onChange(now) }
     }
 
     private companion object {
+        /** How long the switch of an app takes to slide across before the app moves to the other list, in ms. */
+        const val SWITCH_MS = 250L
+
+        /** How much is left of the picture, and of the name, of an app switched off, of 255. */
+        const val OFF_ICON_ALPHA = 140
+        const val OFF_TEXT_ALPHA = 140
+
         /** The names of the steps of ReaderSettings.hyphenation. */
         val HYPHENATION = intArrayOf(
             R.string.hyphenation_0, R.string.hyphenation_1, R.string.hyphenation_2, R.string.hyphenation_3, R.string.hyphenation_4,

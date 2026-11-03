@@ -62,6 +62,9 @@ open class ReaderActivity : ComponentActivity(), ReaderHost, GestureFrame.Listen
     /** The margins each row of the [plank] has of its own, before any is kept clear of the camera; see [clearCamera]. */
     private val rowMargins = HashMap<View, Pair<Int, Int>>()
 
+    /** What slides up when a word is held on the page, for it to be looked up; see [lookUp]. */
+    private var lookUpSheet: LookUpSheet? = null
+
     /** The crease along the spine of the cover that ends the book, see [coverRoom]. */
     private lateinit var crease: CoverCrease
 
@@ -280,7 +283,7 @@ open class ReaderActivity : ComponentActivity(), ReaderHost, GestureFrame.Listen
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 // The menu stays over the cover that ends the book, which Back then leaves.
-                if (menuOpen && !onCover) closeMenu() else leave()
+                if (lookingUp) lookUpSheet?.hide(slide = true) else if (menuOpen && !onCover) closeMenu() else leave()
             }
         })
 
@@ -1054,34 +1057,47 @@ open class ReaderActivity : ComponentActivity(), ReaderHost, GestureFrame.Listen
     }
 
     override fun onLongPress(x: Float, y: Float) {
-        if (menuOpen || onCover) return
+        if (menuOpen || onCover || lookingUp) return
         engine?.word(x - content.paddingLeft, y - content.paddingTop) { word -> if (word != null) lookUp(word) }
     }
 
+    /** Whether the apps a word can be looked up in are up, see [lookUp]. */
+    private val lookingUp get() = lookUpSheet?.open == true
+
     /**
-     * Hands [word] to an app of the phone's that looks words up, a dictionary or a translator, as
-     * selecting it in any other app would: the reader itself stays offline. With several, the
-     * reader is asked which.
+     * Offers [word] to the apps of the phone's chosen in the settings to look words up in, a
+     * dictionary, a translator or a search engine, on a plank that slides up from the foot of the
+     * page: the one tapped is handed the word as selecting it in any other app would. The reader
+     * itself stays offline.
      */
     private fun lookUp(word: String) {
-        val ask = Intent(Intent.ACTION_PROCESS_TEXT).setType("text/plain")
-            .putExtra(Intent.EXTRA_PROCESS_TEXT, word)
-            .putExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, true)
-        val apps = packageManager.queryIntentActivities(ask, 0)
+        val all = WordLookUp.all(this)
+        val apps = WordLookUp.chosen(this, s, all)
         if (apps.isEmpty()) {
-            toast(R.string.no_look_up, long = true)
+            toast(if (all.isEmpty()) R.string.no_look_up else R.string.look_up_none_on, long = true)
             return
         }
         content.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-        val one = apps.singleOrNull()?.activityInfo
-        try {
-            startActivity(
-                if (one != null) ask.setClassName(one.packageName, one.name)
-                else Intent.createChooser(ask, getString(R.string.look_up, word)),
-            )
-        } catch (_: ActivityNotFoundException) {
-            toast(R.string.no_look_up, long = true)
+        // With a single app there is nothing to choose: the word goes straight to it.
+        apps.singleOrNull()?.let {
+            lookUpIn(it, word)
+            return
         }
+        // Made the first time, over all else the reader shows.
+        val sheet = lookUpSheet ?: LookUpSheet(this).also {
+            lookUpSheet = it
+            root.addView(it, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        }
+        sheet.show(word, apps, cutout.insets.left, cutout.insets.right) { app -> if (lookUpIn(app, word)) sheet.hide() }
+    }
+
+    /** Hands [word] to [app]; tells whether it opened. */
+    private fun lookUpIn(app: WordLookUp, word: String) = try {
+        startActivity(app.intent(word))
+        true
+    } catch (_: ActivityNotFoundException) {
+        toast(R.string.no_look_up, long = true)
+        false
     }
 
     override fun canZoom() = engine?.zoomable == true && !menuOpen
