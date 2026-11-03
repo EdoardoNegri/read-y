@@ -791,12 +791,10 @@ open class ReaderActivity : ComponentActivity(), ReaderHost, GestureFrame.Listen
         if (!hidden || isFinishing) return
         hidden = false
         if (turnLater) {
-            turnLater = false
             // The page the book opened on stands in front, as it was read, while the screen turns.
             val print = turnedPrint
             turnedPrint = null
             if (print != null) showSidewaysPage(print, turnTo) else showSidewaysPage(BookOpening.kept(file, s.look), BookOpening.keptTurned(file, s.look))
-            orient()
         }
         readEndPictureIfNear(state.percent)
         paceScreen()
@@ -804,8 +802,19 @@ open class ReaderActivity : ComponentActivity(), ReaderHost, GestureFrame.Listen
         window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
         // The shelf under it need no longer be drawn: once the reader is seen, two frames on. Made
         // solid at once, the shelf and the book opening on it would be hidden while the reader is
-        // still unseen, and a frame would show neither.
-        if (Build.VERSION.SDK_INT >= 30) twoFramesOn { if (!isFinishing) setTranslucent(false) }
+        // still unseen, and a frame would show neither. The screen turns only then: turned while
+        // the reader is see-through, it is not cut from one way to the other as the reader asks
+        // (jumpCut), but faded round, with what lies under the reader, such as the home screen
+        // the book was opened on, showing through. Until it turns, the page stays set out on its
+        // side ([turnLater]): set out for the upright window meanwhile, it would show so for a moment.
+        if (Build.VERSION.SDK_INT >= 30) twoFramesOn {
+            if (isFinishing) return@twoFramesOn
+            setTranslucent(false)
+            if (turnLater) {
+                turnLater = false
+                orient()
+            }
+        }
     }
 
     override fun reopen() {
