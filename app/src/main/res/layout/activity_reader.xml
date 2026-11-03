@@ -79,9 +79,10 @@
                     android:contentDescription="@string/back"
                     android:src="@drawable/ic_back" />
 
-                <!-- The name of the book on its plaque, as on the shelf: as wide as the name, and
-                     no wider than the room between the buttons. Its background is a
-                     PlaqueDrawable set in code; its paddings keep the name clear of the screws.
+                <!-- The name of the book on the ornate title plate, as in its details: as wide as
+                     the name, and no wider than the room between the buttons. Its background is a
+                     PlaqueDrawable set in code; its paddings keep the name clear of the screws and
+                     the scooped corners, as TitlePlate's do.
                      One line, which is laid out as wide as it is rather than scrolled into view,
                      so that it can be pictured before it is first shown (ReaderActivity.endMenu). -->
                 <FrameLayout
@@ -100,8 +101,8 @@
                         android:fontFamily="serif"
                         android:gravity="center"
                         android:paddingBottom="2dp"
-                        android:paddingEnd="22dp"
-                        android:paddingStart="22dp"
+                        android:paddingEnd="26dp"
+                        android:paddingStart="26dp"
                         android:shadowColor="#99FFF6C8"
                         android:shadowDy="1"
                         android:shadowRadius="1"

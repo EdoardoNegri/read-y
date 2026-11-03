@@ -221,8 +221,9 @@ open class ReaderActivity : ComponentActivity(), ReaderHost, GestureFrame.Listen
         content.listener = this
 
         title = findViewById(R.id.bookTitle)
-        // On a plaque as the book has it on the shelf: of bronze once it is read to the end, with stars for a favorite.
-        title.background = PlaqueDrawable(resources.density).apply {
+        // On the ornate title plate, as the book's details and the dialogs have their names: of
+        // bronze once it is read to the end, and with stars for a favorite, as its plaque on the shelf.
+        title.background = PlaqueDrawable(resources.density, ornate = true).apply {
             favorite = Library.isFavorite(this@ReaderActivity, file)
             finished = this@ReaderActivity.finished
         }

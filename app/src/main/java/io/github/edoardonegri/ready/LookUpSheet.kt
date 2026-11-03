@@ -17,6 +17,7 @@ import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.core.view.doOnPreDraw
 import androidx.core.view.isVisible
+import androidx.core.view.updateLayoutParams
 
 /**
  * What comes up when a word is held on the page: a plank that slides up from the foot of the
@@ -49,13 +50,13 @@ class LookUpSheet(ctx: Context) : FrameLayout(ctx) {
         plank.setPadding(0, 0, 0, ctx.dp(16))
 
         // The word on the ornate title plate of a dialog (dialog_shelf.xml), as wide as the room
-        // between the buttons of a rail would leave it, whatever it says.
+        // between the buttons of a rail would leave it, whatever it says; see [show].
         word.background = PlaqueDrawable(d, ornate = true)
         val top = FrameLayout(ctx).apply {
-            setPadding(ctx.dp(48), 0, ctx.dp(48), 0)
+            setPadding(ctx.dp(RAIL_DP), 0, ctx.dp(RAIL_DP), 0)
             addView(word, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(45), Gravity.CENTER).apply {
-                marginStart = ctx.dp(4)
-                marginEnd = ctx.dp(4)
+                marginStart = ctx.dp(PLATE_MARGIN_DP)
+                marginEnd = ctx.dp(PLATE_MARGIN_DP)
             })
         }
         plank.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(62)))
@@ -80,6 +81,14 @@ class LookUpSheet(ctx: Context) : FrameLayout(ctx) {
         word.text = context.getString(R.string.look_up_title, text)
         word.contentDescription = context.getString(R.string.look_up, text)
         plank.setPadding(left, 0, right, plank.paddingBottom)
+        // On a screen on its side the plate is as wide as it is on the screen upright, not
+        // stretched across all of it: the narrower side of the screen is the width upright. It is
+        // never wider than the room the plank leaves it, as in a window shared with another app.
+        val config = resources.configuration
+        val aside = 2 * (RAIL_DP + PLATE_MARGIN_DP)
+        word.updateLayoutParams {
+            width = minOf(context.dp(config.smallestScreenWidthDp - aside), context.dp(config.screenWidthDp - aside) - left - right).coerceAtLeast(0)
+        }
         apps.removeAllViews()
         choices.forEachIndexed { i, app -> apps.addView(plate(app, onPick), plateParams(i)) }
         plank.animate().cancel()
@@ -133,6 +142,10 @@ class LookUpSheet(ctx: Context) : FrameLayout(ctx) {
     }
 
     private companion object {
+        /** The room left at either side of the title plate, where a rail has its buttons, and the plate's own margin, in dp. */
+        const val RAIL_DP = 48
+        const val PLATE_MARGIN_DP = 4
+
         /**
          * How large the picture on a plate is, and the brass around it on every side, in dp: the
          * same for every app. The screws at the ends stand in that brass, clear of the picture.
