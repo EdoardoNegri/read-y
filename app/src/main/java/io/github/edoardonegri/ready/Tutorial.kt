@@ -36,7 +36,8 @@ import androidx.lifecycle.LifecycleOwner
  * Most steps wait for the reader to do what the board asks, such as opening the menu or holding a
  * book, which the screen tells the tour of ([happened]); touches reach only what is lit, so the
  * reader cannot lose the way. The board has Skip on its left and Next on its right, always: Next
- * goes on without waiting, Skip ends the tour for good, and so does the last step.
+ * goes on without waiting, and the last step ends the tour for good. Skip ends it for good too,
+ * and with it the tours of the other screens, which are not shown after it either.
  *
  * The board is a window of its own, made anew for each step, so that it is always the topmost:
  * over the menu and the dialogs the tour leads to, and over the keyboard.
@@ -143,7 +144,7 @@ class Tutorial private constructor(
             textSize = 14f
             gravity = Gravity.CENTER
             setPadding(act.dp(4), act.dp(8), act.dp(14), act.dp(8))
-            setOnClickListener { finish() }
+            setOnClickListener { finish(skipped = true) }
         }
         // Skip on the left and Next on the right, whatever the step.
         val buttons = LinearLayout(act).apply {
@@ -174,6 +175,11 @@ class Tutorial private constructor(
             if (!done) overlay.postDelayed(watcher, WATCH_MS)
         }
 
+        /** Skipped on another screen the reader was led to, such as the reader's or the settings', this tour ends too. */
+        override fun onResume(owner: LifecycleOwner) {
+            if (!done && tourSeen(act, key)) finish()
+        }
+
         override fun onStop(owner: LifecycleOwner) {
             overlay.removeCallbacks(watcher)
         }
@@ -187,7 +193,7 @@ class Tutorial private constructor(
 
     /** Back ends the tour as Skip does, rather than reaching what is under it. */
     private val back = object : OnBackPressedCallback(true) {
-        override fun handleOnBackPressed() = finish()
+        override fun handleOnBackPressed() = finish(skipped = true)
     }
 
     private fun show() {
@@ -465,7 +471,8 @@ class Tutorial private constructor(
         }
     }
 
-    private fun finish() {
+    /** Ends the tour, and, [skipped], every other tour with it. */
+    private fun finish(skipped: Boolean = false) {
         if (done) return
         done = true
         overlay.removeCallbacks(watcher)
@@ -475,7 +482,7 @@ class Tutorial private constructor(
         board = null
         lowerHalo()
         (overlay.parent as? ViewGroup)?.removeView(overlay)
-        tourDone(act, key)
+        for (tour in if (skipped) ALL else listOf(key)) tourDone(act, tour)
         onFinished()
     }
 
@@ -579,6 +586,9 @@ class Tutorial private constructor(
         const val SHELF = "seen"
         const val READER = "seen_reader"
         const val SETTINGS = "seen_settings"
+
+        /** Every tour, which Skip ends all of. */
+        private val ALL = listOf(SHELF, READER, SETTINGS)
 
         /** How long the screen is given to change after something the reader did, in ms. */
         private const val SETTLE_MS = 350L
