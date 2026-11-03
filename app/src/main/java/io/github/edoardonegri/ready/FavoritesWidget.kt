@@ -16,10 +16,12 @@ import android.graphics.RectF
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.SizeF
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 import androidx.core.content.edit
+import androidx.core.os.BundleCompat
 import androidx.core.graphics.createBitmap
 import androidx.core.os.HandlerCompat
 import java.io.File
@@ -130,6 +132,60 @@ class FavoritesWidget : AppWidgetProvider() {
         }
 
         /**
+         * What widget [id] shows laid out as [shelf]: the case, and in it the shelves with their
+         * books, those of more than [most] bytes of covers left out.
+         */
+        private fun views(ctx: Context, id: Int, shelf: WidgetShelf, notice: Boolean, most: Int): RemoteViews {
+            val views = RemoteViews(ctx.packageName, R.layout.widget_favorites)
+            // The case has the shape of this picture, that of the widget. It says it is larger
+            // than any screen, and is fitted into the widget, which it then fills.
+            views.setImageViewBitmap(
+                R.id.shape,
+                createBitmap(shelf.width, shelf.height, Bitmap.Config.ALPHA_8).apply { density = 4 },
+            )
+            if (Build.VERSION.SDK_INT >= 31) {
+                val shelves = Shelves(ctx, shelf)
+                val items = RemoteViews.RemoteCollectionItems.Builder().setViewTypeCount(1)
+                for (i in 0 until shelves.count) {
+                    items.addItem(i.toLong(), shelves.row(i))
+                    if (shelves.bytes > most) break
+                }
+                views.setRemoteAdapter(R.id.shelves, items.build())
+            } else {
+                val service = Intent(ctx, FavoritesService::class.java)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                service.data = Uri.parse(service.toUri(Intent.URI_INTENT_SCHEME))
+                @Suppress("DEPRECATION")
+                views.setRemoteAdapter(R.id.shelves, service)
+            }
+            views.setEmptyView(R.id.shelves, R.id.empty)
+            views.setViewVisibility(R.id.notice, if (notice) View.VISIBLE else View.GONE)
+
+            // Every place on the shelves opens WidgetOpenActivity, the one thing they can be
+            // told to open: it opens a tapped book where it stands, and leads on to the
+            // choosing of the books. The path of the book is filled in per item, so the
+            // template must be mutable.
+            val mutable = if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
+            views.setPendingIntentTemplate(
+                R.id.shelves,
+                PendingIntent.getActivity(
+                    ctx, 0,
+                    Intent(ctx, WidgetOpenActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
+                    PendingIntent.FLAG_UPDATE_CURRENT or mutable,
+                ),
+            )
+            views.setOnClickPendingIntent(
+                R.id.empty,
+                PendingIntent.getActivity(
+                    ctx, 1, Intent(ctx, WidgetBooksActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                ),
+            )
+            return views
+        }
+
+        /**
          * Sends each widget its whole content. From Android 12 the shelves travel with it, which
          * replaces everything the launcher shows in one step. Asking it to fetch them again from
          * [FavoritesService] instead, the only way before, leaves it showing covers and sizes
@@ -138,54 +194,20 @@ class FavoritesWidget : AppWidgetProvider() {
         private fun show(ctx: Context, ids: IntArray, notice: Boolean = false) {
             val manager = AppWidgetManager.getInstance(ctx)
             for (id in ids) {
-                val views = RemoteViews(ctx.packageName, R.layout.widget_favorites)
-                // The case has the shape of this picture, that of the widget. It says it is larger
-                // than any screen, and is fitted into the widget, which it then fills.
-                val shelf = WidgetShelf(ctx, manager, id)
-                views.setImageViewBitmap(
-                    R.id.shape,
-                    createBitmap(shelf.width, shelf.height, Bitmap.Config.ALPHA_8).apply { density = 4 },
-                )
                 if (Build.VERSION.SDK_INT >= 31) {
-                    val shelves = Shelves(ctx, shelf)
-                    val items = RemoteViews.RemoteCollectionItems.Builder().setViewTypeCount(1)
-                    for (i in 0 until shelves.count) {
-                        items.addItem(i.toLong(), shelves.row(i))
-                        if (shelves.bytes > MAX_BYTES) break
-                    }
-                    views.setRemoteAdapter(R.id.shelves, items.build())
+                    // One for each way the home screen may show the widget, which it picks from as it turns;
+                    // the covers they all show are as many as one alone may.
+                    val shelves = WidgetShelf.bySize(ctx, manager, id)
+                    val each = MAX_BYTES / shelves.size
+                    val one = shelves[null]
+                    manager.updateAppWidget(
+                        id,
+                        if (one != null) views(ctx, id, one, notice, each)
+                        else RemoteViews(shelves.entries.associate { (size, shelf) -> size!! to views(ctx, id, shelf, notice, each) }),
+                    )
                 } else {
-                    val service = Intent(ctx, FavoritesService::class.java)
-                        .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
-                    service.data = Uri.parse(service.toUri(Intent.URI_INTENT_SCHEME))
-                    @Suppress("DEPRECATION")
-                    views.setRemoteAdapter(R.id.shelves, service)
+                    manager.updateAppWidget(id, views(ctx, id, WidgetShelf.upright(ctx, manager, id), notice, MAX_BYTES))
                 }
-                views.setEmptyView(R.id.shelves, R.id.empty)
-                views.setViewVisibility(R.id.notice, if (notice) View.VISIBLE else View.GONE)
-
-                // Every place on the shelves opens WidgetOpenActivity, the one thing they can be
-                // told to open: it opens a tapped book where it stands, and leads on to the
-                // choosing of the books. The path of the book is filled in per item, so the
-                // template must be mutable.
-                val mutable = if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
-                views.setPendingIntentTemplate(
-                    R.id.shelves,
-                    PendingIntent.getActivity(
-                        ctx, 0,
-                        Intent(ctx, WidgetOpenActivity::class.java)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
-                        PendingIntent.FLAG_UPDATE_CURRENT or mutable,
-                    ),
-                )
-                views.setOnClickPendingIntent(
-                    R.id.empty,
-                    PendingIntent.getActivity(
-                        ctx, 1, Intent(ctx, WidgetBooksActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-                    ),
-                )
-                manager.updateAppWidget(id, views)
             }
             @Suppress("DEPRECATION")
             if (Build.VERSION.SDK_INT < 31) manager.notifyAppWidgetViewDataChanged(ids, R.id.shelves)
@@ -194,16 +216,24 @@ class FavoritesWidget : AppWidgetProvider() {
 }
 
 /**
- * How the shelves are laid out in one placed widget. A book has one cell of the home screen to
- * itself and is as tall as that allows, whatever the widget's size: a widget four cells wide holds
- * four places on a shelf, a narrower one fewer (the others move to the shelf below), and every cell
- * of height shows one more shelf, empty if there are no books left for it. The case fills the
- * widget, so a place is as wide and as tall as its share of it; a book is never stretched to
- * fit, and stands at the foot of its place with free room above it if that is taller than it
- * needs (widget_favorites.xml). All sizes are in dp and mirror widget_favorites.xml and
- * widget_row.xml.
+ * How the shelves are laid out in one placed widget, shown [width] by [height] dp, the home screen
+ * [sideways] or not. A book has one cell of the home screen to itself and is as tall as that
+ * allows, whatever the widget's size: a widget four cells wide holds four places on a shelf, a
+ * narrower one fewer (the others move to the shelf below), and every cell of height shows one more
+ * shelf, empty if there are no books left for it. The case fills the widget, so a place is as wide
+ * and as tall as its share of it; a book is never stretched to fit, and stands at the foot of its
+ * place with free room above it if that is taller than it needs (widget_favorites.xml). All sizes
+ * are in dp and mirror widget_favorites.xml and widget_row.xml.
  */
-private class WidgetShelf(ctx: Context, manager: AppWidgetManager, id: Int) {
+private class WidgetShelf(
+    ctx: Context, id: Int, val width: Int, val height: Int, sideways: Boolean,
+    /**
+     * How much smaller than it says the home screen shows the widget, 1 if it is shown as it is.
+     * Samsung's does so (0.83 on a screen set to a denser grid): the sizes it reports are those
+     * of the widget unscaled, and so are the bounds it gives of a place that is tapped.
+     */
+    val shown: Float,
+) {
     val columns: Int
 
     /** Width of one cover; it is half again as tall. */
@@ -215,64 +245,51 @@ private class WidgetShelf(ctx: Context, manager: AppWidgetManager, id: Int) {
     /** Shelves the widget has room for. */
     val shelves: Int
 
-    /** Size of the widget, which the case fills. */
-    val width: Int
-    val height: Int
-
-    /**
-     * How much smaller than it says the home screen shows the widget, 1 if it is shown as it is.
-     * Samsung's does so (0.83 on a screen set to a denser grid): the sizes it reports are those
-     * of the widget unscaled, and so are the bounds it gives of a place that is tapped.
-     */
-    val shown: Float
-
     init {
-        val o = manager.getAppWidgetOptions(id)
-        // The launcher reports the portrait size as min width x max height. The home screen may be
-        // portrait while this app is not, so the size for a landscape home screen is not used.
-        val reportedW = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
-        val reportedH = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)
-        shown = o.getFloat(SHOWN, 1f).takeIf { it in 0.4f..1f } ?: 1f
-        val w = if (reportedW > 0) reportedW else 250
-        val h = if (reportedH > 0) reportedH else 110
-        width = w
-        height = h
-        val between = (w - 2 * POST).coerceAtLeast(1)
+        val between = (width - 2 * POST).coerceAtLeast(1)
 
         // The launcher never says how many cells a size is. A widget is dropped two cells wide
         // and two tall (favorites_widget_info.xml), so the size it has then gives the size of a
-        // cell, and is remembered. Not every size is one of two cells, though: a home screen may
-        // drop the widget otherwise or report another size first, and a widget placed long ago
-        // was dropped at another size. So a size is only taken for one of two cells if it can
-        // be one on this screen, and what was remembered is dropped if it cannot. Until there
-        // is one, the cells are taken to be of the usual size.
-        val screen = ctx.resources.configuration.smallestScreenWidthDp
-        fun twoWide(inner: Int) = (inner + 2 * POST) / screen.coerceAtLeast(1).toFloat() in 0.28f..0.52f
-        fun twoTall(height: Int) = height in 130..270
+        // cell, and is remembered, for a home screen upright and for one sideways. Not every size
+        // is one of two cells, though: a home screen may drop the widget otherwise or report
+        // another size first, and a widget placed long ago was dropped at another size. So a size
+        // is only taken for one of two cells if it can be one on this screen, and what was
+        // remembered is dropped if it cannot. Until there is one, the cells are taken to be of
+        // the usual size. A tablet has more cells across than a phone, each a smaller part of
+        // the screen, and taller ones.
+        val config = ctx.resources.configuration
+        val tablet = config.smallestScreenWidthDp >= TABLET
+        val long = maxOf(config.screenWidthDp, config.screenHeightDp)
+        val screenW = (if (sideways) long else config.smallestScreenWidthDp).coerceAtLeast(1)
+        val screenH = (if (sideways) config.smallestScreenWidthDp else long).coerceAtLeast(1)
+        val wide = if (tablet) 0.17f..0.42f else 0.28f..0.52f
+        val tall = if (tablet) 150..420 else if (sideways) 90..270 else 130..270
+        fun twoWide(inner: Int) = (inner + 2 * POST) / screenW.toFloat() in wide
+        fun twoTall(height: Int) = height in tall
         val prefs = prefs(ctx)
-        var two = prefs.getInt(TWO + id, 0)
-        var pair = prefs.getInt(PAIR + id, 0)
+        val side = if (sideways) SIDEWAYS else ""
+        var two = prefs.getInt(TWO + side + id, 0)
+        var pair = prefs.getInt(PAIR + side + id, 0)
         if (!twoTall(two)) {
-            two = if (reportedH > 0 && twoTall(h)) h else 0
-            prefs.edit { if (two > 0) putInt(TWO + id, two) else remove(TWO + id) }
+            two = if (twoTall(height)) height else 0
+            prefs.edit { if (two > 0) putInt(TWO + side + id, two) else remove(TWO + side + id) }
         }
         if (!twoWide(pair)) {
-            pair = if (reportedW > 0 && twoWide(between)) between else 0
-            prefs.edit { if (pair > 0) putInt(PAIR + id, pair) else remove(PAIR + id).remove(FOUR + id) }
+            pair = if (twoWide(between)) between else 0
+            prefs.edit { if (pair > 0) putInt(PAIR + side + id, pair) else remove(PAIR + side + id).remove(FOUR + id) }
         }
-        if (two == 0) two = 2 * USUAL_CELL_H
-        if (pair == 0) pair = (screen * 0.45f).toInt() - 2 * POST
+        if (two == 0) two = if (tablet) (screenH * 0.25f).toInt() else 2 * USUAL_CELL_H
+        if (pair == 0) pair = (screenW * if (tablet) 0.3f else 0.45f).toInt() - 2 * POST
         val cellW = pair / 2f
         // One shelf per cell of height.
-        shelves = (h / (two / 2f)).roundToInt().coerceAtLeast(1)
+        shelves = (height / (two / 2f)).roundToInt().coerceAtLeast(1)
         // A cell less is a little less than a place less, because of the gaps between cells.
         columns = (between / cellW + 0.3f).toInt().coerceIn(1, MAX_COLUMNS)
         // The shelves share the height of the case exactly, so that it ends on the plank of the
         // last one it shows, and the books are as tall as that leaves room for.
-        placeH = (h.toFloat() / shelves - TOP - PLANK).coerceAtLeast(18f)
+        placeH = (height.toFloat() / shelves - TOP - PLANK).coerceAtLeast(18f)
         // The posts take their share of the width, so the book stays narrow enough to stand in its place.
-        val inner = (w - 2 * POST).coerceAtLeast(1)
-        coverW = minOf(placeH / 1.5f, inner.toFloat() / columns - 2 * SIDE).coerceAtLeast(12f)
+        coverW = minOf(placeH / 1.5f, between.toFloat() / columns - 2 * SIDE).coerceAtLeast(12f)
     }
 
     companion object {
@@ -287,23 +304,67 @@ private class WidgetShelf(ctx: Context, manager: AppWidgetManager, id: Int) {
         /** About the height of a cell of a home screen, for as long as that of this one is not known. */
         private const val USUAL_CELL_H = 105
 
+        /** The narrowest side of a tablet's screen, in dp. */
+        private const val TABLET = 600
+
         /** The number of places widget_row.xml has. */
         const val MAX_COLUMNS = 8
         private const val TWO = "row"
         private const val FOUR = "four"
         private const val PAIR = "pair"
 
+        /** Put between the name of what is remembered for a widget and its id, for a home screen sideways. */
+        private const val SIDEWAYS = "w"
+
         private fun prefs(ctx: Context) = ctx.prefs(Prefs.WIDGET)
 
+        private fun shown(o: Bundle) = o.getFloat(SHOWN, 1f).takeIf { it in 0.4f..1f } ?: 1f
+
+        /**
+         * Widget [id] laid out as the home screen shows it upright, the size the launcher reports
+         * as min width x max height.
+         */
+        fun upright(ctx: Context, manager: AppWidgetManager, id: Int): WidgetShelf {
+            val o = manager.getAppWidgetOptions(id)
+            val w = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH).takeIf { it > 0 } ?: 250
+            val h = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT).takeIf { it > 0 } ?: 110
+            return WidgetShelf(ctx, id, w, h, sideways = false, shown(o))
+        }
+
+        /**
+         * Widget [id] laid out for each size the home screen may show it at, by that size, for it
+         * to pick from as it turns. That is on a tablet, whose home screen turns with it; a phone's
+         * mostly stays upright while this app may not, and its widget is laid out [upright] alone,
+         * under null.
+         */
+        fun bySize(ctx: Context, manager: AppWidgetManager, id: Int): Map<SizeF?, WidgetShelf> {
+            val o = manager.getAppWidgetOptions(id)
+            val sizes = BundleCompat.getParcelableArrayList(o, AppWidgetManager.OPTION_APPWIDGET_SIZES, SizeF::class.java)
+                .orEmpty().filter { it.width > 0 && it.height > 0 }.distinct()
+            if (ctx.resources.configuration.smallestScreenWidthDp < TABLET || sizes.size < 2) {
+                return mapOf(null to upright(ctx, manager, id))
+            }
+            // The narrowest is the upright one; a home screen sideways shows the widget wider.
+            val narrowest = sizes.minOf { it.width }
+            return sizes.associate { size ->
+                size to WidgetShelf(ctx, id, size.width.roundToInt(), size.height.roundToInt(), sideways = size.width > narrowest, shown(o))
+            }
+        }
+
         fun forget(ctx: Context, ids: IntArray) {
-            prefs(ctx).edit { for (id in ids) remove(TWO + id).remove(FOUR + id).remove(PAIR + id) }
+            prefs(ctx).edit {
+                for (id in ids) {
+                    remove(TWO + id).remove(FOUR + id).remove(PAIR + id)
+                    remove(TWO + SIDEWAYS + id).remove(PAIR + SIDEWAYS + id)
+                }
+            }
         }
     }
 }
 
 /** The shelves of one placed widget as they are right now, with its books standing on them. Blocking. */
 private class Shelves(private val ctx: Context, private val shelf: WidgetShelf) {
-    constructor(ctx: Context, id: Int) : this(ctx, WidgetShelf(ctx, AppWidgetManager.getInstance(ctx), id))
+    constructor(ctx: Context, id: Int) : this(ctx, WidgetShelf.upright(ctx, AppWidgetManager.getInstance(ctx), id))
 
     private val access = Library.hasAccess()
     private val items = if (access) Library.widgetBooks(ctx) else emptyList()
