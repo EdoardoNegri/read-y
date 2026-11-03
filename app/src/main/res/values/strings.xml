@@ -113,6 +113,19 @@ Tap your book again.</string>
         <item quantity="one">That book was already on your shelf, so it was not added again.</item>
         <item quantity="other">%1$d books were already on your shelf, so they were not added again.</item>
     </plurals>
+    <!-- Several books shared with Read-y at once (ImportActivity.importSeveral). -->
+    <plurals name="shared_added">
+        <item quantity="one">1 book was added to your shelf.</item>
+        <item quantity="other">%1$d books were added to your shelf.</item>
+    </plurals>
+    <plurals name="shared_unreadable">
+        <item quantity="one">1 of the %2$d files could not be opened as a book. The others were added.</item>
+        <item quantity="other">%1$d of the %2$d files could not be opened as books. The others were added.</item>
+    </plurals>
+    <plurals name="shared_kept">
+        <item quantity="one">Added. 1 original could not be removed, so it is still there too.</item>
+        <item quantity="other">Added. %1$d originals could not be removed, so they are still there too.</item>
+    </plurals>
     <string name="cannot_import">That file is not a book Read-y can open (EPUB, PDF, MOBI, CBZ or TXT), or it could not be read.</string>
     <string name="add_books">Add books</string>
     <!-- Asked before the books are picked: moved, they are kept only on the shelf; copied, they stay where they were too. -->

@@ -9,7 +9,8 @@ import java.io.File
 
 /**
  * Takes a book handed over by another app ("Open with" or "Share"): moves it onto the first
- * shelf of the library and opens it. It is moved, not copied, so that the book is kept only
+ * shelf of the library and opens it. Several shared at once are all moved there, and the shelf is
+ * shown ([importSeveral]). It is moved, not copied, so that the book is kept only
  * once. Where the other app does not let the file be deleted, the reader is asked to pick it in
  * Android's own picker, which does. It shows nothing of its own but that question.
  */
@@ -31,15 +32,17 @@ class ImportActivity : Activity() {
             originalSize = savedInstanceState.getLong(KEY_SIZE, -1)
             return
         }
-        val uri = intent.data ?: shared()
-        if (uri == null || !Library.hasAccess()) {
+        val uris = intent.data?.let(::listOf) ?: shared()
+        if (uris.isEmpty() || !Library.hasAccess()) {
             // Without access to the library folder the book cannot be kept; the shelf asks for it.
-            if (uri != null) toast(R.string.import_needs_access, long = true)
+            if (uris.isNotEmpty()) toast(R.string.import_needs_access, long = true)
             startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             finish()
             return
         }
-        val type = intent.type
+        if (uris.size > 1) return importSeveral(uris)
+        val uri = uris.single()
+        val type = if (intent.action == Intent.ACTION_SEND_MULTIPLE) contentResolver.getType(uri) else intent.type
         Library.io.execute {
             val (name, size) = Store.describe(uri)
             val imported = try {
@@ -64,6 +67,51 @@ class ImportActivity : Activity() {
                     }
                     else -> open(imported.book)
                 }
+            }
+        }
+    }
+
+    /**
+     * Takes several books shared at once, [uris], as one is taken, onto the first shelf, and shows
+     * the shelf rather than opening any of them. The files they came from go where the app they
+     * came from lets them; where it does not, the reader is told, rather than asked about each.
+     */
+    private fun importSeveral(uris: List<Uri>) {
+        val app = applicationContext
+        Library.io.execute {
+            var added = 0
+            var duplicates = 0
+            var unreadable = 0
+            var kept = 0
+            for (uri in uris) {
+                val imported = try {
+                    BookImport.import(app, uri, app.contentResolver.getType(uri))
+                } catch (e: Exception) {
+                    null
+                }
+                if (imported == null) unreadable++ else {
+                    if (imported.duplicate) duplicates++ else added++
+                    if (imported.moved && !Store.removeOriginal(uri)) kept++
+                }
+            }
+            runOnUiThread {
+                // A toast shows two lines at most: what most needs telling is told.
+                val res = app.resources
+                app.toast(
+                    when {
+                        unreadable == uris.size -> res.getString(R.string.cannot_import)
+                        unreadable > 0 -> res.getQuantityString(R.plurals.shared_unreadable, unreadable, unreadable, uris.size)
+                        kept > 0 -> res.getQuantityString(R.plurals.shared_kept, kept, kept)
+                        duplicates > 0 -> res.getQuantityString(R.plurals.already_here, duplicates, duplicates)
+                        else -> res.getQuantityString(R.plurals.shared_added, added, added)
+                    },
+                    long = true,
+                )
+                startActivity(
+                    Intent(this, MainActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                )
+                finish()
             }
         }
     }
@@ -132,9 +180,15 @@ class ImportActivity : Activity() {
         finish()
     }
 
-    private fun shared(): Uri? =
-        if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-        else @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
+    /** The books shared: one, or with "Share" on several at once, all of them. */
+    private fun shared(): List<Uri> = when {
+        intent.action == Intent.ACTION_SEND_MULTIPLE -> (
+            if (Build.VERSION.SDK_INT >= 33) intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            else @Suppress("DEPRECATION") intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
+            ).orEmpty().filterNotNull()
+        Build.VERSION.SDK_INT >= 33 -> listOfNotNull(intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java))
+        else -> listOfNotNull(@Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM))
+    }
 
     private companion object {
         const val PICK = 1
