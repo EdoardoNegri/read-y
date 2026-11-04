@@ -933,7 +933,9 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
                 canvas.drawBitmap(menuPicture, menuX, menuY, picturePaint)
             }
             if (plaqueAt.isEmpty) return
-            // The plaque, as large as it has grown, with the name of the book written as large on it.
+            // The plaque, as large as it has grown, with the name of the book written as large on it,
+            // and as far become the title plate of the menu: it never flies as a plate of neither.
+            plate.ornateness = if (menu != null) e else 0f
             plate.setBounds(plaqueAt.left.toInt(), plaqueAt.top.toInt(), plaqueAt.right.toInt(), plaqueAt.bottom.toInt())
             plate.draw(canvas)
             words.textSize = if (menu != null) lerp(row.plaqueText, menu.titleText, e) else row.plaqueText

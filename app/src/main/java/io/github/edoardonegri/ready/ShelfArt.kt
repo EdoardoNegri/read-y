@@ -34,7 +34,14 @@ import kotlin.math.sin
  * follows them. A [favorite] has stars and scooped corners. A [finished]
  * book has the plate it would have anyway, of bronze instead of brass.
  */
-class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) : Drawable() {
+class PlaqueDrawable(private val d: Float, ornate: Boolean = false) : Drawable() {
+
+    /**
+     * How far the plate is the [ornate] one, from 0, the plaque on the shelf, to 1: the plaque of a
+     * book that rises from its row into the reader's menu becomes the plate the menu names it on
+     * as it goes, its corners scooped out and its screws or stars moving in.
+     */
+    var ornateness by changes(if (ornate) 1f else 0f, ::invalidateSelf)
 
     /**
      * The plate of a favorite book: its corners are scooped out like the ornate plate's, only
@@ -107,7 +114,7 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
     }
 
     override fun draw(c: Canvas) {
-        if (ornate || favorite) {
+        if (ornateness > 0f || favorite) {
             drawShaped(c)
             return
         }
@@ -184,7 +191,8 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
     }
 
     private fun drawShaped(c: Canvas) {
-        notch = (if (ornate) NOTCH_DP else FAVORITE_NOTCH_DP) * d
+        val o = ornateness.coerceIn(0f, 1f)
+        notch = lerp(if (favorite) FAVORITE_NOTCH_DP else 0f, NOTCH_DP, o) * d
         val b = bounds
         val shadow = SHADOW_DP * d
         val left = b.left.toFloat()
@@ -225,11 +233,11 @@ class PlaqueDrawable(private val d: Float, private val ornate: Boolean = false) 
         c.drawPath(path, paint)
 
         // An ornate plate is held by screws, or by stars where it names a favorite.
+        val x = lerp(if (favorite) STAR_X_DP else SCREW_X_DP, ORNATE_SCREW_X_DP, o) * d
         if (!favorite) {
-            screw(c, left + ORNATE_SCREW_X_DP * d, cy, 0.6f)
-            screw(c, right - ORNATE_SCREW_X_DP * d, cy, 2.3f)
+            screw(c, left + x, cy, 0.6f)
+            screw(c, right - x, cy, 2.3f)
         } else {
-            val x = (if (ornate) ORNATE_SCREW_X_DP else STAR_X_DP) * d
             star(c, left + x, cy)
             star(c, right - x, cy)
         }
