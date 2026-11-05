@@ -13,7 +13,7 @@ android {
         applicationId = "com.edoardonegri.readY"
         minSdk = 26
         targetSdk = 37
-        versionCode = 6
+        versionCode = 8
         versionName = "1.0"
     }
 
