@@ -16,6 +16,7 @@ import android.graphics.drawable.BitmapDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
@@ -1140,23 +1141,13 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
          * Opens the book [file], whose cover is shown by [from], at once, while the reader starts
          * behind it ([handoff]): on the page as the book was last left, if that is kept and looks
          * the same ([look]), else on paper that the page the reader sets out meanwhile comes onto
-         * as soon as the reader has pictured it. It opens only once the reader has set out its page,
-         * or [patience] milliseconds have gone by, if that is given: for a reader that is slow to
-         * start, see [Handoff.whenSetOut].
+         * as soon as the reader has pictured it.
          */
         fun open(
             from: View, paperColor: Int, file: File, look: String, handoff: Handoff, grown: Boolean = false, known: EndMenu? = null,
-            patience: Long = 0L,
         ) {
             // A cover read for the book opened before is not this one's; the cover for this one is asked for after this.
             thread.post { sharp = null }
-            if (patience > 0L) handoff.whenSetOut(patience) { start(from, paperColor, file, look, handoff, grown, known) }
-            else start(from, paperColor, file, look, handoff, grown, known)
-        }
-
-        private fun start(
-            from: View, paperColor: Int, file: File, look: String, handoff: Handoff, grown: Boolean, known: EndMenu?,
-        ) {
             val screen = act.window.decorView
             if (grown && known != null && known.screenW == screen.width && known.screenH == screen.height) {
                 // A cover that only grows raises the menu of the reader as it does. Where the menu is
@@ -1194,14 +1185,10 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
          * Slides the page of the book [file] in from the right, as [BookOpening.slideIn] does, while the
          * reader starts behind it ([handoff]): the page as the book was last left, if that is kept and
          * looks the same ([look]), else paper that the reader's page comes onto once it is pictured.
-         * Like [open], it waits for the reader to set out its page, up to [patience] milliseconds, if that is given.
          */
-        fun slide(paperColor: Int, file: File, look: String, handoff: Handoff, patience: Long = 0L) {
-            val start = {
-                play(handoff::opened) { o, done -> o.slideIn(paperColor, kept(file, look), done) }
-                printWhenPictured(handoff)
-            }
-            if (patience > 0L) handoff.whenSetOut(patience, start) else start()
+        fun slide(paperColor: Int, file: File, look: String, handoff: Handoff) {
+            play(handoff::opened) { o, done -> o.slideIn(paperColor, kept(file, look), done) }
+            printWhenPictured(handoff)
         }
 
         /**
@@ -1212,39 +1199,72 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         private fun play(then: () -> Unit, start: (BookOpening, () -> Unit) -> Unit) {
             val token = act.window.decorView.windowToken ?: return then()
             thread.post {
-                remove()
-                pending = then
-                val params = WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                        WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
-                    PixelFormat.TRANSLUCENT,
-                ).apply {
-                    this.token = token
-                    windowAnimations = 0
-                    if (Build.VERSION.SDK_INT >= 30) {
-                        layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-                        // Over the whole screen, the bars included, as the reader that takes over is:
-                        // kept clear of them, all of it would stand a little higher than in the reader.
-                        fitInsetsTypes = 0
-                    }
+                // In the window made ready for it, if one was, which has shown nothing yet.
+                if (!spare) {
+                    remove()
+                    make(token)
                 }
+                spare = false
+                pending = then
+                val o = opening ?: return@post remove()
                 try {
-                    val o = BookOpening(act) {
-                        act.windowManager.addView(it, params)
-                        shown = it
-                    }
-                    opening = o
                     start(o) {
                         pending = null
                         main.post(then)
                     }
                 } catch (e: Exception) {
-                    // The shelf has no window to put one over any more.
                     remove()
                 }
+            }
+        }
+
+        /**
+         * Whether the window there is was only made ready for a book, see [prepare], and has shown
+         * none yet; only touched on the opening thread.
+         */
+        private var spare = false
+
+        /**
+         * Makes the window a book is to open in ahead of it, with nothing in it to see: a book
+         * that waits before it opens, as the one tapped on the widget does for its page, then
+         * opens at once, rather than after its window is made and has drawn for the first time.
+         */
+        fun prepare() {
+            val token = act.window.decorView.windowToken ?: return
+            thread.post {
+                if (opening != null) return@post
+                make(token)
+                spare = opening != null
+            }
+        }
+
+        /** Makes the window books open in, over the window of the activity that [token] is of, and the opening in it; on the opening thread. */
+        private fun make(token: IBinder) {
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                PixelFormat.TRANSLUCENT,
+            ).apply {
+                this.token = token
+                windowAnimations = 0
+                if (Build.VERSION.SDK_INT >= 30) {
+                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                    // Over the whole screen, the bars included, as the reader that takes over is:
+                    // kept clear of them, all of it would stand a little higher than in the reader.
+                    fitInsetsTypes = 0
+                }
+            }
+            try {
+                opening = BookOpening(act) {
+                    act.windowManager.addView(it, params)
+                    shown = it
+                }
+            } catch (e: Exception) {
+                // The shelf has no window to put one over any more.
+                remove()
             }
         }
 
@@ -1261,6 +1281,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         }
 
         private fun remove() {
+            spare = false
             pending?.let {
                 pending = null
                 main.post(it)
@@ -1314,15 +1335,37 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
             if (pictured) then(print) else onPicture = then
         }
 
+        /** Whether the book has begun to open, and what the reader does then; see [begun]. */
+        private var hasBegun = false
+        private var onBegin: (() -> Unit)? = null
+
+        /**
+         * The book begins to open now, having waited for its page ([whenSetOut]): what the reader
+         * kept for then, as nothing is to change on the screen before, is done; see [whenBegun].
+         */
+        fun begun() {
+            if (hasBegun) return
+            hasBegun = true
+            onBegin?.let {
+                onBegin = null
+                it()
+            }
+        }
+
+        /** Calls [then] once the book begins to open, see [begun]; at once if it has. */
+        fun whenBegun(then: () -> Unit) {
+            if (hasBegun) then() else onBegin = then
+        }
+
         /** What [whenSetOut] waits with, until the reader has pictured its page. */
         private var settled: (() -> Unit)? = null
 
         /**
          * Calls [then], once, when the reader has set out its page and pictured it, see [pictured];
-         * at once if it has, and after [wait] milliseconds if it has not by then. For a reader that
-         * is slow to start, as in an app that has to start first: a book opened meanwhile moves
-         * unevenly, as everything the reader does for its page is done as it opens, and the page
-         * and the menu would come onto it only once it lay open, all at once.
+         * at once if it has, and after [wait] milliseconds if it has not by then. For a book that
+         * opens only onto its page, as one tapped on the widget does: opened while the reader still
+         * starts, it moves unevenly, as everything the reader does for its page is done as it opens,
+         * and the page and the menu would come onto it only once it lay open, all at once.
          */
         fun whenSetOut(wait: Long, then: () -> Unit) {
             if (pictured) return then()

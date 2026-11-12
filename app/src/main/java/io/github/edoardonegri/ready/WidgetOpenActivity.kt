@@ -1,12 +1,11 @@
 package io.github.edoardonegri.ready
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.content.Intent
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
-import android.os.Process
-import android.os.SystemClock
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -19,7 +18,9 @@ import kotlin.math.roundToInt
 /**
  * What a tap on the home-screen widget opens. It is see-through and lies over the home screen: a
  * tapped book opens right there, where it stands on the widget, as a book does on the bookshelf
- * ([BookOpening]), and the reader takes over once its page fills the screen. Left again, the
+ * ([BookOpening]), and the reader takes over once its page fills the screen. The reader is started
+ * before anything else, and the book opens once it has set out its page; nothing shows until
+ * then. Left again, the
  * reader goes to the bookshelf, to the shelf the book stands on, where the book is closed.
  * The place for choosing the books leads on to [WidgetBooksActivity]. The shortcut on the app's
  * icon that goes on with the book read last (ContinueShortcut) opens it here too, its page sliding
@@ -29,16 +30,8 @@ class WidgetOpenActivity : ComponentActivity() {
 
     private var done = false
 
-    /**
-     * Whether the app was started by this very tap, which it was if its process is as young as that:
-     * nothing is warm yet, and the reader that starts behind the opening book is much slower to set
-     * out its page than it is anywhere else; see [openBook].
-     */
-    private var cold = false
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        cold = SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime() < COLD_MS
         // Made anew after it handed the book to the reader, it has nothing more to do: starting the
         // reader again would take the one there away and open the book anew.
         if (savedInstanceState?.getBoolean(DONE) == true) {
@@ -73,18 +66,56 @@ class WidgetOpenActivity : ComponentActivity() {
 
     /** Slides the page of [book] in from the right, over the home screen, once the window is there to show it in. */
     private fun slide(book: File) {
+        val handoff = readBehind(book)
+        window.decorView.post {
+            if (isDestroyed) return@post
+            readyWindow(handoff)
+            openBook(book, null, handoff)
+        }
+    }
+
+    /**
+     * Starts the reader of [book] before anything else is done here, unseen over this window, where
+     * the book opens once the reader has set out its page ([openBook]): the book is read, the reader
+     * made and its page set out while the window settles and the cover is fetched, rather than after.
+     * Null where the reader cannot start unseen, before Android 11: it starts once the book lies open.
+     */
+    private fun readBehind(book: File): BookOpening.Handoff? {
         BookPrep.prepare(book)
-        if (Library.isFlowing(book)) window.decorView.post { FlowEngine.prepare(this) }
-        window.decorView.post { if (!isDestroyed) openBook(book, null) }
+        if (Build.VERSION.SDK_INT < 30) {
+            if (Library.isFlowing(book)) window.decorView.post { FlowEngine.prepare(this) }
+            return null
+        }
+        leaveShelf()
+        val handoff = BookOpening.Handoff()
+        BookOpening.handoff = handoff
+        read(book, handoff)
+        // The reader's web view is made while the system gets the reader going.
+        if (Library.isFlowing(book)) FlowEngine.prepare(this)
+        return handoff
+    }
+
+    /**
+     * Takes away whatever the app still has open elsewhere, the bookshelf or a book, before the
+     * reader starts in its place. Started in the task of a bookshelf that is still there, the
+     * reader, unseen, would have Android show the picture it keeps of that task until the reader
+     * has drawn: the bookshelf, over the home screen, for a moment, before the book opens.
+     */
+    private fun leaveShelf() {
+        if (Build.VERSION.SDK_INT < 29) return
+        try {
+            for (task in getSystemService(ActivityManager::class.java).appTasks) {
+                val id = task.taskInfo?.taskId ?: continue
+                if (id != taskId) task.finishAndRemoveTask()
+            }
+        } catch (e: Exception) {
+            // It stays, and may show for a moment.
+        }
     }
 
     /** Opens [book] from [at], the place on the screen its picture on the widget has. */
     private fun open(book: File, at: Rect) {
-        // The book opens only once the window has settled, which takes the better part of a
-        // second; the reader's web view is made and the book is read meanwhile, so that the
-        // reader has less to do, and its page shows sooner, once the book lies open.
-        BookPrep.prepare(book)
-        if (Library.isFlowing(book)) window.decorView.post { FlowEngine.prepare(this) }
+        val handoff = readBehind(book)
         val root = FrameLayout(this)
         setContentView(root)
         // The book as the widget shows it: standing at the foot of its place, half again as tall as wide.
@@ -110,7 +141,8 @@ class WidgetOpenActivity : ComponentActivity() {
                     root.getLocationOnScreen(origin)
                     cover.translationX = (at.centerX() - w / 2 - origin[0]).toFloat()
                     cover.translationY = (at.bottom - h - origin[1]).toFloat()
-                    whenInPlace { openBook(book, cover) }
+                    readyWindow(handoff)
+                    whenInPlace { openBook(book, cover, handoff) }
                 }
             }
         }
@@ -145,56 +177,61 @@ class WidgetOpenActivity : ComponentActivity() {
     }
 
     /**
-     * Opens the book whose cover [cover] shows, on the paper the reader shows, and hands it to the
-     * reader; without a cover, its page slides in from the right.
+     * Opens the book whose cover [cover] shows, on the paper the reader shows; without a cover, its
+     * page slides in from the right. The reader started behind it ([handoff], see [readBehind])
+     * shows itself once the book is open; without one, the book is handed to the reader then.
      */
-    private fun openBook(book: File, cover: View?) {
+    private fun openBook(book: File, cover: View?, handoff: BookOpening.Handoff?) {
+        if (handoff == null) return openThenRead(book, cover)
+        // The book opens once the reader has set out its page, which is all that is waited for: it
+        // opens onto that page, the menu of the reader there to come onto it, and evenly, with
+        // nothing left for the reader to do meanwhile. Nothing shows until then: the book stands
+        // on the widget as it did.
+        handoff.whenSetOut(SET_OUT_WAIT_MS) {
+            // Left meanwhile, there is no book to open: the reader shows itself as it is.
+            if (closing) return@whenSetOut handoff.opened()
+            handoff.begun()
+            val settings = ReaderSettings(this)
+            val paper = settings.lit(settings.palette.bg)
+            // The book opens in a window of its own, which the reader over it does not hold up.
+            val opening = detached ?: BookOpening.Detached(this).also { detached = it }
+            if (cover == null) return@whenSetOut opening.slide(paper, book, settings.look, handoff)
+            // A book read to its end opens on its cover, which only grows, as it does on the bookshelf.
+            // Where the menu stands over the cover is known from the last time the book was shown there.
+            val grown = !settings.vertical && Library.isFinished(this, book)
+            opening.open(cover, paper, book, settings.look, handoff, grown, if (grown) Library.endMenu(this, book) else null)
+            if (grown) Library.sharpCover(this, book, resources.displayMetrics.widthPixels, opening::sharpen)
+        }
+    }
+
+    /** Opens the book in this window, and starts its reader once it lies open: where the reader cannot start unseen. */
+    private fun openThenRead(book: File, cover: View?) {
         val settings = ReaderSettings(this)
         val paper = settings.lit(settings.palette.bg)
-        // A book read to its end opens on its cover, which only grows, as it does on the bookshelf.
-        val grown = cover != null && !settings.vertical && Library.isFinished(this, book)
-        val sharpWidth = resources.displayMetrics.widthPixels
-        if (Build.VERSION.SDK_INT < 30) {
-            val opening = BookOpening(this)
-            if (cover == null) {
-                opening.slideIn(paper, BookOpening.kept(book, settings.look)) { read(book) }
-            } else {
-                opening.open(cover, paper, if (grown) null else BookOpening.kept(book, settings.look), grown) { read(book) }
-                if (grown) Library.sharpCover(this, book, sharpWidth) { runOnUiThread { opening.sharpen(it) } }
-            }
-            return
-        }
-        // The reader starts at once, unseen over the book opening, and sets out its page
-        // meanwhile; it shows itself once the book is open (BookOpening.Handoff), as it does
-        // from the bookshelf. The book opens in a window of its own, which the reader starting
-        // does not hold up.
-        val handoff = BookOpening.Handoff()
-        BookOpening.handoff = handoff
-        read(book, handoff)
-        val opening = BookOpening.Detached(this).also { detached = it }
-        // Started by this tap, the app has the reader to make from nothing, which takes it seconds
-        // rather than a moment: the book opening meanwhile would stutter, and be open long before the
-        // page and the menu of the reader are there to come onto it, which then jump into it one
-        // after the other. It opens once the reader has set out its page, which is all that is
-        // waited for; the book stands on the widget until then, as it does while the window settles.
-        val patience = if (cold) COLD_WAIT_MS else 0L
-        if (cover == null) {
-            opening.slide(paper, book, settings.look, handoff, patience)
-        } else {
-            // Where the menu stands over the cover is known from the last time the book was shown there.
-            opening.open(cover, paper, book, settings.look, handoff, grown, if (grown) Library.endMenu(this, book) else null, patience)
-            if (grown) Library.sharpCover(this, book, sharpWidth, opening::sharpen)
-        }
+        val opening = BookOpening(this)
+        if (cover == null) return opening.slideIn(paper, BookOpening.kept(book, settings.look)) { read(book) }
+        val grown = !settings.vertical && Library.isFinished(this, book)
+        opening.open(cover, paper, if (grown) null else BookOpening.kept(book, settings.look), grown) { read(book) }
+        if (grown) Library.sharpCover(this, book, resources.displayMetrics.widthPixels) { runOnUiThread { opening.sharpen(it) } }
     }
 
     /** The book opening while the reader starts over it, see [openBook]. */
     private var detached: BookOpening.Detached? = null
 
     /**
+     * Makes the window the book opens in while it waits for its page, so that it opens the moment
+     * the page is there; with a reader started behind it ([handoff]) only, as the book otherwise
+     * opens in this window.
+     */
+    private fun readyWindow(handoff: BookOpening.Handoff?) {
+        if (handoff != null && detached == null) detached = BookOpening.Detached(this).also { it.prepare() }
+    }
+
+    /**
      * Hands [book] to the reader, in the bookshelf's task, which only holds the reader from then
      * on: Android shows a picture of whatever was open there as the task comes to the front, until
      * the reader has drawn its page, and with [handoff] the reader starts unseen over the book
-     * opening, see [openBook]. Leaving the book leads to the bookshelf all the same.
+     * opening, see [readBehind]. Leaving the book leads to the bookshelf all the same.
      */
     private fun read(book: File, handoff: BookOpening.Handoff? = null) {
         // Not if the opening was left before the book lay open.
@@ -238,14 +275,12 @@ class WidgetOpenActivity : ComponentActivity() {
          */
         private const val ARRIVAL_MS = 1500L
 
-        /** How young the process is that this tap started, as long as it is taken to have been started by it: far more than it takes to get here. */
-        private const val COLD_MS = 5_000L
-
         /**
-         * The longest a book started cold waits for its reader to set out its page before it opens
-         * all the same: the reader gives up on its page after 2.5 s itself, once it has started.
+         * The longest a book waits for its reader to set out its page before it opens all the
+         * same: the reader gives up on its page after 2.5 s itself, once it has started.
          */
-        private const val COLD_WAIT_MS = 4_000L
+        private const val SET_OUT_WAIT_MS = 4_000L
+
 
         /** Whether the book was handed to the reader already, kept for the activity made anew. */
         private const val DONE = "done"

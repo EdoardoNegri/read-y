@@ -198,6 +198,12 @@ open class ReaderActivity : ComponentActivity(), ReaderHost, GestureFrame.Listen
         }
         // A row of the plank that comes to another height may come to be beside the camera, or not.
         plank.addOnLayoutChangeListener { _, _, t, _, b, _, ot, _, ob -> if (t != ot || b != ob) clearCamera() }
+        // Behind a book that opens on the home screen only once its page is set out, the bars of
+        // the phone stay until the book begins to open: nothing changes on the screen before.
+        if (handoff != null && fromWidget) {
+            barsLater = true
+            handoff.whenBegun(::hideBarsNow)
+        }
         immersive()
 
         file = File(intent.getStringExtra(EXTRA_PATH) ?: "")
@@ -794,6 +800,7 @@ open class ReaderActivity : ComponentActivity(), ReaderHost, GestureFrame.Listen
     private fun reveal() {
         if (!hidden || isFinishing) return
         hidden = false
+        hideBarsNow()
         if (turnLater) {
             // The page the book opened on stands in front, as it was read, while the screen turns.
             val print = turnedPrint
@@ -929,8 +936,19 @@ open class ReaderActivity : ComponentActivity(), ReaderHost, GestureFrame.Listen
     private var fromShelf = false
     private var fromWidget = false
 
+    /** Whether the bars of the phone are hidden only once the book begins to open on the home screen, see onCreate. */
+    private var barsLater = false
+
+    /** The book begins to open, or the reader shows itself: the bars kept until then ([barsLater]) go. */
+    private fun hideBarsNow() {
+        if (!barsLater) return
+        barsLater = false
+        if (!isFinishing) immersive()
+    }
+
     private fun immersive() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        if (barsLater) return
         WindowInsetsControllerCompat(window, window.decorView).apply {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             hide(WindowInsetsCompat.Type.systemBars())
