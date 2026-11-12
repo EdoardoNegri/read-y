@@ -163,6 +163,14 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
     private var printed = false
 
     /**
+     * Whether the book is placed and posed, which it is only once its layer has been laid out. A
+     * print that comes before is kept, [early], and laid on the page then (see [print]): the
+     * reader of a book opened where the app is cold may have pictured its page by then already.
+     */
+    private var placed = false
+    private var early: Bitmap? = null
+
+    /**
      * Whether the book is only enlarged out of its place on the shelf, its cover as it is, without
      * opening: it ends as the cover that ends a book read to its end, over the whole screen. The
      * book is as large as the screen, and is made as small, [growScale], as the cover on the shelf;
@@ -257,7 +265,17 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
             if (!place(spot)) return@sized then()
             pose(0f)
             show()
+            placedNow()
             run(0f, 1f, then)
+        }
+    }
+
+    /** The book is placed and posed: a print that was pictured before comes onto it now. */
+    private fun placedNow() {
+        placed = true
+        early?.let {
+            early = null
+            print(it)
         }
     }
 
@@ -351,6 +369,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         sized {
             pose(0f)
             show()
+            placedNow()
             run(0f, 1f, then)
         }
     }
@@ -388,6 +407,8 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
         page.setImageBitmap(print)
         printed = print != null
         printedAt = 0f
+        placed = false
+        early = null
         cover.alpha = 1f
     }
 
@@ -414,6 +435,12 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
      */
     fun print(print: Bitmap) {
         if (printed || layer.visibility != View.VISIBLE) return
+        // Pictured before the book is placed, which waits for its layer to be laid out: where the
+        // cover stands is not known yet, so it comes onto the page once the book is posed.
+        if (!placed) {
+            early = print
+            return
+        }
         // A book that only grows wants the cover alone, in the shape it has; not a page.
         if (grown && abs(print.width.toFloat() / print.height - growFrom.width().toFloat() / growFrom.height()) > 0.02f) return
         // A page pictured while the reader was turned sideways, or not yet turned, is not one for the upright shelf: stretched over it, it would look squeezed.
@@ -467,6 +494,7 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
     fun clear() {
         ticker = null
         sharp = null
+        early = null
         layer.animate().cancel()
         page.animate().cancel()
         steady(false)
@@ -1112,14 +1140,24 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
          * Opens the book [file], whose cover is shown by [from], at once, while the reader starts
          * behind it ([handoff]): on the page as the book was last left, if that is kept and looks
          * the same ([look]), else on paper that the page the reader sets out meanwhile comes onto
-         * as soon as the reader has pictured it.
+         * as soon as the reader has pictured it. It opens only once the reader has set out its page,
+         * or [patience] milliseconds have gone by, if that is given: for a reader that is slow to
+         * start, see [Handoff.whenSetOut].
          */
         fun open(
             from: View, paperColor: Int, file: File, look: String, handoff: Handoff, grown: Boolean = false, known: EndMenu? = null,
+            patience: Long = 0L,
+        ) {
+            // A cover read for the book opened before is not this one's; the cover for this one is asked for after this.
+            thread.post { sharp = null }
+            if (patience > 0L) handoff.whenSetOut(patience) { start(from, paperColor, file, look, handoff, grown, known) }
+            else start(from, paperColor, file, look, handoff, grown, known)
+        }
+
+        private fun start(
+            from: View, paperColor: Int, file: File, look: String, handoff: Handoff, grown: Boolean, known: EndMenu?,
         ) {
             val screen = act.window.decorView
-            // A cover read for the book opened before is not this one's.
-            thread.post { sharp = null }
             if (grown && known != null && known.screenW == screen.width && known.screenH == screen.height) {
                 // A cover that only grows raises the menu of the reader as it does. Where the menu is
                 // known, from the last time the book was shown, it grows at once, and what is on the
@@ -1156,10 +1194,14 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
          * Slides the page of the book [file] in from the right, as [BookOpening.slideIn] does, while the
          * reader starts behind it ([handoff]): the page as the book was last left, if that is kept and
          * looks the same ([look]), else paper that the reader's page comes onto once it is pictured.
+         * Like [open], it waits for the reader to set out its page, up to [patience] milliseconds, if that is given.
          */
-        fun slide(paperColor: Int, file: File, look: String, handoff: Handoff) {
-            play(handoff::opened) { o, done -> o.slideIn(paperColor, kept(file, look), done) }
-            printWhenPictured(handoff)
+        fun slide(paperColor: Int, file: File, look: String, handoff: Handoff, patience: Long = 0L) {
+            val start = {
+                play(handoff::opened) { o, done -> o.slideIn(paperColor, kept(file, look), done) }
+                printWhenPictured(handoff)
+            }
+            if (patience > 0L) handoff.whenSetOut(patience, start) else start()
         }
 
         /**
@@ -1264,11 +1306,39 @@ class BookOpening(private val act: Activity, attach: ((View) -> Unit)? = null) {
                 onPicture = null
                 it(print)
             }
+            settled?.invoke()
         }
 
         /** Calls [then] with the picture of the reader's page once it has one, see [pictured]; at once if it has. */
         fun whenPictured(then: (Bitmap?) -> Unit) {
             if (pictured) then(print) else onPicture = then
+        }
+
+        /** What [whenSetOut] waits with, until the reader has pictured its page. */
+        private var settled: (() -> Unit)? = null
+
+        /**
+         * Calls [then], once, when the reader has set out its page and pictured it, see [pictured];
+         * at once if it has, and after [wait] milliseconds if it has not by then. For a reader that
+         * is slow to start, as in an app that has to start first: a book opened meanwhile moves
+         * unevenly, as everything the reader does for its page is done as it opens, and the page
+         * and the menu would come onto it only once it lay open, all at once.
+         */
+        fun whenSetOut(wait: Long, then: () -> Unit) {
+            if (pictured) return then()
+            val main = Handler(Looper.getMainLooper())
+            var called = false
+            val go = object : Runnable {
+                override fun run() {
+                    if (called) return
+                    called = true
+                    settled = null
+                    main.removeCallbacks(this)
+                    then()
+                }
+            }
+            settled = go::run
+            main.postDelayed(go, wait)
         }
 
         /** The reader's menu as it stands over the cover that ends a book, pictured, or null if it could not be; see [menuPictured]. */

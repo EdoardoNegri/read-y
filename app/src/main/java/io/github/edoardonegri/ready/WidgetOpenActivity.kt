@@ -5,6 +5,8 @@ import android.content.Intent
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.os.Process
+import android.os.SystemClock
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -27,8 +29,16 @@ class WidgetOpenActivity : ComponentActivity() {
 
     private var done = false
 
+    /**
+     * Whether the app was started by this very tap, which it was if its process is as young as that:
+     * nothing is warm yet, and the reader that starts behind the opening book is much slower to set
+     * out its page than it is anywhere else; see [openBook].
+     */
+    private var cold = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        cold = SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime() < COLD_MS
         // Made anew after it handed the book to the reader, it has nothing more to do: starting the
         // reader again would take the one there away and open the book anew.
         if (savedInstanceState?.getBoolean(DONE) == true) {
@@ -162,11 +172,17 @@ class WidgetOpenActivity : ComponentActivity() {
         BookOpening.handoff = handoff
         read(book, handoff)
         val opening = BookOpening.Detached(this).also { detached = it }
+        // Started by this tap, the app has the reader to make from nothing, which takes it seconds
+        // rather than a moment: the book opening meanwhile would stutter, and be open long before the
+        // page and the menu of the reader are there to come onto it, which then jump into it one
+        // after the other. It opens once the reader has set out its page, which is all that is
+        // waited for; the book stands on the widget until then, as it does while the window settles.
+        val patience = if (cold) COLD_WAIT_MS else 0L
         if (cover == null) {
-            opening.slide(paper, book, settings.look, handoff)
+            opening.slide(paper, book, settings.look, handoff, patience)
         } else {
             // Where the menu stands over the cover is known from the last time the book was shown there.
-            opening.open(cover, paper, book, settings.look, handoff, grown, if (grown) Library.endMenu(this, book) else null)
+            opening.open(cover, paper, book, settings.look, handoff, grown, if (grown) Library.endMenu(this, book) else null, patience)
             if (grown) Library.sharpCover(this, book, sharpWidth, opening::sharpen)
         }
     }
@@ -221,6 +237,15 @@ class WidgetOpenActivity : ComponentActivity() {
          * jump to its place and size.
          */
         private const val ARRIVAL_MS = 1500L
+
+        /** How young the process is that this tap started, as long as it is taken to have been started by it: far more than it takes to get here. */
+        private const val COLD_MS = 5_000L
+
+        /**
+         * The longest a book started cold waits for its reader to set out its page before it opens
+         * all the same: the reader gives up on its page after 2.5 s itself, once it has started.
+         */
+        private const val COLD_WAIT_MS = 4_000L
 
         /** Whether the book was handed to the reader already, kept for the activity made anew. */
         private const val DONE = "done"
