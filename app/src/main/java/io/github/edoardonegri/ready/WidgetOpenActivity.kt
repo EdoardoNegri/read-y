@@ -228,20 +228,25 @@ class WidgetOpenActivity : ComponentActivity() {
     }
 
     /**
-     * Hands [book] to the reader, in the bookshelf's task, which only holds the reader from then
-     * on: Android shows a picture of whatever was open there as the task comes to the front, until
-     * the reader has drawn its page, and with [handoff] the reader starts unseen over the book
-     * opening, see [readBehind]. Leaving the book leads to the bookshelf all the same.
+     * Hands [book] to the reader, in a task that only holds the reader from then on. Without
+     * [handoff] it is the bookshelf's, in which Android shows a picture of whatever was open there
+     * as the task comes to the front, until the reader has drawn its page. With [handoff] the
+     * reader starts unseen over the book opening, see [readBehind], and is given a task of its own,
+     * never the bookshelf's: once the app has been left for a while and its process is gone,
+     * Android keeps that task with its bookshelf, which [leaveShelf] cannot take away, and the
+     * bookshelf would be brought back under the see-through reader, to grow out of the widget
+     * before the book opens. Leaving the book leads to the bookshelf all the same.
      */
     private fun read(book: File, handoff: BookOpening.Handoff? = null) {
         // Not if the opening was left before the book lay open.
         if (done || closing) return
         done = true
         val reader = if (handoff != null) OpeningReaderActivity::class.java else ReaderActivity::class.java
+        val task = if (handoff != null) Intent.FLAG_ACTIVITY_MULTIPLE_TASK else Intent.FLAG_ACTIVITY_CLEAR_TASK
         startActivity(
             Intent(this, reader).putExtra(ReaderActivity.EXTRA_PATH, book.path)
                 .putExtra(ReaderActivity.EXTRA_FROM_SHELF, true).putExtra(ReaderActivity.EXTRA_FROM_WIDGET, true)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or task or Intent.FLAG_ACTIVITY_NO_ANIMATION),
         )
         // The page stays until the reader has taken its place, see onStop.
     }
